@@ -22,8 +22,12 @@ infra/audit/*
 # Node.js
 node_modules/
 .next/
+out/
 dist/
 coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
 
 # IDE và OS
 .vscode/settings.json
