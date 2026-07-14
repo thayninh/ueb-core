@@ -1,0 +1,31 @@
+# Dữ liệu cá nhân và dữ liệu đầu vào
+data/input/*
+!data/input/.gitkeep
+*.xlsx
+*.xls
+*.csv
+!docs/phase-0/05_approval_units.csv
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Logs và kết quả kiểm kê máy chủ
+infra/audit/*
+!infra/audit/.gitkeep
+
+# Node.js
+node_modules/
+.next/
+dist/
+coverage/
+
+# IDE và OS
+.vscode/settings.json
+.DS_Store
+Thumbs.db
