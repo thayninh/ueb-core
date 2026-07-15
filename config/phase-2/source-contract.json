@@ -1,0 +1,274 @@
+{
+  "contract_version": "2.0.0",
+  "source_filename": "CSDLCore_chuan_hoa_PostgreSQL.xlsx",
+  "source_sha256": "e276a144f5f8accb4ed6c6d2a6d7ec38a862d2e84467cb5fe43d342a95d7e972",
+  "sheet_name": "csdlcore",
+  "exact_business_column_count": 20,
+  "exact_header_order": [
+    "stt",
+    "don_vi_phu_trach_hoc_phan",
+    "bo_mon_phu_trach_hoc_phan",
+    "khoi_kien_thuc",
+    "ma_hoc_phan",
+    "ten_hoc_phan",
+    "ten_giang_vien",
+    "ma_so_can_bo",
+    "email_tai_khoan_vnu",
+    "bo_mon",
+    "don_vi",
+    "core_1_2_3",
+    "TC1:Trợ Giảng",
+    "TC2: SH Chuyên môn",
+    "TC3: Tốt nghiệp/NCKH/Bài báo/Chính cương",
+    "tc3_1_nganh_tot_nghiep_phu_hop",
+    "tc3_2_bien_soan_de_cuong_giao_trinh",
+    "tc3_3_chu_nhiem_de_tai_nckh_lien_quan",
+    "tc3_4_bai_bao_lien_quan",
+    "TC4: Giảng thử"
+  ],
+  "column_mapping": [
+    {
+      "position": 1,
+      "excel_header": "stt",
+      "postgresql_column": "stt",
+      "postgresql_type": "integer",
+      "nullable": false,
+      "unique": true
+    },
+    {
+      "position": 2,
+      "excel_header": "don_vi_phu_trach_hoc_phan",
+      "postgresql_column": "don_vi_phu_trach_hoc_phan",
+      "postgresql_type": "text",
+      "nullable": true,
+      "unique": false
+    },
+    {
+      "position": 3,
+      "excel_header": "bo_mon_phu_trach_hoc_phan",
+      "postgresql_column": "bo_mon_phu_trach_hoc_phan",
+      "postgresql_type": "text",
+      "nullable": true,
+      "unique": false
+    },
+    {
+      "position": 4,
+      "excel_header": "khoi_kien_thuc",
+      "postgresql_column": "khoi_kien_thuc",
+      "postgresql_type": "text",
+      "nullable": true,
+      "unique": false
+    },
+    {
+      "position": 5,
+      "excel_header": "ma_hoc_phan",
+      "postgresql_column": "ma_hoc_phan",
+      "postgresql_type": "text",
+      "nullable": true,
+      "unique": false
+    },
+    {
+      "position": 6,
+      "excel_header": "ten_hoc_phan",
+      "postgresql_column": "ten_hoc_phan",
+      "postgresql_type": "text",
+      "nullable": true,
+      "unique": false
+    },
+    {
+      "position": 7,
+      "excel_header": "ten_giang_vien",
+      "postgresql_column": "ten_giang_vien",
+      "postgresql_type": "text",
+      "nullable": true,
+      "unique": false
+    },
+    {
+      "position": 8,
+      "excel_header": "ma_so_can_bo",
+      "postgresql_column": "ma_so_can_bo",
+      "postgresql_type": "text",
+      "nullable": true,
+      "unique": false
+    },
+    {
+      "position": 9,
+      "excel_header": "email_tai_khoan_vnu",
+      "postgresql_column": "email_tai_khoan_vnu",
+      "postgresql_type": "text",
+      "nullable": true,
+      "unique": false
+    },
+    {
+      "position": 10,
+      "excel_header": "bo_mon",
+      "postgresql_column": "bo_mon",
+      "postgresql_type": "text",
+      "nullable": true,
+      "unique": false
+    },
+    {
+      "position": 11,
+      "excel_header": "don_vi",
+      "postgresql_column": "don_vi",
+      "postgresql_type": "text",
+      "nullable": true,
+      "unique": false
+    },
+    {
+      "position": 12,
+      "excel_header": "core_1_2_3",
+      "postgresql_column": "core_1_2_3",
+      "postgresql_type": "text",
+      "nullable": true,
+      "unique": false
+    },
+    {
+      "position": 13,
+      "excel_header": "TC1:Trợ Giảng",
+      "postgresql_column": "tc1_tro_giang",
+      "postgresql_type": "text",
+      "nullable": true,
+      "unique": false
+    },
+    {
+      "position": 14,
+      "excel_header": "TC2: SH Chuyên môn",
+      "postgresql_column": "tc2_sh_chuyen_mon",
+      "postgresql_type": "text",
+      "nullable": true,
+      "unique": false
+    },
+    {
+      "position": 15,
+      "excel_header": "TC3: Tốt nghiệp/NCKH/Bài báo/Chính cương",
+      "postgresql_column": "tc3_tong_hop",
+      "postgresql_type": "text",
+      "nullable": true,
+      "unique": false
+    },
+    {
+      "position": 16,
+      "excel_header": "tc3_1_nganh_tot_nghiep_phu_hop",
+      "postgresql_column": "tc3_1_nganh_tot_nghiep_phu_hop",
+      "postgresql_type": "text",
+      "nullable": true,
+      "unique": false
+    },
+    {
+      "position": 17,
+      "excel_header": "tc3_2_bien_soan_de_cuong_giao_trinh",
+      "postgresql_column": "tc3_2_bien_soan_de_cuong_giao_trinh",
+      "postgresql_type": "text",
+      "nullable": true,
+      "unique": false
+    },
+    {
+      "position": 18,
+      "excel_header": "tc3_3_chu_nhiem_de_tai_nckh_lien_quan",
+      "postgresql_column": "tc3_3_chu_nhiem_de_tai_nckh_lien_quan",
+      "postgresql_type": "text",
+      "nullable": true,
+      "unique": false
+    },
+    {
+      "position": 19,
+      "excel_header": "tc3_4_bai_bao_lien_quan",
+      "postgresql_column": "tc3_4_bai_bao_lien_quan",
+      "postgresql_type": "text",
+      "nullable": true,
+      "unique": false
+    },
+    {
+      "position": 20,
+      "excel_header": "TC4: Giảng thử",
+      "postgresql_column": "tc4_giang_thu",
+      "postgresql_type": "text",
+      "nullable": true,
+      "unique": false
+    }
+  ],
+  "expected_data_row_count": 2497,
+  "stt": {
+    "expected_min": -1,
+    "expected_max": 2569,
+    "expected_distinct": 2497,
+    "expected_missing_within_range_count": 74,
+    "expected_missing_within_range": [
+      33, 43, 64, 71, 138, 161, 168, 182, 524, 530, 541, 688, 693, 707, 732,
+      736, 748, 754, 759, 782, 790, 801, 806, 812, 815, 847, 875, 906, 968,
+      1487, 1625, 1651, 1655, 1807, 1825, 1826, 1831, 1835, 1841, 1842, 1844,
+      1856, 1885, 1887, 1908, 1917, 1918, 1923, 1931, 1932, 1935, 1955, 1974,
+      1980, 2031, 2063, 2076, 2081, 2082, 2085, 2091, 2118, 2136, 2145, 2151,
+      2160, 2175, 2197, 2242, 2243, 2290, 2295, 2296, 2325
+    ],
+    "expected_next": 2570,
+    "duplicate_count": 0,
+    "renumbering_policy": "FORBIDDEN",
+    "reuse_missing_stt_policy": "FORBIDDEN"
+  },
+  "expected_warning_counts": {
+    "missing_staff_code_and_email_rows": 0,
+    "duplicate_business_groups": 7,
+    "duplicate_business_rows": 14,
+    "staff_name_variant_groups": 5,
+    "course_name_variant_groups": 19
+  },
+  "expected_invalid_date_count": 0,
+  "expected_formula_cell_count": 0,
+  "expected_error_cell_count": 0,
+  "blank_cell_policy": {
+    "excel_blank_cell": "SQL_NULL",
+    "empty_text": "PRESERVE_AS_EMPTY_TEXT",
+    "whitespace_only_text": "PRESERVE_EXACTLY"
+  },
+  "text_preservation_policy": {
+    "trim": "FORBIDDEN",
+    "case_conversion": "FORBIDDEN",
+    "stored_value_unicode_normalization": "FORBIDDEN",
+    "business_value_rewrite": "FORBIDDEN"
+  },
+  "date_text_policy": {
+    "postgresql_type": "text",
+    "blank_allowed": true,
+    "accepted_date_format": "DD/MM/YYYY",
+    "calendar_date_must_exist": true,
+    "automatic_conversion": "FORBIDDEN",
+    "date_only_headers": ["tc3_3_chu_nhiem_de_tai_nckh_lien_quan"],
+    "date_or_status_headers": [
+      "TC1:Trợ Giảng",
+      "TC2: SH Chuyên môn",
+      "TC3: Tốt nghiệp/NCKH/Bài báo/Chính cương",
+      "tc3_1_nganh_tot_nghiep_phu_hop",
+      "tc3_2_bien_soan_de_cuong_giao_trinh",
+      "tc3_4_bai_bao_lien_quan",
+      "TC4: Giảng thử"
+    ],
+    "accepted_status_text": "Đã hoàn thành"
+  },
+  "formula_policy": {
+    "allowed": false,
+    "on_formula_cell": "REJECT_SOURCE"
+  },
+  "duplicate_policy": {
+    "action": "PRESERVE_ALL_ROWS",
+    "automatic_delete": "FORBIDDEN",
+    "automatic_merge": "FORBIDDEN",
+    "automatic_deduplication": "FORBIDDEN"
+  },
+  "staff_code_policy": {
+    "postgresql_type": "text",
+    "blank_cell": "SQL_NULL",
+    "trim": "FORBIDDEN",
+    "case_conversion": "FORBIDDEN",
+    "synthesis": "FORBIDDEN"
+  },
+  "uniqueness_policy": {
+    "unique_business_columns": ["stt"],
+    "all_other_business_columns_unique": false
+  },
+  "identity_status_policy": {
+    "missing_staff_code_and_email_rows_in_approved_source": 0,
+    "removed_74_rows": "NOT_IMPORTED_AND_NOT_MARKED_UNRESOLVED"
+  }
+}
