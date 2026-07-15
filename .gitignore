@@ -29,6 +29,7 @@ coverage/
 playwright-report/
 test-results/
 *.tsbuildinfo
+/src/generated/prisma/
 
 # IDE và OS
 .vscode/settings.json

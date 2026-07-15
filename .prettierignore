@@ -5,6 +5,7 @@ playwright-report
 test-results
 pnpm-lock.yaml
 AGENTS.md
+src/generated/prisma
 
 docs
 data
