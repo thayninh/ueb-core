@@ -24,6 +24,8 @@
     "data:import": "tsx scripts/phase-2/import-source.ts",
     "data:verify": "tsx scripts/phase-2/verify-import.ts",
     "auth:inspect-identities": "tsx scripts/phase-3/inspect-identity-source.ts",
+    "auth:seed-units": "tsx scripts/phase-3/seed-organization-units.ts",
+    "auth:bootstrap-admin": "tsx scripts/phase-3/bootstrap-admin.ts",
     "db:generate": "prisma generate",
     "db:validate": "prisma validate",
     "db:format": "prisma format",
