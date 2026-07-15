@@ -5,7 +5,10 @@ import { pathToFileURL } from "node:url";
 import { Client, type ClientBase } from "pg";
 
 import { calculateDatasetChecksum } from "./lib/canonicalize";
-import { parsePipelineArguments } from "./lib/cli";
+import {
+  assertRequestedSheetMatchesContract,
+  parsePipelineArguments,
+} from "./lib/cli";
 import { writePhase2AuditReport } from "./lib/import-report";
 import {
   prepareSourceFile,
@@ -70,12 +73,16 @@ interface VerificationReport {
   privacy: { containsBusinessValues: false };
 }
 
-export async function runVerifyImport(filePath: string): Promise<{
+export async function runVerifyImport(
+  filePath: string,
+  requestedSheet?: string,
+): Promise<{
   status: "PASS" | "FAIL";
   reportPath: string;
   anomalyCount: number;
 }> {
   const contract = await loadSourceContract();
+  assertRequestedSheetMatchesContract(requestedSheet, contract.sheet_name);
   const prepared = await prepareSourceFile(filePath, contract);
   const generatedAt = new Date();
   let snapshot: ImportDatabaseSnapshot = {
@@ -520,8 +527,12 @@ async function main(): Promise<void> {
   try {
     const arguments_ = parsePipelineArguments(process.argv.slice(2), {
       requireConfirmSha: false,
+      allowSheet: true,
     });
-    const result = await runVerifyImport(arguments_.filePath);
+    const result = await runVerifyImport(
+      arguments_.filePath,
+      arguments_.sheetName,
+    );
     const output = {
       status: result.status,
       reportPath: result.reportPath,

@@ -51,3 +51,14 @@ export function parsePipelineArguments(
 }
 
 export class PipelineCliError extends Error {}
+
+export function assertRequestedSheetMatchesContract(
+  requestedSheet: string | undefined,
+  contractSheet: string,
+): void {
+  if (requestedSheet && requestedSheet !== contractSheet) {
+    throw new PipelineCliError(
+      "Requested sheet does not match the approved source contract.",
+    );
+  }
+}

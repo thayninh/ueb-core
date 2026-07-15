@@ -4,7 +4,10 @@ import { pathToFileURL } from "node:url";
 
 import { Client, type ClientBase } from "pg";
 
-import { parsePipelineArguments } from "./lib/cli";
+import {
+  assertRequestedSheetMatchesContract,
+  parsePipelineArguments,
+} from "./lib/cli";
 import {
   createDryRunImportReport,
   writePhase2AuditReport,
@@ -59,8 +62,10 @@ export function validateConfirmedSha(
 export async function runControlledImport(
   filePath: string,
   confirmSha: string,
+  requestedSheet?: string,
 ): Promise<ControlledImportResult> {
   const contract = await loadSourceContract();
+  assertRequestedSheetMatchesContract(requestedSheet, contract.sheet_name);
   const prepared = await prepareSourceFile(filePath, contract);
   const generatedAt = new Date();
   const dryRun = createDryRunImportReport(prepared, contract, generatedAt);
@@ -439,10 +444,12 @@ async function main(): Promise<void> {
   try {
     const arguments_ = parsePipelineArguments(process.argv.slice(2), {
       requireConfirmSha: true,
+      allowSheet: true,
     });
     const result = await runControlledImport(
       arguments_.filePath,
       arguments_.confirmSha!,
+      arguments_.sheetName,
     );
     const output = {
       status: result.status,

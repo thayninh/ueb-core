@@ -1,6 +1,9 @@
 import { pathToFileURL } from "node:url";
 
-import { parsePipelineArguments, PipelineCliError } from "./lib/cli";
+import {
+  assertRequestedSheetMatchesContract,
+  parsePipelineArguments,
+} from "./lib/cli";
 import {
   createDryRunImportReport,
   writePhase2AuditReport,
@@ -19,11 +22,7 @@ export async function runDryRunImport(
   datasetChecksum: string | null;
 }> {
   const contract = await loadSourceContract();
-  if (requestedSheet && requestedSheet !== contract.sheet_name) {
-    throw new PipelineCliError(
-      "Requested sheet does not match the approved source contract.",
-    );
-  }
+  assertRequestedSheetMatchesContract(requestedSheet, contract.sheet_name);
   const prepared = await prepareSourceFile(filePath, contract);
   const generatedAt = new Date();
   const report = createDryRunImportReport(prepared, contract, generatedAt);

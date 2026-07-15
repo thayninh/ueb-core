@@ -12,7 +12,10 @@ import {
   serializeBusinessValues,
 } from "../../scripts/phase-2/lib/canonicalize";
 import { sha256Bytes } from "../../scripts/phase-2/lib/checksum";
-import { parsePipelineArguments } from "../../scripts/phase-2/lib/cli";
+import {
+  assertRequestedSheetMatchesContract,
+  parsePipelineArguments,
+} from "../../scripts/phase-2/lib/cli";
 import {
   createLegacyImportRunId,
   createLegacyRecordUid,
@@ -348,6 +351,12 @@ describe("Phase 2 controlled import pipeline", () => {
         allowSheet: true,
       }).sheetName,
     ).toBe("csdlcore");
+    expect(() =>
+      assertRequestedSheetMatchesContract("csdlcore", "csdlcore"),
+    ).not.toThrow();
+    expect(() =>
+      assertRequestedSheetMatchesContract("other", "csdlcore"),
+    ).toThrow(/approved source contract/u);
   });
 
   it("rejects a source SHA that differs from the contract", async () => {
