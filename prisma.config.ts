@@ -9,6 +9,7 @@ export default defineConfig({
   },
   datasource: {
     // Client generation and schema validation do not require database access.
-    url: process.env.DATABASE_URL ?? "",
+    // Migration commands must never reuse the Next.js runtime credential.
+    url: process.env.MIGRATION_DATABASE_URL ?? "",
   },
 });

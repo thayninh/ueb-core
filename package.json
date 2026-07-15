@@ -25,6 +25,7 @@
     "db:migrate:create": "prisma migrate dev --create-only",
     "db:migrate:dev": "prisma migrate dev",
     "db:migrate:status": "prisma migrate status",
+    "db:bootstrap-runtime-role": "tsx scripts/phase-2/bootstrap-runtime-role.ts",
     "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   },
   "dependencies": {

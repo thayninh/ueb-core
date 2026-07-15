@@ -8,3 +8,88 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+model UebCoreData {
+  stt Int @id @default(autoincrement())
+
+  donViPhuTrachHocPhan          String? @map("don_vi_phu_trach_hoc_phan") @db.Text
+  boMonPhuTrachHocPhan          String? @map("bo_mon_phu_trach_hoc_phan") @db.Text
+  khoiKienThuc                  String? @map("khoi_kien_thuc") @db.Text
+  maHocPhan                     String? @map("ma_hoc_phan") @db.Text
+  tenHocPhan                    String? @map("ten_hoc_phan") @db.Text
+  tenGiangVien                  String? @map("ten_giang_vien") @db.Text
+  maSoCanBo                     String? @map("ma_so_can_bo") @db.Text
+  emailTaiKhoanVnu              String? @map("email_tai_khoan_vnu") @db.Text
+  boMon                         String? @map("bo_mon") @db.Text
+  donVi                         String? @map("don_vi") @db.Text
+  core123                       String? @map("core_1_2_3") @db.Text
+  tc1TroGiang                   String? @map("tc1_tro_giang") @db.Text
+  tc2ShChuyenMon                String? @map("tc2_sh_chuyen_mon") @db.Text
+  tc3TongHop                    String? @map("tc3_tong_hop") @db.Text
+  tc31NganhTotNghiepPhuHop      String? @map("tc3_1_nganh_tot_nghiep_phu_hop") @db.Text
+  tc32BienSoanDeCuongGiaoTrinh  String? @map("tc3_2_bien_soan_de_cuong_giao_trinh") @db.Text
+  tc33ChuNhiemDeTaiNckhLienQuan String? @map("tc3_3_chu_nhiem_de_tai_nckh_lien_quan") @db.Text
+  tc34BaiBaoLienQuan            String? @map("tc3_4_bai_bao_lien_quan") @db.Text
+  tc4GiangThu                   String? @map("tc4_giang_thu") @db.Text
+
+  lecturerUid        String   @map("lecturer_uid") @db.Uuid
+  recordUid          String   @map("record_uid") @db.Uuid
+  snapshotId         String   @map("snapshot_id") @db.Uuid
+  versionNo          Int      @map("version_no")
+  identityStatus     String   @map("identity_status") @db.VarChar(16)
+  sourceRowNumber    Int      @map("source_row_number")
+  sourceRowChecksum  String   @map("source_row_checksum") @db.Char(64)
+  sourceImportRunId  String   @map("source_import_run_id") @db.Uuid
+  sourceSubmissionId String?  @map("source_submission_id") @db.Uuid
+  approvalUnit       String?  @map("approval_unit") @db.Text
+  origin             String   @db.VarChar(32)
+  approvedBy         String?  @map("approved_by") @db.Uuid
+  approvedAt         DateTime @map("approved_at") @db.Timestamptz(6)
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  sourceImportRun ImportRun @relation(fields: [sourceImportRunId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([recordUid, snapshotId], map: "ueb_core_data_record_uid_snapshot_id_key")
+  @@unique([lecturerUid, versionNo, recordUid], map: "ueb_core_data_lecturer_uid_version_no_record_uid_key")
+  @@index([lecturerUid, stt(sort: Desc)], map: "ueb_core_data_lecturer_uid_stt_idx")
+  @@index([snapshotId], map: "ueb_core_data_snapshot_id_idx")
+  @@index([maSoCanBo], map: "ueb_core_data_ma_so_can_bo_idx")
+  @@index([emailTaiKhoanVnu], map: "ueb_core_data_email_tai_khoan_vnu_idx")
+  @@index([approvalUnit], map: "ueb_core_data_approval_unit_idx")
+  @@map("ueb_core_data")
+}
+
+model ImportRun {
+  id                     String   @id @default(uuid()) @db.Uuid
+  sourceFilename         String   @map("source_filename") @db.Text
+  sourceSha256           String   @unique(map: "import_run_source_sha256_key") @map("source_sha256") @db.Char(64)
+  sourceSheet            String   @map("source_sheet") @db.Text
+  sourceContractVersion  String   @map("source_contract_version") @db.VarChar(32)
+  sourceRowCount         Int      @map("source_row_count")
+  sourceMinStt           Int      @map("source_min_stt")
+  sourceMaxStt           Int      @map("source_max_stt")
+  canonicalDatasetSha256 String   @map("canonical_dataset_sha256") @db.Char(64)
+  report                 Json     @db.JsonB
+  importedAt             DateTime @map("imported_at") @db.Timestamptz(6)
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  dataRows UebCoreData[]
+
+  @@map("import_run")
+}
+
+model WorkflowEvent {
+  eventId            String   @id @default(uuid()) @map("event_id") @db.Uuid
+  submissionId       String   @map("submission_id") @db.Uuid
+  parentSubmissionId String?  @map("parent_submission_id") @db.Uuid
+  eventType          String   @map("event_type") @db.VarChar(64)
+  lecturerUid        String   @map("lecturer_uid") @db.Uuid
+  approvalUnit       String?  @map("approval_unit") @db.Text
+  payload            Json     @db.JsonB
+  actorUserId        String?  @map("actor_user_id") @db.Uuid
+  reason             String?  @db.Text
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([submissionId, createdAt], map: "workflow_event_submission_id_created_at_idx")
+  @@map("workflow_event")
+}
