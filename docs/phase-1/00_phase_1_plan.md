@@ -2,9 +2,10 @@
 
 | Thuộc tính | Giá trị |
 | --- | --- |
-| Trạng thái | Draft — Bắt đầu Giai đoạn 1 |
+| Trạng thái | COMPLETED WITH OPEN PHASE-0 CONDITIONS |
 | Người phụ trách | Chưa phân công |
-| Ngày cập nhật | 2026-07-14 |
+| Ngày cập nhật | 2026-07-15 |
+| Ngày nghiệm thu kỹ thuật | 2026-07-15 |
 
 ## Mục tiêu
 
@@ -53,13 +54,26 @@
 
 ## Điều kiện nghiệm thu Giai đoạn 1
 
-- Ứng dụng chạy local.
-- PostgreSQL local healthy.
-- Ứng dụng kết nối được database local.
-- Lint đạt.
-- Typecheck đạt.
-- Test cơ bản đạt.
-- Production build đạt.
-- Health endpoint trả kết quả đúng.
-- Không có secret trong Git.
-- Có README hướng dẫn chạy local.
+- [x] Next.js project foundation.
+- [x] Node.js 24 và pnpm 11.
+- [x] PostgreSQL local bằng Docker Compose.
+- [x] Health và readiness endpoints.
+- [x] Unit test và Chromium E2E.
+- [x] Docker image tương thích triển khai production.
+- [x] Nghiệm thu native app với Docker database.
+- [x] Nghiệm thu full Docker stack.
+- [x] Kiểm tra loại trừ secret và file cấm.
+- [x] Tài liệu Giai đoạn 1.
+
+Các nội dung chưa hoàn thành và không thuộc technical foundation Giai đoạn 1:
+
+- [ ] Triển khai production.
+- [ ] Kết nối PostgreSQL production.
+- [ ] Database nghiệp vụ.
+- [ ] Import Excel.
+- [ ] Authentication.
+- [ ] Role-based authorization.
+- [ ] Workflow phê duyệt.
+- [ ] Backup/restore production.
+
+Chi tiết bằng chứng và các điểm chặn kế thừa vẫn `OPEN` được ghi tại `05_phase_1_acceptance.md`.
