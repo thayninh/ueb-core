@@ -19,8 +19,16 @@ describe("Phase 2 source contract", () => {
     ).toEqual(sourceContract.exact_header_order);
   });
 
-  it("uses integer unique stt and nullable text for all other business columns", () => {
-    const [sttColumn, ...textColumns] = sourceContract.column_mapping;
+  it("uses the approved integer policies and preserves all other text mappings", () => {
+    const [sttColumn] = sourceContract.column_mapping;
+    const knowledgeBlock = sourceContract.column_mapping.find(
+      (column) => column.postgresql_column === "khoi_kien_thuc",
+    );
+    const textColumns = sourceContract.column_mapping.filter(
+      (column) =>
+        column.postgresql_column !== "stt" &&
+        column.postgresql_column !== "khoi_kien_thuc",
+    );
 
     expect(sttColumn).toMatchObject({
       excel_header: "stt",
@@ -29,7 +37,22 @@ describe("Phase 2 source contract", () => {
       nullable: false,
       unique: true,
     });
-    expect(textColumns).toHaveLength(19);
+    expect(knowledgeBlock).toMatchObject({
+      source_cell_type: "number",
+      logical_type: "integer",
+      postgresql_type: "integer",
+      nullable: false,
+      unique: false,
+      coercion: "FORBIDDEN",
+      integer_only: true,
+      postgresql_integer_range: {
+        minimum: -2147483648,
+        maximum: 2147483647,
+      },
+      expected_current_minimum: 1,
+      expected_current_maximum: 5,
+    });
+    expect(textColumns).toHaveLength(18);
     expect(
       textColumns.every(
         (column) =>
@@ -56,6 +79,9 @@ describe("Phase 2 source contract", () => {
         course_name_variant_groups: 19,
       },
       expected_invalid_date_count: 0,
+      date_text_policy: {
+        expected_checked_cell_count: 19976,
+      },
       stt: {
         expected_min: -1,
         expected_max: 2569,

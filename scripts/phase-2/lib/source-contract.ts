@@ -9,9 +9,21 @@ const columnMappingSchema = z.object({
   position: z.number().int().positive(),
   excel_header: z.string(),
   postgresql_column: z.string().regex(/^[a-z][a-z0-9_]*$/u),
+  source_cell_type: z.enum(["number", "string"]).optional(),
+  logical_type: z.enum(["integer", "text"]).optional(),
   postgresql_type: z.enum(["integer", "text"]),
   nullable: z.boolean(),
   unique: z.boolean(),
+  coercion: z.literal("FORBIDDEN").optional(),
+  integer_only: z.literal(true).optional(),
+  postgresql_integer_range: z
+    .object({
+      minimum: z.number().int(),
+      maximum: z.number().int(),
+    })
+    .optional(),
+  expected_current_minimum: z.number().int().optional(),
+  expected_current_maximum: z.number().int().optional(),
 });
 
 const sourceContractSchema = z.object({
@@ -58,6 +70,7 @@ const sourceContractSchema = z.object({
   date_text_policy: z.object({
     postgresql_type: z.literal("text"),
     blank_allowed: z.literal(true),
+    expected_checked_cell_count: z.number().int().positive(),
     accepted_date_format: z.literal("DD/MM/YYYY"),
     calendar_date_must_exist: z.literal(true),
     automatic_conversion: z.literal("FORBIDDEN"),
@@ -173,6 +186,51 @@ export function assertContractConsistency(contract: SourceContract): void {
     throw new SourceContractError(
       "SOURCE_CONTRACT_STAFF_CODE_INVALID",
       "ma_so_can_bo must be mapped as text.",
+    );
+  }
+
+  const knowledgeBlock = columns.find(
+    (column) => column.postgresql_column === "khoi_kien_thuc",
+  );
+  if (
+    !knowledgeBlock ||
+    knowledgeBlock.source_cell_type !== "number" ||
+    knowledgeBlock.logical_type !== "integer" ||
+    knowledgeBlock.postgresql_type !== "integer" ||
+    knowledgeBlock.nullable ||
+    knowledgeBlock.unique ||
+    knowledgeBlock.coercion !== "FORBIDDEN" ||
+    knowledgeBlock.integer_only !== true ||
+    knowledgeBlock.postgresql_integer_range?.minimum !== -2_147_483_648 ||
+    knowledgeBlock.postgresql_integer_range.maximum !== 2_147_483_647 ||
+    knowledgeBlock.expected_current_minimum !== 1 ||
+    knowledgeBlock.expected_current_maximum !== 5
+  ) {
+    throw new SourceContractError(
+      "SOURCE_CONTRACT_KNOWLEDGE_BLOCK_INVALID",
+      "khoi_kien_thuc must use the approved non-null integer source policy.",
+    );
+  }
+
+  const dateHeaders = [
+    ...contract.date_text_policy.date_only_headers,
+    ...contract.date_text_policy.date_or_status_headers,
+  ];
+  if (
+    dateHeaders.length === 0 ||
+    new Set(dateHeaders).size !== dateHeaders.length ||
+    dateHeaders.some(
+      (header) =>
+        !contract.exact_header_order.includes(header) ||
+        columns.find((column) => column.excel_header === header)
+          ?.postgresql_type !== "text",
+    ) ||
+    contract.date_text_policy.expected_checked_cell_count !==
+      dateHeaders.length * contract.expected_data_row_count
+  ) {
+    throw new SourceContractError(
+      "SOURCE_CONTRACT_DATE_POLICY_INVALID",
+      "Date policy headers and expected checked-cell count must cover the approved source exactly.",
     );
   }
 }

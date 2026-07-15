@@ -51,6 +51,13 @@ export interface DryRunImportReport {
     staffNameVariantGroups: number;
     courseNameVariantGroups: number;
   };
+  dateValidation: {
+    checkedCellCount: number;
+    validDateTextCount: number;
+    statusTextCount: number;
+    blankCount: number;
+    invalidDateCount: number;
+  };
   violations: SafeSourceAnomaly[];
   privacy: {
     containsBusinessValues: false;
@@ -105,6 +112,14 @@ export function createDryRunImportReport(
         prepared.inspection.duplicate_business_row_groups.row_count,
       staffNameVariantGroups: prepared.inspection.staff_name_variant_groups,
       courseNameVariantGroups: prepared.inspection.course_name_variant_groups,
+    },
+    dateValidation: {
+      checkedCellCount: prepared.inspection.date_validation.checked_cell_count,
+      validDateTextCount:
+        prepared.inspection.date_validation.valid_date_text_count,
+      statusTextCount: prepared.inspection.date_validation.status_text_count,
+      blankCount: prepared.inspection.date_validation.blank_count,
+      invalidDateCount: prepared.inspection.date_validation.invalid_date_count,
     },
     violations: prepared.violations,
     privacy: {

@@ -139,7 +139,7 @@ describe("Phase 2 controlled import pipeline", () => {
     expect(first.rows).toHaveLength(2);
     expect(first.rows[0].businessValues.don_vi).toBe("  Đơn vị A  ");
     expect(first.rows[0].businessValues.bo_mon).toBe("");
-    expect(first.rows[0].businessValues.khoi_kien_thuc).toBeNull();
+    expect(first.rows[0].businessValues.khoi_kien_thuc).toBe(1);
     expect(first.datasetChecksum).toBe(second.datasetChecksum);
     expect(first.rows.map((row) => row.lecturerUid)).toEqual(
       second.rows.map((row) => row.lecturerUid),
@@ -167,6 +167,78 @@ describe("Phase 2 controlled import pipeline", () => {
         code: "STAFF_CODE_MUST_BE_STRING_OR_NULL",
         sourceRowNumber: 2,
         stt: 1,
+      }),
+    );
+  });
+
+  it("accepts approved khoi_kien_thuc boundary integers 1 and 5", async () => {
+    const fixture = await createFixture([
+      validFixtureRow(1, 1),
+      validFixtureRow(2, 5),
+    ]);
+    const prepared = await prepareSourceBytes(
+      fixture.bytes,
+      fixture.contract.source_filename,
+      fixture.contract,
+    );
+
+    expect(prepared.violations).toEqual([]);
+    expect(
+      prepared.rows.map((row) => row.businessValues.khoi_kien_thuc),
+    ).toEqual([1, 5]);
+  });
+
+  it('rejects string number "1" for khoi_kien_thuc without coercion', async () => {
+    const prepared = await prepareKnowledgeBlockValue("1");
+
+    expect(prepared.violations).toContainEqual(
+      expect.objectContaining({
+        code: "INTEGER_CELL_TYPE_INVALID",
+        column: "khoi_kien_thuc",
+      }),
+    );
+  });
+
+  it("rejects a decimal khoi_kien_thuc value", async () => {
+    const prepared = await prepareKnowledgeBlockValue(1.5);
+
+    expect(prepared.violations).toContainEqual(
+      expect.objectContaining({
+        code: "INTEGER_CELL_TYPE_INVALID",
+        column: "khoi_kien_thuc",
+      }),
+    );
+  });
+
+  it("rejects khoi_kien_thuc outside PostgreSQL int32", async () => {
+    const prepared = await prepareKnowledgeBlockValue(2_147_483_648);
+
+    expect(prepared.violations).toContainEqual(
+      expect.objectContaining({
+        code: "INTEGER_VALUE_OUTSIDE_POSTGRESQL_INT32_RANGE",
+        column: "khoi_kien_thuc",
+      }),
+    );
+  });
+
+  it("rejects blank khoi_kien_thuc", async () => {
+    const prepared = await prepareKnowledgeBlockValue(null);
+
+    expect(prepared.violations).toContainEqual(
+      expect.objectContaining({
+        code: "NON_NULLABLE_CELL_BLANK",
+        column: "khoi_kien_thuc",
+      }),
+    );
+  });
+
+  it("rejects an integer outside the approved current 1-5 range", async () => {
+    const prepared = await prepareKnowledgeBlockValue(6);
+
+    expect(prepared.violations).toContainEqual(
+      expect.objectContaining({
+        code: "INTEGER_VALUE_OUTSIDE_APPROVED_SOURCE_RANGE",
+        column: "khoi_kien_thuc",
       }),
     );
   });
@@ -270,6 +342,27 @@ describe("Phase 2 controlled import pipeline", () => {
         requireConfirmSha: true,
       }),
     ).toThrow(/confirm-sha/u);
+    expect(
+      parsePipelineArguments(["--file", "source.xlsx", "--sheet", "csdlcore"], {
+        requireConfirmSha: false,
+        allowSheet: true,
+      }).sheetName,
+    ).toBe("csdlcore");
+  });
+
+  it("rejects a source SHA that differs from the contract", async () => {
+    const fixture = await createFixture([validFixtureRow(1, 1)]);
+    fixture.contract.source_sha256 = "f".repeat(64);
+
+    const prepared = await prepareSourceBytes(
+      fixture.bytes,
+      fixture.contract.source_filename,
+      fixture.contract,
+    );
+
+    expect(prepared.violations).toContainEqual({
+      code: "SOURCE_SHA256_MISMATCH",
+    });
   });
 
   it("keeps dry-run database-free and import guarded by one transaction", () => {
@@ -370,6 +463,7 @@ interface FixtureRow {
   formula?: boolean;
   courseCode?: string;
   courseName?: string;
+  knowledgeBlock?: string | number | null;
 }
 
 async function createFixture(rows: FixtureRow[]): Promise<{
@@ -401,6 +495,8 @@ async function createFixture(rows: FixtureRow[]): Promise<{
     values[position("ma_so_can_bo") - 1] = fixtureRow.staffCode;
     values[position("email_tai_khoan_vnu") - 1] = fixtureRow.email;
     values[position("don_vi") - 1] = fixtureRow.unit;
+    values[position("khoi_kien_thuc") - 1] =
+      fixtureRow.knowledgeBlock === undefined ? 1 : fixtureRow.knowledgeBlock;
     if (fixtureRow.emptyText !== undefined) {
       values[position("bo_mon") - 1] = fixtureRow.emptyText;
     }
@@ -421,6 +517,10 @@ async function createFixture(rows: FixtureRow[]): Promise<{
     if (!distinct.has(stt)) missing.push(stt);
   }
   contract.expected_data_row_count = rows.length;
+  contract.date_text_policy.expected_checked_cell_count =
+    rows.length *
+    (contract.date_text_policy.date_only_headers.length +
+      contract.date_text_policy.date_or_status_headers.length);
   contract.stt.expected_min = minimum;
   contract.stt.expected_max = maximum;
   contract.stt.expected_distinct = distinct.size;
@@ -438,6 +538,31 @@ async function createFixture(rows: FixtureRow[]): Promise<{
     course_name_variant_groups: 0,
   };
   return { bytes, contract };
+}
+
+function validFixtureRow(
+  stt: number,
+  knowledgeBlock: string | number | null,
+): FixtureRow {
+  return {
+    stt,
+    staffCode: `CB-${stt}`,
+    email: `person-${stt}@example.edu`,
+    lecturerName: `Lecturer ${stt}`,
+    unit: "Unit",
+    knowledgeBlock,
+  };
+}
+
+async function prepareKnowledgeBlockValue(
+  value: string | number | null,
+): Promise<PreparedSource> {
+  const fixture = await createFixture([validFixtureRow(1, value)]);
+  return prepareSourceBytes(
+    fixture.bytes,
+    fixture.contract.source_filename,
+    fixture.contract,
+  );
 }
 
 function createMatchingSnapshot(

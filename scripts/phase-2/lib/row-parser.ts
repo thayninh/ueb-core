@@ -330,6 +330,15 @@ function validateSourceMetadata(
       "INVALID_DATE_COUNT_MISMATCH",
     ],
     [
+      inspection.date_validation.checked_cell_count ===
+        contract.date_text_policy.expected_checked_cell_count,
+      "DATE_VALIDATION_CELL_COUNT_MISMATCH",
+    ],
+    [
+      inspection.date_validation.invalid_date_count === 0,
+      "INVALID_DATE_REJECTED",
+    ],
+    [
       inspection.missing_staff_code_and_email ===
         contract.expected_warning_counts.missing_staff_code_and_email_rows,
       "MISSING_IDENTITY_WARNING_COUNT_MISMATCH",
@@ -405,6 +414,23 @@ function parseContractCell(
       !Number.isInteger(cell.value)
     ) {
       anomaly("INTEGER_CELL_TYPE_INVALID");
+      return null;
+    }
+    const integerRange = column.postgresql_integer_range;
+    if (
+      integerRange &&
+      (cell.value < integerRange.minimum || cell.value > integerRange.maximum)
+    ) {
+      anomaly("INTEGER_VALUE_OUTSIDE_POSTGRESQL_INT32_RANGE");
+      return null;
+    }
+    if (
+      (column.expected_current_minimum !== undefined &&
+        cell.value < column.expected_current_minimum) ||
+      (column.expected_current_maximum !== undefined &&
+        cell.value > column.expected_current_maximum)
+    ) {
+      anomaly("INTEGER_VALUE_OUTSIDE_APPROVED_SOURCE_RANGE");
       return null;
     }
     return cell.value;

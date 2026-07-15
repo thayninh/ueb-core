@@ -25,7 +25,7 @@ Header phải khớp nguyên văn, đủ 20 cột và đúng thứ tự dưới 
 | 1 | `stt` | `stt` | `integer` | Không | Có |
 | 2 | `don_vi_phu_trach_hoc_phan` | `don_vi_phu_trach_hoc_phan` | `text` | Có | Không |
 | 3 | `bo_mon_phu_trach_hoc_phan` | `bo_mon_phu_trach_hoc_phan` | `text` | Có | Không |
-| 4 | `khoi_kien_thuc` | `khoi_kien_thuc` | `text` | Có | Không |
+| 4 | `khoi_kien_thuc` | `khoi_kien_thuc` | `integer` | Không | Không |
 | 5 | `ma_hoc_phan` | `ma_hoc_phan` | `text` | Có | Không |
 | 6 | `ten_hoc_phan` | `ten_hoc_phan` | `text` | Có | Không |
 | 7 | `ten_giang_vien` | `ten_giang_vien` | `text` | Có | Không |
@@ -45,6 +45,8 @@ Header phải khớp nguyên văn, đủ 20 cột và đúng thứ tự dưới 
 
 Chỉ `stt` có yêu cầu unique. Việc contract ghi kiểu và nullability không tự tạo schema vật lý hoặc migration.
 
+`khoi_kien_thuc` bắt buộc là Excel number, số nguyên trong giới hạn PostgreSQL integer 32-bit và không được coercion. Nguồn hiện tại được khóa ở miền `1`–`5`; string number, decimal, blank và giá trị ngoài miền này đều là contract violation.
+
 ## 3. Quy tắc giá trị
 
 ### 3.1 Blank và text
@@ -62,7 +64,7 @@ Chỉ `stt` có yêu cầu unique. Việc contract ghi kiểu và nullability kh
 - Không tự chuyển đổi ngày sang kiểu khác hoặc sửa chuỗi nguồn.
 - `tc3_3_chu_nhiem_de_tai_nckh_lien_quan` chỉ cho phép blank hoặc ngày hợp lệ.
 - Bảy cột TC hỗn hợp được liệt kê trong JSON cho phép blank, ngày hợp lệ hoặc chính xác trạng thái `Đã hoàn thành`.
-- Kết quả inspect đã kiểm tra 19.976 ô thuộc các cột này và ghi nhận `0` giá trị không hợp lệ.
+- Contract bắt buộc kiểm tra đủ 19.976 ô thuộc các cột này; kết quả inspect ghi nhận `0` giá trị không hợp lệ. Hard gate không đạt nếu số ô đã kiểm tra sai khác hoặc metric ngày chưa được xác minh.
 
 ### 3.3 Formula và duplicate
 

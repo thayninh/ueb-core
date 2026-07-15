@@ -1,6 +1,6 @@
 import { pathToFileURL } from "node:url";
 
-import { parsePipelineArguments } from "./lib/cli";
+import { parsePipelineArguments, PipelineCliError } from "./lib/cli";
 import {
   createDryRunImportReport,
   writePhase2AuditReport,
@@ -8,7 +8,10 @@ import {
 import { prepareSourceFile } from "./lib/row-parser";
 import { loadSourceContract } from "./lib/source-contract";
 
-export async function runDryRunImport(filePath: string): Promise<{
+export async function runDryRunImport(
+  filePath: string,
+  requestedSheet?: string,
+): Promise<{
   status: "PASS" | "FAIL";
   reportPath: string;
   rowCount: number;
@@ -16,6 +19,11 @@ export async function runDryRunImport(filePath: string): Promise<{
   datasetChecksum: string | null;
 }> {
   const contract = await loadSourceContract();
+  if (requestedSheet && requestedSheet !== contract.sheet_name) {
+    throw new PipelineCliError(
+      "Requested sheet does not match the approved source contract.",
+    );
+  }
   const prepared = await prepareSourceFile(filePath, contract);
   const generatedAt = new Date();
   const report = createDryRunImportReport(prepared, contract, generatedAt);
@@ -39,8 +47,12 @@ async function main(): Promise<void> {
   try {
     const arguments_ = parsePipelineArguments(process.argv.slice(2), {
       requireConfirmSha: false,
+      allowSheet: true,
     });
-    const result = await runDryRunImport(arguments_.filePath);
+    const result = await runDryRunImport(
+      arguments_.filePath,
+      arguments_.sheetName,
+    );
     const output = {
       status: result.status,
       reportPath: result.reportPath,

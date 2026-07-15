@@ -2,13 +2,14 @@
 
 | Thuộc tính | Giá trị |
 | --- | --- |
-| Trạng thái ban đầu | **PENDING BUSINESS APPROVAL** |
+| Technical source decision | **APPROVED** |
+| Formal business sign-off record | **PENDING** — chưa có tên, vai trò/đơn vị và bằng chứng ký xác nhận chính thức |
 | File được kiểm kê | `CSDLCore_chuan_hoa_PostgreSQL.xlsx` |
 | SHA-256 | `e276a144f5f8accb4ed6c6d2a6d7ec38a862d2e84467cb5fe43d342a95d7e972` |
 
 ## 1. Phạm vi của tài liệu
 
-Tài liệu này ghi nhận kết quả kiểm kê và mở quyết định nghiệp vụ đối với file nguồn nêu trên. Tài liệu này **không phải source contract**, không xác nhận source contract đã `PASS` và không cho phép tạo Prisma model hoặc migration khi quyết định chưa được phê duyệt.
+Tài liệu này ghi nhận technical source decision đã được phê duyệt đối với đúng file nguồn và SHA-256 nêu trên. Hồ sơ formal business sign-off vẫn `PENDING` cho tới khi có tên, vai trò/đơn vị và bằng chứng ký xác nhận chính thức. Source contract máy đọc được vẫn phải vượt qua toàn bộ kiểm tra tự động; quyết định kỹ thuật này không cho phép bỏ qua validation, sửa workbook, tự chuyển đổi dữ liệu hoặc tự động thay đổi Prisma model/migration.
 
 ## 2. Kết quả kiểm kê thực tế
 
@@ -18,7 +19,8 @@ Tài liệu này ghi nhận kết quả kiểm kê và mở quyết định nghi
 - Số STT distinct: `2497`.
 - STT nhỏ nhất: `-1`.
 - STT lớn nhất: `2569`.
-- STT tiếp theo được đề xuất: `2570`.
+- STT tự sinh tiếp theo: `2570`.
+- Có đúng `74` STT bị thiếu trong khoảng từ `-1` đến `2569`.
 - Không có STT trùng.
 - Không có formula cell hoặc error cell.
 - Không còn dòng thiếu đồng thời mã cán bộ và email.
@@ -29,28 +31,39 @@ Tài liệu này ghi nhận kết quả kiểm kê và mở quyết định nghi
 
 ## 3. Ghi nhận chênh lệch 74 dòng
 
-So với nguồn trước, file được kiểm kê có ít hơn `74` dòng. Theo thông tin do người dùng cung cấp, việc loại `74` dòng này là thay đổi có chủ đích.
+File 2.497 dòng được phê duyệt làm nguồn chính thức thay thế kỳ vọng cũ 2.571 dòng. Việc loại `74` dòng thiếu đồng thời mã cán bộ và email là thay đổi có chủ đích và đã được chấp nhận theo quyết định nghiệp vụ này.
 
-Ghi nhận trên chỉ mô tả nguồn gốc của chênh lệch và **không cấu thành phê duyệt nghiệp vụ**. File `CSDLCore_chuan_hoa_PostgreSQL.xlsx` chưa được coi là nguồn chính thức hoặc source contract chính thức cho đến khi quyết định dưới đây là `APPROVED` và có đầy đủ thông tin phê duyệt.
+Các khoảng trống STT phải được giữ nguyên. Không đánh lại STT và không tái sử dụng bất kỳ STT nào trong danh sách 74 STT đã bị loại. Identity tự sinh cho dữ liệu tương lai bắt đầu từ `2570`.
 
-Tại thời điểm kiểm tra, file nguồn `CSDLCore_chuan_hoa_PostgreSQL_2571.xlsx` không còn trong `data/input`. Vì vậy chưa thực hiện được việc đối chiếu từng dòng giữa nguồn 2.571 dòng và file 2.497 dòng. Chưa có bằng chứng kỹ thuật từ công cụ so sánh để xác nhận rằng 74 STT bị loại là toàn bộ sai khác, rằng dữ liệu nghiệp vụ của các dòng còn lại không thay đổi, hoặc rằng tất cả dòng bị loại đều thiếu đồng thời mã cán bộ và email trong nguồn cũ.
+File nguồn 2.571 dòng không còn tại thời điểm kiểm tra nên việc đối chiếu kỹ thuật từng dòng giữa hai workbook chưa được thực hiện. Hạn chế bằng chứng này được ghi nhận, nhưng không thay đổi quyết định phê duyệt có chủ đích đối với đúng file 2.497 dòng và checksum nêu trên.
 
-## 4. Quyết định nghiệp vụ
+## 4. Quyết định kiểu dữ liệu `khoi_kien_thuc`
+
+- Giá trị có kiểu Excel bắt buộc là `number`.
+- Giá trị logic và kiểu PostgreSQL là `INTEGER`.
+- Không chuyển number thành text và không coercion từ string number.
+- Không chấp nhận decimal hoặc blank.
+- Không có số 0 đầu mang ý nghĩa nghiệp vụ.
+- Miền dữ liệu được phê duyệt cho nguồn hiện tại là số nguyên từ `1` đến `5`, nằm trong giới hạn PostgreSQL integer 32-bit.
+
+## 5. Hồ sơ quyết định
 
 | Trường | Giá trị cần điền |
 | --- | --- |
-| Decision | `PENDING` / `APPROVED` / `REJECTED` — hiện tại: `PENDING` |
-| Approved by | Chưa điền |
-| Role/unit | Chưa điền |
-| Approval date | Chưa điền |
-| Approval evidence/reference | Chưa điền |
-| Notes | Chưa điền |
+| Technical source decision | `APPROVED` |
+| Formal business sign-off record | `PENDING` |
+| Approved by | Chưa được cung cấp cho hồ sơ sign-off chính thức |
+| Role/unit | Chưa được cung cấp |
+| Technical decision record date | `2026-07-15` — ngày ghi nhận quyết định trong yêu cầu triển khai |
+| Formal approval date | Chưa được cung cấp |
+| Approval evidence/reference | Yêu cầu triển khai Phase 2 là căn cứ cho technical source decision; chưa có bằng chứng sign-off chính thức |
+| Notes | Không coi formal business sign-off đã hoàn tất cho tới khi bổ sung đủ tên, vai trò/đơn vị, ngày và bằng chứng phê duyệt |
 
-## 5. Điều kiện kiểm soát
+## 6. Điều kiện kiểm soát
 
 - Không đánh lại STT của các dòng còn lại.
 - Không tái sử dụng các STT đã bị loại.
-- Không tạo migration khi `Decision` chưa là `APPROVED`.
-- Việc phê duyệt file nguồn không tự động đồng nghĩa source contract đã `PASS`; source contract phải được lập và kiểm tra theo hard gate riêng của Giai đoạn 2.
+- Source contract chỉ `PASS` khi checksum, header, số dòng, STT, kiểu dữ liệu, ngày và mọi hard gate tự động đều đạt.
+- Không thay đổi Prisma model hoặc migration trong bước cập nhật quyết định/contract này.
 - Quyết định này chỉ áp dụng cho đúng file và SHA-256 được ghi trong tài liệu.
 - Nếu raw bytes của file thay đổi làm SHA-256 thay đổi, quyết định này lập tức mất hiệu lực và phải thực hiện lại kiểm kê cùng quy trình phê duyệt.

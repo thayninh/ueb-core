@@ -55,9 +55,19 @@
       "position": 4,
       "excel_header": "khoi_kien_thuc",
       "postgresql_column": "khoi_kien_thuc",
-      "postgresql_type": "text",
-      "nullable": true,
-      "unique": false
+      "source_cell_type": "number",
+      "logical_type": "integer",
+      "postgresql_type": "integer",
+      "nullable": false,
+      "unique": false,
+      "coercion": "FORBIDDEN",
+      "integer_only": true,
+      "postgresql_integer_range": {
+        "minimum": -2147483648,
+        "maximum": 2147483647
+      },
+      "expected_current_minimum": 1,
+      "expected_current_maximum": 5
     },
     {
       "position": 5,
@@ -231,6 +241,7 @@
   "date_text_policy": {
     "postgresql_type": "text",
     "blank_allowed": true,
+    "expected_checked_cell_count": 19976,
     "accepted_date_format": "DD/MM/YYYY",
     "calendar_date_must_exist": true,
     "automatic_conversion": "FORBIDDEN",
