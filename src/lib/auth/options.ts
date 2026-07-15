@@ -1,4 +1,9 @@
-import type { BetterAuthOptions } from "better-auth";
+import {
+  APIError,
+  BASE_ERROR_CODES,
+  type BetterAuthOptions,
+} from "better-auth";
+import { nextCookies } from "better-auth/next-js";
 
 import type { AuthEnvironment } from "@/lib/auth/environment";
 
@@ -20,6 +25,7 @@ type AuthDatabase = NonNullable<BetterAuthOptions["database"]>;
 export function createBetterAuthOptions(input: {
   database: AuthDatabase;
   environment: AuthEnvironment;
+  isUserSessionEligible: (userId: string) => Promise<boolean>;
 }): BetterAuthOptions {
   return {
     appName: "UEB Core",
@@ -28,6 +34,9 @@ export function createBetterAuthOptions(input: {
     secret: input.environment.secret,
     trustedOrigins: input.environment.trustedOrigins,
     database: input.database,
+    logger: {
+      level: "error",
+    },
     emailAndPassword: {
       enabled: true,
       disableSignUp: true,
@@ -63,10 +72,25 @@ export function createBetterAuthOptions(input: {
     verification: {
       modelName: AUTH_MODEL_NAMES.verification,
     },
+    databaseHooks: {
+      session: {
+        create: {
+          before: async (session) => {
+            if (!(await input.isUserSessionEligible(session.userId))) {
+              throw APIError.from(
+                "UNAUTHORIZED",
+                BASE_ERROR_CODES.INVALID_EMAIL_OR_PASSWORD,
+              );
+            }
+          },
+        },
+      },
+    },
     advanced: {
       database: {
         generateId: "uuid",
       },
     },
+    plugins: [nextCookies()],
   };
 }

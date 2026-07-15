@@ -24,6 +24,7 @@ function createOptions(): BetterAuthOptions {
   return createBetterAuthOptions({
     database: {} as NonNullable<BetterAuthOptions["database"]>,
     environment,
+    isUserSessionEligible: async () => true,
   });
 }
 
@@ -61,6 +62,7 @@ describe("Better Auth foundation", () => {
 
     expect(options.database).toBeDefined();
     expect(options.secondaryStorage).toBeUndefined();
+    expect(options.logger).toEqual({ level: "error" });
     expect(options.session).toMatchObject({
       modelName: AUTH_MODEL_NAMES.session,
       expiresIn: AUTH_SESSION_SECONDS.expiresIn,
@@ -71,6 +73,28 @@ describe("Better Auth foundation", () => {
       },
     });
     expect(options.advanced?.database?.generateId).toBe("uuid");
+    expect(options.plugins?.at(-1)?.id).toBe("next-cookies");
+    expect(options.user?.additionalFields).toBeUndefined();
+    expect(options.session?.additionalFields).toBeUndefined();
+  });
+
+  it("blocks session creation when the business access profile is inactive", async () => {
+    const options = createBetterAuthOptions({
+      database: {} as NonNullable<BetterAuthOptions["database"]>,
+      environment,
+      isUserSessionEligible: async () => false,
+    });
+    const beforeSessionCreate = options.databaseHooks?.session?.create?.before;
+
+    expect(beforeSessionCreate).toBeTypeOf("function");
+    await expect(
+      beforeSessionCreate?.(
+        { userId: "11111111-1111-4111-8111-111111111111" } as never,
+        null,
+      ),
+    ).rejects.toMatchObject({
+      body: { code: "INVALID_EMAIL_OR_PASSWORD" },
+    });
   });
 
   it("parses, normalizes, and deduplicates comma-separated trusted origins", () => {
