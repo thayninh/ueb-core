@@ -14,7 +14,7 @@ model UebCoreData {
 
   donViPhuTrachHocPhan          String? @map("don_vi_phu_trach_hoc_phan") @db.Text
   boMonPhuTrachHocPhan          String? @map("bo_mon_phu_trach_hoc_phan") @db.Text
-  khoiKienThuc                  String? @map("khoi_kien_thuc") @db.Text
+  khoiKienThuc                  Int     @map("khoi_kien_thuc") @db.Integer
   maHocPhan                     String? @map("ma_hoc_phan") @db.Text
   tenHocPhan                    String? @map("ten_hoc_phan") @db.Text
   tenGiangVien                  String? @map("ten_giang_vien") @db.Text
