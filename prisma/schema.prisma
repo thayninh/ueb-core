@@ -93,3 +93,175 @@ model WorkflowEvent {
   @@index([submissionId, createdAt], map: "workflow_event_submission_id_created_at_idx")
   @@map("workflow_event")
 }
+
+model Auth_user {
+  id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name          String
+  email         String
+  emailVerified Boolean        @default(false)
+  image         String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  auth_sessions Auth_session[]
+  auth_accounts Auth_account[]
+
+  accessProfile               AccessProfile?        @relation("AccessProfileUser")
+  createdAccessProfiles       AccessProfile[]       @relation("AccessProfileCreatedBy")
+  roleAssignments             RoleAssignment[]      @relation("RoleAssignmentUser")
+  grantedRoleAssignments      RoleAssignment[]      @relation("RoleAssignmentGrantedBy")
+  revokedRoleAssignments      RoleAssignment[]      @relation("RoleAssignmentRevokedBy")
+  unitScopeAssignments        UnitScopeAssignment[] @relation("UnitScopeAssignmentUser")
+  grantedUnitScopeAssignments UnitScopeAssignment[] @relation("UnitScopeAssignmentGrantedBy")
+  revokedUnitScopeAssignments UnitScopeAssignment[] @relation("UnitScopeAssignmentRevokedBy")
+
+  @@unique([email])
+  @@map("auth_user")
+}
+
+model Auth_session {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  expiresAt DateTime
+  token     String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String    @db.Uuid
+  auth_user Auth_user @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([token])
+  @@index([userId])
+  @@map("auth_session")
+}
+
+model Auth_account {
+  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  accountId             String
+  providerId            String
+  userId                String    @db.Uuid
+  auth_user             Auth_user @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("auth_account")
+}
+
+model Auth_verification {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("auth_verification")
+}
+
+model AccessProfile {
+  id          String              @id @default(uuid()) @db.Uuid
+  userId      String              @unique(map: "access_profile_user_id_key") @map("user_id") @db.Uuid
+  lecturerUid String?             @unique(map: "access_profile_lecturer_uid_key") @map("lecturer_uid") @db.Uuid
+  status      AccessProfileStatus @default(PENDING_MAPPING)
+  createdAt   DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+  createdBy   String              @map("created_by") @db.Uuid
+
+  user          Auth_user @relation("AccessProfileUser", fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdByUser Auth_user @relation("AccessProfileCreatedBy", fields: [createdBy], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([status], map: "access_profile_status_idx")
+  @@map("access_profile")
+}
+
+model RoleAssignment {
+  id        String       @id @default(uuid()) @db.Uuid
+  userId    String       @map("user_id") @db.Uuid
+  role      BusinessRole
+  grantedBy String       @map("granted_by") @db.Uuid
+  grantedAt DateTime     @default(now()) @map("granted_at") @db.Timestamptz(6)
+  revokedBy String?      @map("revoked_by") @db.Uuid
+  revokedAt DateTime?    @map("revoked_at") @db.Timestamptz(6)
+
+  user          Auth_user  @relation("RoleAssignmentUser", fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  grantedByUser Auth_user  @relation("RoleAssignmentGrantedBy", fields: [grantedBy], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  revokedByUser Auth_user? @relation("RoleAssignmentRevokedBy", fields: [revokedBy], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([userId], map: "role_assignment_user_id_idx")
+  @@index([role], map: "role_assignment_role_idx")
+  @@map("role_assignment")
+}
+
+model OrganizationUnit {
+  id               String                @id @default(uuid()) @db.Uuid
+  unitKey          String                @unique(map: "organization_unit_unit_key_key") @map("unit_key") @db.VarChar(64)
+  sourceValue      String                @unique(map: "organization_unit_source_value_key") @map("source_value") @db.Text
+  displayName      String                @map("display_name") @db.Text
+  isActive         Boolean               @default(true) @map("is_active")
+  createdAt        DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  scopeAssignments UnitScopeAssignment[]
+
+  @@index([isActive], map: "organization_unit_is_active_idx")
+  @@map("organization_unit")
+}
+
+model UnitScopeAssignment {
+  id                 String    @id @default(uuid()) @db.Uuid
+  userId             String    @map("user_id") @db.Uuid
+  organizationUnitId String    @map("organization_unit_id") @db.Uuid
+  grantedBy          String    @map("granted_by") @db.Uuid
+  grantedAt          DateTime  @default(now()) @map("granted_at") @db.Timestamptz(6)
+  revokedBy          String?   @map("revoked_by") @db.Uuid
+  revokedAt          DateTime? @map("revoked_at") @db.Timestamptz(6)
+
+  user             Auth_user        @relation("UnitScopeAssignmentUser", fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  organizationUnit OrganizationUnit @relation(fields: [organizationUnitId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  grantedByUser    Auth_user        @relation("UnitScopeAssignmentGrantedBy", fields: [grantedBy], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  revokedByUser    Auth_user?       @relation("UnitScopeAssignmentRevokedBy", fields: [revokedBy], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([userId], map: "unit_scope_assignment_user_id_idx")
+  @@index([organizationUnitId], map: "unit_scope_assignment_organization_unit_id_idx")
+  @@map("unit_scope_assignment")
+}
+
+model AuthAuditEvent {
+  id             String   @id @default(uuid()) @db.Uuid
+  eventType      String   @map("event_type") @db.VarChar(64)
+  outcome        String   @db.VarChar(32)
+  actorUserId    String?  @map("actor_user_id") @db.Uuid
+  targetUserId   String?  @map("target_user_id") @db.Uuid
+  sessionId      String?  @map("session_id") @db.Uuid
+  identifierHash String?  @map("identifier_hash") @db.Char(64)
+  metadata       Json     @db.JsonB
+  occurredAt     DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+
+  @@index([eventType, occurredAt(sort: Desc)], map: "auth_audit_event_type_occurred_at_idx")
+  @@index([actorUserId, occurredAt(sort: Desc)], map: "auth_audit_event_actor_user_id_occurred_at_idx")
+  @@index([targetUserId, occurredAt(sort: Desc)], map: "auth_audit_event_target_user_id_occurred_at_idx")
+  @@index([sessionId], map: "auth_audit_event_session_id_idx")
+  @@map("auth_audit_event")
+}
+
+enum AccessProfileStatus {
+  PENDING_MAPPING
+  ACTIVE
+  DISABLED
+
+  @@map("access_profile_status")
+}
+
+enum BusinessRole {
+  LECTURER
+  FACULTY_LEADER
+  ADMIN
+
+  @@map("business_role")
+}
