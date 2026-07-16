@@ -202,8 +202,14 @@ function SubmissionTable({
                       {submission.rejectionReason}
                     </p>
                   </div>
-                ) : submission.terminalAt ? (
-                  formatWorkflowDate(submission.terminalAt)
+                ) : submission.state === "APPROVED" ? (
+                  <div className="space-y-1">
+                    <p>{formatWorkflowDate(submission.terminalAt)}</p>
+                    <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                      STT {submission.resultStt} · Phiên bản{" "}
+                      {submission.resultVersionNo}
+                    </p>
+                  </div>
                 ) : (
                   "—"
                 )}

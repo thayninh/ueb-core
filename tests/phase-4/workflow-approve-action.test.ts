@@ -108,10 +108,11 @@ describe("Phase 4 workflow approve action", () => {
 
   it("revalidates all affected leader, lecturer and dashboard paths", async () => {
     const submissionId = randomUUID();
+    const recordUid = randomUUID();
     mocks.approve.mockResolvedValue({
       submissionId,
       submissionType: "CREATE_NEW",
-      recordUid: randomUUID(),
+      recordUid,
       state: "APPROVED",
       resultStt: 2571,
       resultVersionNo: 1,
@@ -121,9 +122,11 @@ describe("Phase 4 workflow approve action", () => {
     expect(mocks.revalidatePath.mock.calls.map(([path]) => path)).toEqual([
       "/leader/submissions",
       `/leader/submissions/${submissionId}`,
+      "/leader/data",
       "/lecturer/profile",
       "/lecturer/submissions",
       `/lecturer/submissions/${submissionId}`,
+      `/lecturer/rows/${recordUid}/history`,
       "/dashboard",
     ]);
   });

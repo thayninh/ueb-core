@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { LeaderApproveForm } from "@/components/workflow/leader-approve-form";
 import { LeaderRejectForm } from "@/components/workflow/leader-reject-form";
 import { SubmissionStatusBadge } from "@/components/workflow/submission-status-badge";
 import {
@@ -50,10 +51,11 @@ export default async function LeaderSubmissionDetailPage({
         </div>
       </header>
 
-      {detail.stale && (
+      {detail.state === "PENDING" && detail.stale && (
         <section className="rounded-2xl border border-amber-300 bg-amber-50 p-5 text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
           <h2 className="font-semibold">
-            Dữ liệu lõi hiện tại đã thay đổi từ sau thời điểm gửi.
+            Dữ liệu lõi đã thay đổi kể từ khi bản gửi được tạo. Không thể phê
+            duyệt bản gửi này.
           </h2>
           <p className="mt-2 text-sm">
             Reject vẫn được phép vì thao tác này không ghi dữ liệu lõi.
@@ -124,6 +126,30 @@ export default async function LeaderSubmissionDetailPage({
         </section>
       )}
 
+      {detail.state === "APPROVED" && (
+        <section className="rounded-2xl border border-emerald-300 bg-emerald-50 p-6 dark:border-emerald-800 dark:bg-emerald-950/40">
+          <h2 className="font-semibold">Kết quả phê duyệt</h2>
+          <dl className="mt-4 grid gap-4 sm:grid-cols-3">
+            <Metadata
+              label="Thời điểm quyết định"
+              value={formatWorkflowDate(detail.terminalAt)}
+            />
+            <Metadata
+              label="STT kết quả"
+              value={detail.resultStt === null ? "—" : String(detail.resultStt)}
+            />
+            <Metadata
+              label="Phiên bản kết quả"
+              value={
+                detail.resultVersionNo === null
+                  ? "—"
+                  : String(detail.resultVersionNo)
+              }
+            />
+          </dl>
+        </section>
+      )}
+
       <section>
         <h2 className="text-xl font-semibold">So sánh 19 trường nội dung</h2>
         <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
@@ -174,16 +200,26 @@ export default async function LeaderSubmissionDetailPage({
       </section>
 
       {detail.state === "PENDING" && (
-        <section className="rounded-2xl border border-red-200 bg-white p-6 shadow-sm dark:border-red-900 dark:bg-zinc-900">
-          <h2 className="text-xl font-semibold">Từ chối bản gửi</h2>
-          <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
-            Bước này chưa triển khai phê duyệt. Chỉ quyết định từ chối được
-            phép.
-          </p>
-          <div className="mt-5">
-            <LeaderRejectForm submissionId={detail.submissionId} />
-          </div>
-        </section>
+        <div className="grid gap-6 lg:grid-cols-2">
+          <section className="rounded-2xl border border-emerald-200 bg-white p-6 shadow-sm dark:border-emerald-900 dark:bg-zinc-900">
+            <h2 className="text-xl font-semibold">Phê duyệt bản gửi</h2>
+            <div className="mt-5">
+              <LeaderApproveForm
+                stale={detail.stale}
+                submissionId={detail.submissionId}
+              />
+            </div>
+          </section>
+          <section className="rounded-2xl border border-red-200 bg-white p-6 shadow-sm dark:border-red-900 dark:bg-zinc-900">
+            <h2 className="text-xl font-semibold">Từ chối bản gửi</h2>
+            <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
+              Từ chối không ghi dữ liệu lõi và lý do sẽ được lưu bất biến.
+            </p>
+            <div className="mt-5">
+              <LeaderRejectForm submissionId={detail.submissionId} />
+            </div>
+          </section>
+        </div>
       )}
     </main>
   );

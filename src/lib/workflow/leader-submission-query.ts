@@ -59,6 +59,8 @@ export interface LeaderSubmissionSummaryDto {
   readonly courseName: string | null;
   readonly submittedAt: Date;
   readonly terminalAt: Date | null;
+  readonly resultStt: number | null;
+  readonly resultVersionNo: number | null;
   readonly baseStt: number | null;
   readonly baseVersionNo: number | null;
   readonly currentStt: number | null;
@@ -306,6 +308,14 @@ function toSummary(
     courseName: payload.ten_hoc_phan,
     submittedAt: submission.submittedEvent.createdAt,
     terminalAt: submission.terminalEvent?.createdAt ?? null,
+    resultStt:
+      submission.terminalEvent?.eventType === "APPROVED"
+        ? submission.terminalEvent.resultStt
+        : null,
+    resultVersionNo:
+      submission.terminalEvent?.eventType === "APPROVED"
+        ? submission.terminalEvent.resultVersionNo
+        : null,
     baseStt: submission.submittedEvent.baseStt,
     baseVersionNo: submission.submittedEvent.baseVersionNo,
     currentStt: current?.stt ?? null,

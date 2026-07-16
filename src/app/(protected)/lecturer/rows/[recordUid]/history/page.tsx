@@ -40,7 +40,7 @@ export default async function LecturerRowHistoryPage({
           {versions.length} phiên bản bất biến, mới nhất hiển thị trước.
         </p>
       </header>
-      <CoreDataTable rows={versions} />
+      <CoreDataTable rows={versions} showVersionMetadata />
     </main>
   );
 }

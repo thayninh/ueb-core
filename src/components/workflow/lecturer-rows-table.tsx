@@ -75,7 +75,13 @@ export function LecturerRowsTable({
           {rows.map((row) => {
             const pending = pendingByRecord.get(row.recordUid);
             return (
-              <tr className="align-top" key={row.recordUid}>
+              <tr
+                className="align-top"
+                data-record-uid={row.recordUid}
+                data-stt={row.stt}
+                data-version-no={row.versionNo}
+                key={row.recordUid}
+              >
                 {CORE_DISPLAY_FIELD_NAMES.map((field) => (
                   <td
                     className="max-w-80 whitespace-pre-wrap px-4 py-3 text-zinc-700 dark:text-zinc-200"

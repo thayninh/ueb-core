@@ -44,6 +44,8 @@ export interface LecturerSubmissionSummaryDto {
   readonly state: SubmissionState;
   readonly submittedAt: Date;
   readonly terminalAt: Date | null;
+  readonly resultStt: number | null;
+  readonly resultVersionNo: number | null;
   readonly rejectionReason: string | null;
   readonly baseStt: number | null;
   readonly baseVersionNo: number | null;
@@ -64,8 +66,6 @@ export interface LecturerSubmissionDetailDto extends LecturerSubmissionSummaryDt
   readonly parentSubmissionId: string | null;
   readonly payload: RowSubmissionPayload;
   readonly rejectionReason: string | null;
-  readonly resultStt: number | null;
-  readonly resultVersionNo: number | null;
 }
 
 export interface PendingSubmissionByRecordDto {
@@ -175,10 +175,6 @@ export async function getLecturerSubmissionDetail(
         payload: submission.submittedEvent.payload,
         rejectionReason:
           terminal?.eventType === "REJECTED" ? terminal.reason : null,
-        resultStt:
-          terminal?.eventType === "APPROVED" ? terminal.resultStt : null,
-        resultVersionNo:
-          terminal?.eventType === "APPROVED" ? terminal.resultVersionNo : null,
       };
     },
   );
@@ -296,6 +292,14 @@ function toSummary(
     state: submission.state,
     submittedAt: submission.submittedEvent.createdAt,
     terminalAt: submission.terminalEvent?.createdAt ?? null,
+    resultStt:
+      submission.terminalEvent?.eventType === "APPROVED"
+        ? submission.terminalEvent.resultStt
+        : null,
+    resultVersionNo:
+      submission.terminalEvent?.eventType === "APPROVED"
+        ? submission.terminalEvent.resultVersionNo
+        : null,
     rejectionReason:
       submission.terminalEvent?.eventType === "REJECTED"
         ? submission.terminalEvent.reason

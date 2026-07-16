@@ -57,9 +57,9 @@ test.describe.serial("Phase 4 leader rejection", () => {
       new RegExp(`/leader/submissions/${submissionId}$`, "u"),
     );
     await expect(page.locator("[data-workflow-diff-field]")).toHaveCount(19);
-    await expect(page.getByRole("button", { name: /phê duyệt/iu })).toHaveCount(
-      0,
-    );
+    await expect(
+      page.getByRole("button", { name: "Phê duyệt bản gửi" }),
+    ).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Từ chối bản gửi" }),
     ).toBeVisible();

@@ -24,13 +24,11 @@ const WORKFLOW_APPROVE_ERROR_MESSAGES: Partial<
 > = {
   WORKFLOW_SUBMISSION_NOT_FOUND:
     "Không tìm thấy bản gửi hoặc bạn không có quyền truy cập.",
-  WORKFLOW_SCOPE_DENIED:
-    "Không tìm thấy bản gửi hoặc bạn không có quyền truy cập.",
+  WORKFLOW_SCOPE_DENIED: "Bạn không có quyền xử lý bản gửi này.",
   WORKFLOW_NOT_OWNER:
     "Không tìm thấy bản gửi hoặc bạn không có quyền truy cập.",
-  WORKFLOW_ALREADY_TERMINAL: "Bản gửi này đã được xử lý trước đó.",
-  WORKFLOW_STALE_BASE:
-    "Dữ liệu lõi đã thay đổi từ sau thời điểm gửi. Không thể phê duyệt.",
+  WORKFLOW_ALREADY_TERMINAL: "Bản gửi này đã được xử lý.",
+  WORKFLOW_STALE_BASE: "Dữ liệu đã thay đổi; bản gửi không thể được phê duyệt.",
   WORKFLOW_PAYLOAD_MISMATCH:
     "Nội dung bản gửi không còn đáp ứng contract phê duyệt.",
   WORKFLOW_INVALID_STATE: "Trạng thái bản gửi không hợp lệ.",
@@ -57,7 +55,7 @@ export async function approveSubmissionAction(
   try {
     await requireAnyRole([BusinessRole.FACULTY_LEADER, BusinessRole.ADMIN]);
     const approval = await approveSubmission(parsed.data);
-    revalidateWorkflowPaths(approval.submissionId);
+    revalidateWorkflowPaths(approval);
     return {
       success: true,
       fieldErrors: {},
@@ -80,12 +78,22 @@ export async function approveSubmissionAction(
   }
 }
 
-function revalidateWorkflowPaths(submissionId: string): void {
+export async function approveSubmissionFormAction(
+  _previousState: WorkflowApproveActionResult,
+  formData: FormData,
+): Promise<WorkflowApproveActionResult> {
+  return approveSubmissionAction(formData);
+}
+
+function revalidateWorkflowPaths(approval: ApprovedSubmissionDto): void {
+  const { submissionId, recordUid } = approval;
   revalidatePath("/leader/submissions");
   revalidatePath(`/leader/submissions/${submissionId}`);
+  revalidatePath("/leader/data");
   revalidatePath("/lecturer/profile");
   revalidatePath("/lecturer/submissions");
   revalidatePath(`/lecturer/submissions/${submissionId}`);
+  revalidatePath(`/lecturer/rows/${recordUid}/history`);
   revalidatePath("/dashboard");
 }
 

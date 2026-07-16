@@ -107,6 +107,9 @@ export default async function LecturerSubmissionDetailPage({
       {detail.state === "APPROVED" && (
         <section className="rounded-2xl border border-emerald-300 bg-emerald-50 p-6 dark:border-emerald-800 dark:bg-emerald-950/40">
           <h2 className="font-semibold">Kết quả phê duyệt</h2>
+          <p className="mt-2 text-xs font-medium uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+            Thời điểm phê duyệt: {formatWorkflowDate(detail.terminalAt)}
+          </p>
           <p className="mt-2 text-sm">
             STT kết quả: {detail.resultStt} · Phiên bản kết quả:{" "}
             {detail.resultVersionNo}

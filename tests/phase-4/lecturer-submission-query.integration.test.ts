@@ -97,6 +97,13 @@ describe.sequential("Phase 4 lecturer submission query", () => {
       const page = await query.getLecturerSubmissions({ state });
       expect(page.submissions.every((item) => item.state === state)).toBe(true);
       expect(page.totalSubmissions).toBeGreaterThan(0);
+      if (state === "APPROVED") {
+        expect(
+          page.submissions.every(
+            (item) => item.resultStt !== null && item.resultVersionNo !== null,
+          ),
+        ).toBe(true);
+      }
     }
   });
 

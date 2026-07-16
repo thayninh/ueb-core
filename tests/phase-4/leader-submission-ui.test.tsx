@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   queue: vi.fn(),
   leaderDetail: vi.fn(),
   lecturerDetail: vi.fn(),
+  approveAction: vi.fn(),
   rejectAction: vi.fn(),
 }));
 
@@ -25,6 +26,10 @@ vi.mock("@/lib/workflow/lecturer-submission-query", () => ({
 vi.mock("@/app/actions/workflow-reject", () => ({
   rejectSubmissionAction: mocks.rejectAction,
   rejectSubmissionFormAction: mocks.rejectAction,
+}));
+vi.mock("@/app/actions/workflow-approve", () => ({
+  approveSubmissionAction: mocks.approveAction,
+  approveSubmissionFormAction: mocks.approveAction,
 }));
 
 import LeaderSubmissionDetailPage from "@/app/(protected)/leader/submissions/[submissionId]/page";
@@ -46,12 +51,19 @@ describe("Phase 4 leader reject UI", () => {
       errorCode: null,
       rejection: null,
     });
+    mocks.approveAction.mockResolvedValue({
+      success: false,
+      fieldErrors: {},
+      formError: null,
+      errorCode: null,
+      approval: null,
+    });
     mocks.queue.mockResolvedValue(queueFixture());
     mocks.leaderDetail.mockResolvedValue(detailFixture("PENDING"));
     mocks.lecturerDetail.mockResolvedValue(lecturerDetailFixture());
   });
 
-  it("renders only PENDING queue entries and no approve button", async () => {
+  it("renders only PENDING queue entries", async () => {
     render(
       await LeaderSubmissionsPage({
         searchParams: Promise.resolve({}),
@@ -59,9 +71,6 @@ describe("Phase 4 leader reject UI", () => {
     );
     expect(screen.getByText("Giảng viên A")).toBeInTheDocument();
     expect(screen.getByText("Xem và xử lý")).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /phê duyệt/iu }),
-    ).not.toBeInTheDocument();
   });
 
   it("renders a required reject form and nineteen diff rows for PENDING", async () => {
@@ -79,8 +88,8 @@ describe("Phase 4 leader reject UI", () => {
       screen.getByRole("button", { name: "Từ chối bản gửi" }),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: /phê duyệt/iu }),
-    ).not.toBeInTheDocument();
+      screen.getByRole("button", { name: "Phê duyệt bản gửi" }),
+    ).toBeInTheDocument();
   });
 
   it("shows stale warning while still allowing rejection", async () => {
@@ -95,11 +104,16 @@ describe("Phase 4 leader reject UI", () => {
       }),
     );
     expect(
-      screen.getByText(/Dữ liệu lõi hiện tại đã thay đổi/iu),
+      screen.getByText(/Dữ liệu lõi đã thay đổi kể từ khi bản gửi được tạo/iu),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Từ chối bản gửi" }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: "Không thể phê duyệt dữ liệu đã thay đổi",
+      }),
+    ).toBeDisabled();
   });
 
   it("does not render a reject action for terminal detail", async () => {
@@ -113,6 +127,9 @@ describe("Phase 4 leader reject UI", () => {
     expect(screen.getByText("Lý do từ chối")).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Từ chối bản gửi" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /phê duyệt/iu }),
     ).not.toBeInTheDocument();
   });
 
@@ -163,6 +180,8 @@ function summaryFixture(state: "PENDING" | "REJECTED") {
     currentStt: 42,
     currentVersionNo: 1,
     stale: false,
+    resultStt: null,
+    resultVersionNo: null,
   };
 }
 

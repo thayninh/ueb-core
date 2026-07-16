@@ -26,9 +26,11 @@ const BUSINESS_COLUMNS = [
 export function CoreDataTable({
   rows,
   emptyMessage = "Không có dữ liệu trong phạm vi được phép.",
+  showVersionMetadata = false,
 }: Readonly<{
   rows: readonly UebCoreDataDto[];
   emptyMessage?: string;
+  showVersionMetadata?: boolean;
 }>) {
   if (rows.length === 0) {
     return (
@@ -43,6 +45,22 @@ export function CoreDataTable({
       <table className="min-w-max border-collapse text-left text-sm">
         <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
           <tr>
+            {showVersionMetadata && (
+              <>
+                <th
+                  className="border-b border-zinc-200 px-4 py-3 font-semibold dark:border-zinc-700"
+                  scope="col"
+                >
+                  Phiên bản
+                </th>
+                <th
+                  className="border-b border-zinc-200 px-4 py-3 font-semibold dark:border-zinc-700"
+                  scope="col"
+                >
+                  Trạng thái
+                </th>
+              </>
+            )}
             {BUSINESS_COLUMNS.map(([key, label], index) => (
               <th
                 className={`border-b border-zinc-200 px-4 py-3 font-semibold dark:border-zinc-700 ${
@@ -61,11 +79,31 @@ export function CoreDataTable({
           </tr>
         </thead>
         <tbody className="divide-y divide-zinc-200 bg-white dark:divide-zinc-800 dark:bg-zinc-900">
-          {rows.map((row) => (
+          {rows.map((row, rowIndex) => (
             <tr
               className="align-top hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
-              key={row.recordUid}
+              data-current-version={showVersionMetadata && rowIndex === 0}
+              data-version-no={row.versionNo}
+              key={`${row.recordUid}:${row.versionNo}:${row.stt}`}
             >
+              {showVersionMetadata && (
+                <>
+                  <td className="px-4 py-3 font-semibold text-zinc-900 dark:text-zinc-100">
+                    {row.versionNo}
+                  </td>
+                  <td className="px-4 py-3">
+                    {rowIndex === 0 ? (
+                      <span className="rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-100">
+                        Hiện hành
+                      </span>
+                    ) : (
+                      <span className="text-xs text-zinc-500">
+                        Phiên bản cũ
+                      </span>
+                    )}
+                  </td>
+                </>
+              )}
               {BUSINESS_COLUMNS.map(([key], index) => (
                 <td
                   className={`max-w-80 px-4 py-3 text-zinc-700 dark:text-zinc-200 ${
