@@ -19,6 +19,9 @@ data/input/*
 infra/audit/*
 !infra/audit/.gitkeep
 
+# Backup artifacts
+/infra/backup/
+
 # Node.js
 node_modules/
 .next/
