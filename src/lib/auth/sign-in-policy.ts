@@ -29,3 +29,9 @@ export function parseSignInCredentials(formData: FormData):
 export function genericSignInFailure(): SignInActionState {
   return { error: GENERIC_SIGN_IN_ERROR };
 }
+
+export function extractLoginIdentifier(formData: FormData): string | null {
+  const email = formData.get("email");
+  if (typeof email !== "string" || email.trim().length === 0) return null;
+  return email.trim().toLowerCase();
+}
