@@ -32,14 +32,19 @@ export async function preparePhase4LatestReadModelTestDatabase(
     await maintenance.end().catch(() => undefined);
   }
 
-  await deployMigrations(urls.migrationUrl);
-  await grantAuthRuntimePermissions(
-    parseAuthPermissionEnvironment({
-      MIGRATION_DATABASE_URL: urls.migrationUrl,
-      DATABASE_URL: urls.runtimeUrl,
-    }),
-  );
-  return urls;
+  try {
+    await deployMigrations(urls.migrationUrl);
+    await grantAuthRuntimePermissions(
+      parseAuthPermissionEnvironment({
+        MIGRATION_DATABASE_URL: urls.migrationUrl,
+        DATABASE_URL: urls.runtimeUrl,
+      }),
+    );
+    return urls;
+  } catch (error) {
+    await dropPhase4LatestReadModelTestDatabase(urls).catch(() => undefined);
+    throw error;
+  }
 }
 
 export async function dropPhase4LatestReadModelTestDatabase(
