@@ -23,6 +23,8 @@
     "test:phase3:e2e": "pnpm test:phase3:prepare && playwright test --config=playwright.phase-3.config.ts",
     "test:phase3": "pnpm test:phase3:prepare && pnpm test:phase3:integration && playwright test --config=playwright.phase-3.config.ts",
     "test:phase3:rehearsal": "tsx scripts/phase-3/run-full-rehearsal.ts --confirm-full-phase3-rehearsal",
+    "test:phase4:lecturer:prepare": "tsx scripts/phase-4/prepare-lecturer-portal-test-database.ts --confirm-reset-phase4-lecturer-portal",
+    "test:phase4:lecturer:e2e": "tsx scripts/phase-4/run-lecturer-portal-e2e.ts --confirm-reset-phase4-lecturer-portal",
     "data:inspect": "tsx scripts/phase-2/inspect-source.ts",
     "data:profile-column": "tsx scripts/phase-2/profile-column.ts",
     "data:dry-run": "tsx scripts/phase-2/dry-run-import.ts",

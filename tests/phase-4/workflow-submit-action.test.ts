@@ -131,7 +131,9 @@ describe("Phase 4 workflow submit Server Actions", () => {
     const result = await submitUnchangedRowAction(unchangedForm());
     expect(result).toMatchObject({
       success: false,
-      formError: "The submission is based on an outdated record version.",
+      errorCode: "WORKFLOW_STALE_BASE",
+      formError:
+        "Dữ liệu đã thay đổi. Vui lòng tải lại và kiểm tra phiên bản mới nhất.",
       submission: null,
     });
   });
@@ -139,7 +141,9 @@ describe("Phase 4 workflow submit Server Actions", () => {
   it("10. maps an unknown error to a generic message", async () => {
     mocks.submitNewRow.mockRejectedValue(new Error("internal detail"));
     const result = await submitNewRowAction(createForm());
-    expect(result.formError).toBe("The submission could not be completed.");
+    expect(result.formError).toBe(
+      "Không thể hoàn tất bản gửi. Vui lòng thử lại.",
+    );
   });
 
   it("11. never exposes Prisma, SQL, or constraint details", async () => {
@@ -157,13 +161,14 @@ describe("Phase 4 workflow submit Server Actions", () => {
     expect(mocks.requireLecturerIdentity).toHaveBeenCalledTimes(3);
   });
 
-  it("13. revalidates all three workflow views only after success", async () => {
+  it("13. leaves dynamic workflow pages to refresh on navigation", async () => {
     await submitUnchangedRowAction(unchangedForm());
-    expect(mocks.revalidatePath.mock.calls).toEqual([
-      ["/lecturer/profile"],
-      ["/lecturer/submissions"],
-      ["/dashboard"],
-    ]);
+    expect(mocks.revalidatePath).not.toHaveBeenCalled();
+
+    vi.clearAllMocks();
+    mocks.submitUpdatedRow.mockResolvedValue(dto("UPDATE_EXISTING"));
+    await submitUpdatedRowAction(updateForm());
+    expect(mocks.revalidatePath).not.toHaveBeenCalled();
 
     vi.clearAllMocks();
     mocks.requireLecturerIdentity.mockResolvedValue({});

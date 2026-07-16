@@ -1,10 +1,9 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { requireLecturerIdentity } from "@/lib/auth/authorization";
-import { isWorkflowError } from "@/lib/workflow/errors";
+import { isWorkflowError, type WorkflowErrorCode } from "@/lib/workflow/errors";
 import {
   confirmUnchangedInputSchema,
   createNewInputSchema,
@@ -21,8 +20,28 @@ export interface WorkflowSubmitActionResult {
   readonly success: boolean;
   readonly fieldErrors: Readonly<Record<string, readonly string[]>>;
   readonly formError: string | null;
+  readonly errorCode: WorkflowErrorCode | "VALIDATION_ERROR" | null;
   readonly submission: SubmittedRowDto | null;
 }
+
+const WORKFLOW_ERROR_MESSAGES: Readonly<Record<WorkflowErrorCode, string>> = {
+  WORKFLOW_ALREADY_PENDING: "Dòng này đã có một bản gửi đang chờ xử lý.",
+  WORKFLOW_STALE_BASE:
+    "Dữ liệu đã thay đổi. Vui lòng tải lại và kiểm tra phiên bản mới nhất.",
+  WORKFLOW_UNIT_UNRESOLVED:
+    "Không thể xác định duy nhất đơn vị phê duyệt. Vui lòng liên hệ quản trị viên.",
+  WORKFLOW_PAYLOAD_MISMATCH: "Yêu cầu gửi lại không khớp với bản gửi trước.",
+  WORKFLOW_NOT_OWNER:
+    "Không tìm thấy dữ liệu hoặc bạn không có quyền truy cập.",
+  WORKFLOW_RECORD_NOT_FOUND:
+    "Không tìm thấy dữ liệu hoặc bạn không có quyền truy cập.",
+  WORKFLOW_SUBMISSION_NOT_FOUND:
+    "Không tìm thấy bản gửi hoặc bạn không có quyền truy cập.",
+  WORKFLOW_INVALID_STATE: "Trạng thái bản gửi không hợp lệ.",
+  WORKFLOW_SCOPE_DENIED: "Bạn không có quyền thực hiện thao tác này.",
+  WORKFLOW_ALREADY_TERMINAL: "Bản gửi này đã được xử lý.",
+  WORKFLOW_INVALID_PAYLOAD: "Nội dung bản gửi không hợp lệ.",
+};
 
 const parentSubmissionIdSchema = z.preprocess(
   (value) => (value === "" || value === undefined ? null : value),
@@ -70,22 +89,43 @@ const createFormSchema = z
   .strict()
   .pipe(createNewInputSchema);
 
-export function submitUnchangedRowAction(
+export async function submitUnchangedRowAction(
   formData: FormData,
 ): Promise<WorkflowSubmitActionResult> {
   return runAction(formData, unchangedFormSchema, submitUnchangedRow);
 }
 
-export function submitUpdatedRowAction(
+export async function submitUpdatedRowAction(
   formData: FormData,
 ): Promise<WorkflowSubmitActionResult> {
   return runAction(formData, updateFormSchema, submitUpdatedRow);
 }
 
-export function submitNewRowAction(
+export async function submitNewRowAction(
   formData: FormData,
 ): Promise<WorkflowSubmitActionResult> {
   return runAction(formData, createFormSchema, submitNewRow);
+}
+
+export async function submitUnchangedRowFormAction(
+  _previousState: WorkflowSubmitActionResult,
+  formData: FormData,
+): Promise<WorkflowSubmitActionResult> {
+  return submitUnchangedRowAction(formData);
+}
+
+export async function submitUpdatedRowFormAction(
+  _previousState: WorkflowSubmitActionResult,
+  formData: FormData,
+): Promise<WorkflowSubmitActionResult> {
+  return submitUpdatedRowAction(formData);
+}
+
+export async function submitNewRowFormAction(
+  _previousState: WorkflowSubmitActionResult,
+  formData: FormData,
+): Promise<WorkflowSubmitActionResult> {
+  return submitNewRowAction(formData);
 }
 
 async function runAction<Input>(
@@ -106,7 +146,8 @@ async function runAction<Input>(
     return {
       success: false,
       fieldErrors,
-      formError: "The submission form is invalid.",
+      formError: "Biểu mẫu chưa hợp lệ. Vui lòng kiểm tra lại.",
+      errorCode: "VALIDATION_ERROR",
       submission: null,
     };
   }
@@ -114,11 +155,11 @@ async function runAction<Input>(
   try {
     await requireLecturerIdentity();
     const submission = await service(parsed.data);
-    revalidateWorkflowPaths();
     return {
       success: true,
       fieldErrors: {},
       formError: null,
+      errorCode: null,
       submission,
     };
   } catch (error) {
@@ -126,8 +167,9 @@ async function runAction<Input>(
       success: false,
       fieldErrors: {},
       formError: isWorkflowError(error)
-        ? error.message
-        : "The submission could not be completed.",
+        ? WORKFLOW_ERROR_MESSAGES[error.code]
+        : "Không thể hoàn tất bản gửi. Vui lòng thử lại.",
+      errorCode: isWorkflowError(error) ? error.code : null,
       submission: null,
     };
   }
@@ -147,7 +189,8 @@ function formDataToObject(
         result: {
           success: false,
           fieldErrors: { [key]: ["Duplicate form field."] },
-          formError: "The submission form is invalid.",
+          formError: "Biểu mẫu chưa hợp lệ. Vui lòng kiểm tra lại.",
+          errorCode: "VALIDATION_ERROR",
           submission: null,
         },
       };
@@ -155,10 +198,4 @@ function formDataToObject(
     data[key] = value;
   }
   return { success: true, data };
-}
-
-function revalidateWorkflowPaths(): void {
-  revalidatePath("/lecturer/profile");
-  revalidatePath("/lecturer/submissions");
-  revalidatePath("/dashboard");
 }
