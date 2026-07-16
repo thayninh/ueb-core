@@ -7,22 +7,26 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { PrismaClient } from "../../src/generated/prisma/client";
 import {
+  assertActiveAdminActor,
   buildProvisioningPlan,
   assertExternalOutputPath,
   parseProvisioningCommand,
   parseRollbackCommand,
   type ProvisioningBundle,
 } from "../../scripts/phase-5/lib/provisioning-guards";
+import { formatProvisioningReport } from "../../scripts/phase-5/provision-approved-users";
 import { toRollbackTargets } from "../../scripts/phase-5/rollback-provisioning-batch";
 
 vi.mock("server-only", () => ({}));
 
 const checksum = "a".repeat(64);
+const actorUserId = "20000000-0000-4000-8000-000000000002";
 const commonArguments = [
   "--input=/secure/approved-phase5.json",
   "--approval-batch-id=phase5-pilot-01",
   `--input-checksum=${checksum}`,
   "--expected-database=ueb_core_uat",
+  `--actor-user-id=${actorUserId}`,
 ] as const;
 const approval = {
   approval_batch_id: "phase5-pilot-01",
@@ -95,11 +99,20 @@ describe("Phase 5 controlled provisioning", () => {
         ...commonArguments,
         "--confirm-apply",
         "--confirm-rollback-dry-run-pass",
-        "--actor-user-id=20000000-0000-4000-8000-000000000002",
         "--credential-output=/secure/generated-credentials.json",
         `--restore-rehearsal-checksum=${"b".repeat(64)}`,
       ]),
     ).toMatchObject({ apply: true });
+  });
+
+  it("requires an explicit actor for dry-run", () => {
+    expect(() =>
+      parseProvisioningCommand(
+        commonArguments.filter(
+          (argument) => !argument.startsWith("--actor-user-id="),
+        ),
+      ),
+    ).toThrow();
   });
 
   it("rejects canonical acceptance and non-UAT database targets", () => {
@@ -169,6 +182,92 @@ describe("Phase 5 controlled provisioning", () => {
       unitScopeAssignmentCount: 0,
       blockers: [],
     });
+  });
+
+  it("fails lecturer source matching when RLS returns no rows without context", async () => {
+    const plan = await buildProvisioningPlan({
+      prisma: prismaMock({ coreRows: [] }),
+      bundle: lecturerBundle(),
+      approvalBatchId: approval.approval_batch_id,
+      inputChecksum: checksum,
+    });
+
+    expect(plan.blockers).toEqual([
+      expect.objectContaining({ code: "LECTURER_SOURCE_MISMATCH" }),
+    ]);
+  });
+
+  it("validates an active ADMIN and matches all five RLS-visible lecturer rows", async () => {
+    const lecturers = Array.from({ length: 5 }, (_, index) => ({
+      ...approval,
+      email: `lecturer-${index + 1}@example.com`,
+      lecturer_uid: `10000000-0000-4000-8000-00000000000${index + 1}`,
+      requested_roles: ["LECTURER" as const],
+      account_action: "CREATE" as const,
+    }));
+    const roleAssignment = {
+      findFirst: vi.fn().mockResolvedValue({ id: "active-admin-role" }),
+    };
+    await assertActiveAdminActor({
+      prisma: { roleAssignment } as unknown as Pick<
+        PrismaClient,
+        "roleAssignment"
+      >,
+      actorUserId,
+    });
+    const plan = await buildProvisioningPlan({
+      prisma: prismaMock({
+        coreRows: lecturers.map((row) => ({
+          emailTaiKhoanVnu: row.email,
+          lecturerUid: row.lecturer_uid,
+        })),
+      }),
+      bundle: { lecturers, leaders: [] },
+      approvalBatchId: approval.approval_batch_id,
+      inputChecksum: checksum,
+    });
+
+    expect(roleAssignment.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          userId: actorUserId,
+          role: "ADMIN",
+          revokedAt: null,
+        }),
+      }),
+    );
+    expect(plan).toMatchObject({ createCount: 5, blockers: [] });
+  });
+
+  it("fails closed when the actor is not an active ADMIN", async () => {
+    await expect(
+      assertActiveAdminActor({
+        prisma: {
+          roleAssignment: { findFirst: vi.fn().mockResolvedValue(null) },
+        } as unknown as Pick<PrismaClient, "roleAssignment">,
+        actorUserId,
+      }),
+    ).rejects.toMatchObject({ code: "ACTOR_NOT_ACTIVE_ADMIN" });
+  });
+
+  it("reports zero database writes for a successful dry-run plan", async () => {
+    const plan = await buildProvisioningPlan({
+      prisma: prismaMock({
+        coreRows: [
+          {
+            emailTaiKhoanVnu: "lecturer-one@example.com",
+            lecturerUid,
+          },
+        ],
+      }),
+      bundle: lecturerBundle(),
+      approvalBatchId: approval.approval_batch_id,
+      inputChecksum: checksum,
+    });
+
+    expect(formatProvisioningReport(false, plan)).toContain(
+      "DATABASE_WRITES=0",
+    );
   });
 
   it("never creates a leader account and resolves only an approved exact unit", async () => {

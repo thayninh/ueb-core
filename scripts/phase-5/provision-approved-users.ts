@@ -11,11 +11,14 @@ import {
 } from "../../src/lib/auth/admin-user-management";
 import type { Phase5ProvisioningAuditContext } from "../../src/lib/auth/audit";
 import { provisionUser } from "../../src/lib/auth/provision-user-core";
+import { withCoreDataRlsContext } from "../../src/lib/auth/rls-context";
+import { Prisma } from "../../src/generated/prisma/client";
 import { getPrismaClient } from "../../src/lib/server/prisma";
 import { closeRuntimeDatabaseConnections } from "../phase-3/lib/runtime-database";
 import { recordProvisioningBatchReconciled } from "./lib/provisioning-audit";
 import {
   assertExternalOutputPath,
+  assertActiveAdminActor,
   assertProvisioningDatabaseSafety,
   buildProvisioningPlan,
   loadProvisioningBundle,
@@ -48,12 +51,25 @@ export async function runControlledProvisioning(input: {
     );
     databaseOpened = true;
     const prisma = getPrismaClient();
-    const plan = await buildProvisioningPlan({
-      prisma,
-      bundle: loaded.bundle,
-      approvalBatchId: command.approvalBatchId,
-      inputChecksum: command.inputChecksum,
-    });
+    const plan = await withCoreDataRlsContext(
+      { userId: command.actorUserId },
+      async (transaction) => {
+        await assertActiveAdminActor({
+          prisma: transaction,
+          actorUserId: command.actorUserId,
+        });
+        return buildProvisioningPlan({
+          prisma: transaction,
+          bundle: loaded.bundle,
+          approvalBatchId: command.approvalBatchId,
+          inputChecksum: command.inputChecksum,
+        });
+      },
+      {
+        isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+        readOnly: true,
+      },
+    );
     if (plan.blockers.length > 0) {
       return {
         report: formatProvisioningReport(command.apply, plan),
@@ -64,19 +80,7 @@ export async function runControlledProvisioning(input: {
       return { report: formatProvisioningReport(false, plan), exitCode: 0 };
     }
 
-    const actorUserId = command.actorUserId!;
-    const actorRole = await prisma.roleAssignment.findFirst({
-      where: {
-        userId: actorUserId,
-        role: "ADMIN",
-        revokedAt: null,
-        user: { accessProfile: { status: "ACTIVE" } },
-      },
-      select: { id: true },
-    });
-    if (!actorRole) {
-      throw new SafeProvisioningError("INPUT_VALIDATION_FAILED");
-    }
+    const actorUserId = command.actorUserId;
     const auditContext: Phase5ProvisioningAuditContext = {
       approvalBatchId: command.approvalBatchId,
       inputChecksum: command.inputChecksum,
@@ -188,7 +192,7 @@ async function prepareCredentials(
   return credentialByRow;
 }
 
-function formatProvisioningReport(
+export function formatProvisioningReport(
   apply: boolean,
   plan: ProvisioningPlan,
 ): string {

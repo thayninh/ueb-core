@@ -34,6 +34,7 @@ export type ProvisioningErrorCode =
   | "APPROVAL_BATCH_MISMATCH"
   | "BATCH_LIMIT_EXCEEDED"
   | "DATABASE_GUARD_FAILED"
+  | "ACTOR_NOT_ACTIVE_ADMIN"
   | "BATCH_CHECKSUM_CONFLICT"
   | "BATCH_ALREADY_ROLLED_BACK"
   | "ACCOUNT_ACTION_CONFLICT"
@@ -69,7 +70,7 @@ export interface ProvisioningCommand {
   readonly inputChecksum: string;
   readonly expectedDatabase: string;
   readonly apply: boolean;
-  readonly actorUserId?: string;
+  readonly actorUserId: string;
   readonly credentialOutputPath?: string;
   readonly restoreRehearsalChecksum?: string;
 }
@@ -95,6 +96,15 @@ export interface ProvisioningDatabaseContext {
   readonly databaseName: string;
   readonly runtimeUser: string;
 }
+
+type ProvisioningReadClient = Pick<
+  PrismaClient,
+  | "auth_user"
+  | "organizationUnit"
+  | "uebCoreData"
+  | "authAuditEvent"
+  | "roleAssignment"
+>;
 
 export interface ProvisioningBlocker {
   readonly source: "BATCH" | "LECTURERS" | "LEADERS";
@@ -158,19 +168,19 @@ export function parseProvisioningCommand(
     "--restore-rehearsal-checksum=",
   ]);
 
+  if (actors.length !== 1 || !z.uuid().safeParse(actors[0]).success) {
+    throw new SafeProvisioningError("INPUT_VALIDATION_FAILED");
+  }
   if (apply) {
     if (
-      actors.length !== 1 ||
       credentialOutputs.length !== 1 ||
       restoreChecksums.length !== 1 ||
       !args.includes("--confirm-rollback-dry-run-pass") ||
-      !z.uuid().safeParse(actors[0]).success ||
       !SHA256.test(restoreChecksums[0]!)
     ) {
       throw new SafeProvisioningError("INPUT_VALIDATION_FAILED");
     }
   } else if (
-    actors.length > 0 ||
     credentialOutputs.length > 0 ||
     restoreChecksums.length > 0 ||
     args.includes("--confirm-rollback-dry-run-pass")
@@ -181,7 +191,7 @@ export function parseProvisioningCommand(
   return {
     ...base,
     apply,
-    actorUserId: actors[0],
+    actorUserId: actors[0]!,
     credentialOutputPath: credentialOutputs[0],
     restoreRehearsalChecksum: restoreChecksums[0],
   };
@@ -397,7 +407,7 @@ export async function assertProvisioningDatabaseSafety(
 }
 
 export async function buildProvisioningPlan(input: {
-  readonly prisma: PrismaClient;
+  readonly prisma: ProvisioningReadClient;
   readonly bundle: ProvisioningBundle;
   readonly approvalBatchId: string;
   readonly inputChecksum: string;
@@ -611,6 +621,24 @@ export async function buildProvisioningPlan(input: {
 
   const uniqueBlockers = deduplicateBlockers(blockers);
   return summarizePlan(entries, uniqueBlockers);
+}
+
+export async function assertActiveAdminActor(input: {
+  readonly prisma: Pick<PrismaClient, "roleAssignment">;
+  readonly actorUserId: string;
+}): Promise<void> {
+  const actorRole = await input.prisma.roleAssignment.findFirst({
+    where: {
+      userId: input.actorUserId,
+      role: "ADMIN",
+      revokedAt: null,
+      user: { accessProfile: { status: "ACTIVE" } },
+    },
+    select: { id: true },
+  });
+  if (!actorRole) {
+    throw new SafeProvisioningError("ACTOR_NOT_ACTIVE_ADMIN");
+  }
 }
 
 export async function readBatchEvidence(input: {
