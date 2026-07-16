@@ -6,7 +6,10 @@ ENV PNPM_HOME="/pnpm"
 ENV PATH="${PNPM_HOME}:${PATH}"
 ENV NEXT_TELEMETRY_DISABLED=1
 
-RUN corepack enable
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssl \
+  && rm -rf /var/lib/apt/lists/* \
+  && corepack enable
 
 WORKDIR /app
 
@@ -26,7 +29,7 @@ COPY . .
 RUN pnpm build
 
 
-FROM node:24-bookworm-slim AS runner
+FROM base AS runner
 
 WORKDIR /app
 
