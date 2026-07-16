@@ -140,11 +140,13 @@ pnpm phase5:rollback-provisioning -- \
   --input=<ABSOLUTE_APPROVED_BUNDLE_OUTSIDE_REPOSITORY> \
   --approval-batch-id=<BATCH_ID> \
   --input-checksum=<BUNDLE_SHA256> \
-  --expected-database=ueb_core_uat
+  --expected-database=ueb_core_uat \
+  --actor-user-id=<ACTIVE_ADMIN_INTERNAL_USER_ID>
 ```
 
 Không truyền `--confirm-rollback`. `ROLLBACK_STATUS=PASS` là điều kiện bắt buộc
-trước apply; dry-run không ghi database. Operational rollback sau apply
+trước apply. Rollback dry-run xác minh active `ADMIN`, đặt transaction-local RLS
+context và ép transaction read-only nên không ghi database. Operational rollback sau apply
 không tin plan này để chọn target; nó chỉ tin append-only audit evidence
 có exact batch ID, checksum và operation `APPLY`.
 
@@ -182,10 +184,12 @@ pnpm phase5:reconcile-provisioning -- \
   --input=<ABSOLUTE_APPROVED_BUNDLE_OUTSIDE_REPOSITORY> \
   --approval-batch-id=<BATCH_ID> \
   --input-checksum=<BUNDLE_SHA256> \
-  --expected-database=ueb_core_uat
+  --expected-database=ueb_core_uat \
+  --actor-user-id=<ACTIVE_ADMIN_INTERNAL_USER_ID>
 ```
 
-Reconciliation là read-only. Nó yêu cầu desired state khớp database và mỗi
+Reconciliation xác minh active `ADMIN` và chạy read-only với transaction-local
+RLS context. Nó yêu cầu desired state khớp database và mỗi
 target có audit evidence của exact batch/checksum. Drift hoặc missing audit làm
 exit code khác `0`.
 

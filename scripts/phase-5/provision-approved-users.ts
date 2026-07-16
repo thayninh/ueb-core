@@ -11,20 +11,18 @@ import {
 } from "../../src/lib/auth/admin-user-management";
 import type { Phase5ProvisioningAuditContext } from "../../src/lib/auth/audit";
 import { provisionUser } from "../../src/lib/auth/provision-user-core";
-import { withCoreDataRlsContext } from "../../src/lib/auth/rls-context";
-import { Prisma } from "../../src/generated/prisma/client";
 import { getPrismaClient } from "../../src/lib/server/prisma";
 import { closeRuntimeDatabaseConnections } from "../phase-3/lib/runtime-database";
 import { recordProvisioningBatchReconciled } from "./lib/provisioning-audit";
 import {
   assertExternalOutputPath,
-  assertActiveAdminActor,
   assertProvisioningDatabaseSafety,
   buildProvisioningPlan,
   loadProvisioningBundle,
   parseProvisioningCommand,
   SafeProvisioningError,
   type ProvisioningPlan,
+  withAuthorizedProvisioningReadContext,
 } from "./lib/provisioning-guards";
 
 interface GeneratedCredential {
@@ -51,25 +49,16 @@ export async function runControlledProvisioning(input: {
     );
     databaseOpened = true;
     const prisma = getPrismaClient();
-    const plan = await withCoreDataRlsContext(
-      { userId: command.actorUserId },
-      async (transaction) => {
-        await assertActiveAdminActor({
-          prisma: transaction,
-          actorUserId: command.actorUserId,
-        });
-        return buildProvisioningPlan({
+    const plan = await withAuthorizedProvisioningReadContext({
+      actorUserId: command.actorUserId,
+      query: (transaction) =>
+        buildProvisioningPlan({
           prisma: transaction,
           bundle: loaded.bundle,
           approvalBatchId: command.approvalBatchId,
           inputChecksum: command.inputChecksum,
-        });
-      },
-      {
-        isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
-        readOnly: true,
-      },
-    );
+        }),
+    });
     if (plan.blockers.length > 0) {
       return {
         report: formatProvisioningReport(command.apply, plan),

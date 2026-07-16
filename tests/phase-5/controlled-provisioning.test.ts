@@ -11,6 +11,7 @@ import {
   buildProvisioningPlan,
   assertExternalOutputPath,
   parseProvisioningCommand,
+  parseReconciliationCommand,
   parseRollbackCommand,
   type ProvisioningBundle,
 } from "../../scripts/phase-5/lib/provisioning-guards";
@@ -130,6 +131,7 @@ describe("Phase 5 controlled provisioning", () => {
         "--approval-batch-id=phase5-pilot-01",
         `--input-checksum=${checksum}`,
         "--expected-database=postgres",
+        `--actor-user-id=${actorUserId}`,
       ]),
     ).toThrow();
   });
@@ -140,6 +142,7 @@ describe("Phase 5 controlled provisioning", () => {
         "--approval-batch-id=phase5-pilot-01",
         `--input-checksum=${checksum}`,
         "--expected-database=ueb_core_uat",
+        `--actor-user-id=${actorUserId}`,
       ]),
     ).toThrow();
     expect(
@@ -148,8 +151,24 @@ describe("Phase 5 controlled provisioning", () => {
         "--approval-batch-id=phase5-pilot-01",
         `--input-checksum=${checksum}`,
         "--expected-database=ueb_core_uat",
+        `--actor-user-id=${actorUserId}`,
       ]),
     ).toMatchObject({ apply: false });
+  });
+
+  it("requires an explicit actor for rollback dry-run and reconciliation", () => {
+    const withoutActor = commonArguments.filter(
+      (argument) => !argument.startsWith("--actor-user-id="),
+    );
+    expect(() => parseRollbackCommand(withoutActor)).toThrow();
+    expect(() => parseReconciliationCommand(withoutActor)).toThrow();
+    expect(parseRollbackCommand(commonArguments)).toMatchObject({
+      actorUserId,
+      apply: false,
+    });
+    expect(parseReconciliationCommand(commonArguments)).toMatchObject({
+      actorUserId,
+    });
   });
 
   it("refuses a credential output path inside the repository", async () => {
@@ -404,6 +423,7 @@ describe("Phase 5 controlled provisioning", () => {
       expect(source).not.toMatch(
         /console\.(?:log|error)\([^)]*(?:email|password|token|name)/iu,
       );
+      expect(source).toContain("withAuthorizedProvisioningReadContext");
     }
   });
 });

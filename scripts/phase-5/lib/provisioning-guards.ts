@@ -2,10 +2,11 @@ import { createHash } from "node:crypto";
 import { lstat, readFile, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, resolve, sep } from "node:path";
 
-import type {
+import {
   Prisma,
-  PrismaClient,
+  type PrismaClient,
 } from "../../../src/generated/prisma/client";
+import { withCoreDataRlsContext } from "../../../src/lib/auth/rls-context";
 import { Client } from "pg";
 import { z } from "zod";
 
@@ -80,6 +81,7 @@ export interface ReconciliationCommand {
   readonly approvalBatchId: string;
   readonly inputChecksum: string;
   readonly expectedDatabase: string;
+  readonly actorUserId: string;
 }
 
 export interface RollbackCommand {
@@ -88,7 +90,7 @@ export interface RollbackCommand {
   readonly inputChecksum: string;
   readonly expectedDatabase: string;
   readonly apply: boolean;
-  readonly actorUserId?: string;
+  readonly actorUserId: string;
 }
 
 export interface ProvisioningDatabaseContext {
@@ -206,8 +208,13 @@ export function parseReconciliationCommand(
     "--approval-batch-id=",
     "--input-checksum=",
     "--expected-database=",
+    "--actor-user-id=",
   ]);
-  return parseCommonInputArguments(args);
+  const actors = valuesFor(args, "--actor-user-id=");
+  if (actors.length !== 1 || !z.uuid().safeParse(actors[0]).success) {
+    throw new SafeProvisioningError("INPUT_VALIDATION_FAILED");
+  }
+  return { ...parseCommonInputArguments(args), actorUserId: actors[0]! };
 }
 
 export function parseRollbackCommand(
@@ -240,11 +247,7 @@ export function parseRollbackCommand(
     throw new SafeProvisioningError("INPUT_VALIDATION_FAILED");
   }
   assertUatDatabaseName(databases[0]!);
-  if (
-    (apply &&
-      (actors.length !== 1 || !z.uuid().safeParse(actors[0]).success)) ||
-    (!apply && actors.length > 0)
-  ) {
+  if (actors.length !== 1 || !z.uuid().safeParse(actors[0]).success) {
     throw new SafeProvisioningError("INPUT_VALIDATION_FAILED");
   }
   return {
@@ -253,7 +256,7 @@ export function parseRollbackCommand(
     inputChecksum: checksums[0]!,
     expectedDatabase: databases[0]!,
     apply,
-    actorUserId: actors[0],
+    actorUserId: actors[0]!,
   };
 }
 
@@ -623,6 +626,26 @@ export async function buildProvisioningPlan(input: {
   return summarizePlan(entries, uniqueBlockers);
 }
 
+export async function withAuthorizedProvisioningReadContext<T>(input: {
+  readonly actorUserId: string;
+  readonly query: (prisma: ProvisioningReadClient) => Promise<T>;
+}): Promise<T> {
+  return withCoreDataRlsContext(
+    { userId: input.actorUserId },
+    async (transaction) => {
+      await assertActiveAdminActor({
+        prisma: transaction,
+        actorUserId: input.actorUserId,
+      });
+      return input.query(transaction);
+    },
+    {
+      isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+      readOnly: true,
+    },
+  );
+}
+
 export async function assertActiveAdminActor(input: {
   readonly prisma: Pick<PrismaClient, "roleAssignment">;
   readonly actorUserId: string;
@@ -642,7 +665,7 @@ export async function assertActiveAdminActor(input: {
 }
 
 export async function readBatchEvidence(input: {
-  readonly prisma: PrismaClient;
+  readonly prisma: Pick<PrismaClient, "authAuditEvent">;
   readonly approvalBatchId: string;
   readonly inputChecksum: string;
   readonly operation?: "APPLY" | "ROLLBACK";
@@ -715,7 +738,7 @@ export async function assertExternalOutputPath(
 
 function parseCommonInputArguments(
   args: readonly string[],
-): ReconciliationCommand {
+): Omit<ReconciliationCommand, "actorUserId"> {
   const inputs = valuesFor(args, "--input=");
   const approvalBatchIds = valuesFor(args, "--approval-batch-id=");
   const checksums = valuesFor(args, "--input-checksum=");

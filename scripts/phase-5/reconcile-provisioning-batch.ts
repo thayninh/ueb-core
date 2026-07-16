@@ -2,7 +2,6 @@ import "dotenv/config";
 
 import { pathToFileURL } from "node:url";
 
-import { getPrismaClient } from "../../src/lib/server/prisma";
 import { closeRuntimeDatabaseConnections } from "../phase-3/lib/runtime-database";
 import {
   assertProvisioningDatabaseSafety,
@@ -10,6 +9,7 @@ import {
   loadProvisioningBundle,
   parseReconciliationCommand,
   readBatchEvidence,
+  withAuthorizedProvisioningReadContext,
 } from "./lib/provisioning-guards";
 
 async function reconcileProvisioningBatch(
@@ -29,21 +29,23 @@ async function reconcileProvisioningBatch(
       command.expectedDatabase,
     );
     databaseOpened = true;
-    const prisma = getPrismaClient();
-    const [plan, evidence] = await Promise.all([
-      buildProvisioningPlan({
-        prisma,
-        bundle: loaded.bundle,
-        approvalBatchId: command.approvalBatchId,
-        inputChecksum: command.inputChecksum,
+    const { plan, evidence } = await withAuthorizedProvisioningReadContext({
+      actorUserId: command.actorUserId,
+      query: async (transaction) => ({
+        plan: await buildProvisioningPlan({
+          prisma: transaction,
+          bundle: loaded.bundle,
+          approvalBatchId: command.approvalBatchId,
+          inputChecksum: command.inputChecksum,
+        }),
+        evidence: await readBatchEvidence({
+          prisma: transaction,
+          approvalBatchId: command.approvalBatchId,
+          inputChecksum: command.inputChecksum,
+          operation: "APPLY",
+        }),
       }),
-      readBatchEvidence({
-        prisma,
-        approvalBatchId: command.approvalBatchId,
-        inputChecksum: command.inputChecksum,
-        operation: "APPLY",
-      }),
-    ]);
+    });
     const evidenceTargets = new Set(
       evidence.map(({ targetUserId }) => targetUserId),
     );

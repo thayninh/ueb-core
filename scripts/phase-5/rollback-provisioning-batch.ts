@@ -17,6 +17,7 @@ import {
   loadProvisioningBundle,
   parseRollbackCommand,
   readBatchEvidence,
+  withAuthorizedProvisioningReadContext,
 } from "./lib/provisioning-guards";
 
 interface TargetRollback {
@@ -46,11 +47,15 @@ async function runProvisioningRollback(
         approvalBatchId: command.approvalBatchId,
         expectedChecksum: command.inputChecksum,
       });
-      const plan = await buildProvisioningPlan({
-        prisma,
-        bundle: loaded.bundle,
-        approvalBatchId: command.approvalBatchId,
-        inputChecksum: command.inputChecksum,
+      const plan = await withAuthorizedProvisioningReadContext({
+        actorUserId: command.actorUserId,
+        query: (transaction) =>
+          buildProvisioningPlan({
+            prisma: transaction,
+            bundle: loaded.bundle,
+            approvalBatchId: command.approvalBatchId,
+            inputChecksum: command.inputChecksum,
+          }),
       });
       if (plan.blockers.length > 0) throw new Error("Blocked rollback plan.");
       return {
