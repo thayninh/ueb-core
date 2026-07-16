@@ -52,6 +52,7 @@
     "phase5:bootstrap-provisioning-role": "tsx scripts/phase-5/bootstrap-provisioning-role.ts",
     "phase5:grant-provisioning-permissions": "tsx scripts/phase-5/grant-provisioning-permissions.ts",
     "phase5:verify-provisioning-role": "tsx scripts/phase-5/verify-provisioning-role.ts",
+    "phase5:reconcile-pilot-uat": "tsx scripts/phase-5/reconcile-pilot-uat.ts",
     "data:inspect": "tsx scripts/phase-2/inspect-source.ts",
     "data:profile-column": "tsx scripts/phase-2/profile-column.ts",
     "data:dry-run": "tsx scripts/phase-2/dry-run-import.ts",

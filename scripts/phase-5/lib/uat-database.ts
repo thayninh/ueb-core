@@ -109,7 +109,7 @@ export async function verifyUatBaseline(
 ): Promise<UatBaselineReport> {
   await client.query("BEGIN TRANSACTION READ ONLY");
   try {
-    const report = await readBaselineReport(client);
+    const report = await readUatBaselineReport(client);
     assertExpectedBaseline(report);
     await assertUatRuntimeContract(client, runtimeRole);
     await client.query("COMMIT");
@@ -230,7 +230,7 @@ export function resolveSingleActiveAdmin(
   return candidate.user_id;
 }
 
-async function readBaselineReport(
+export async function readUatBaselineReport(
   client: ClientBase,
 ): Promise<UatBaselineReport> {
   const counts = (
@@ -333,7 +333,7 @@ async function readSequenceState(
   return state;
 }
 
-async function assertUatRuntimeContract(
+export async function assertUatRuntimeContract(
   client: ClientBase,
   runtimeRole: string,
 ): Promise<void> {
