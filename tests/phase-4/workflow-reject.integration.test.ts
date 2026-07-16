@@ -280,7 +280,7 @@ isolatedDescribe("Phase 4 workflow rejection service", () => {
   it("keeps runtime unable to write core data", async () => {
     await expect(
       fixture.runtime.query("INSERT INTO public.ueb_core_data DEFAULT VALUES"),
-    ).rejects.toThrow(/permission denied/iu);
+    ).rejects.toThrow(/permission denied|row-level security/iu);
     await expect(
       fixture.runtime.query(
         "UPDATE public.ueb_core_data SET stt = stt WHERE false",

@@ -128,10 +128,24 @@ describe.skipIf(!integrationEnabled)(
       expect(await latest.getLatestCoreRowsForLecturer()).toHaveLength(2);
     });
 
-    it("4. breaks a corrupt same-version tie with the greater STT", async () => {
-      auth.principal = adminPrincipal();
-      const row = await latest.getLatestCoreRowByRecordUid(ids.recordA3);
-      expect(row.stt).toBe(1006);
+    it("4. rejects a corrupt duplicate record version", async () => {
+      const owner = new Client({ connectionString: urls.migrationUrl });
+      await owner.connect();
+      try {
+        await expect(
+          seedCoreRow(
+            owner,
+            1006,
+            ids.lecturerC,
+            ids.recordA3,
+            1,
+            "Tie Unit",
+            "A3 duplicate version",
+          ),
+        ).rejects.toThrow(/duplicate key value violates unique constraint/u);
+      } finally {
+        await owner.end();
+      }
     });
 
     it("5. returns A1 history in version and STT descending order", async () => {
@@ -225,7 +239,7 @@ describe.skipIf(!integrationEnabled)(
       auth.principal = adminPrincipal();
       const page = await latest.getLatestCoreRowsForAdmin();
       expect(page.totalRows).toBe(4);
-      expect(await physicalCoreRowCount()).toBe(6);
+      expect(await physicalCoreRowCount()).toBe(5);
     });
 
     it("18. returns zero core rows without transaction-local RLS context", async () => {
@@ -389,19 +403,13 @@ async function seedFixtures(migrationUrl: string): Promise<void> {
           id, source_filename, source_sha256, source_sheet,
           source_contract_version, source_row_count, source_min_stt,
           source_max_stt, canonical_dataset_sha256, report, imported_at
-        ) VALUES ($1::uuid, 'phase4-fixture.xlsx', $2, 'fixture', 'phase4-test', 6,
-          1001, 1006, $3, '{}'::jsonb, now())
+        ) VALUES ($1::uuid, 'phase4-fixture.xlsx', $2, 'fixture', 'phase4-test', 5,
+          1001, 1005, $3, '{}'::jsonb, now())
       `,
       [ids.importRun, "a".repeat(64), "b".repeat(64)],
     );
     await seedIdentityFixtures(client);
 
-    // The production contract rejects this corruption. The isolated test drops
-    // only this index so the read model's mandatory deterministic tie-break can
-    // be exercised without changing any repository migration.
-    await client.query(
-      'DROP INDEX "ueb_core_data_lecturer_uid_version_no_record_uid_key"',
-    );
     await seedCoreRow(
       client,
       1001,
@@ -446,15 +454,6 @@ async function seedFixtures(migrationUrl: string): Promise<void> {
       1,
       "Tie Unit",
       "A3 lower STT",
-    );
-    await seedCoreRow(
-      client,
-      1006,
-      ids.lecturerC,
-      ids.recordA3,
-      1,
-      "Tie Unit",
-      "A3 greater STT",
     );
     await client.query("COMMIT");
   } catch (error) {
