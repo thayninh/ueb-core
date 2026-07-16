@@ -37,3 +37,9 @@ export const UEB_CORE_DATA_DTO_SELECT = {
 export type UebCoreDataDto = Prisma.UebCoreDataGetPayload<{
   select: typeof UEB_CORE_DATA_DTO_SELECT;
 }>;
+
+/** A current logical row selected by record_uid, version_no and stt. */
+export type LatestCoreRowDto = UebCoreDataDto;
+
+/** One immutable version in a record_uid history. */
+export type CoreRowVersionDto = UebCoreDataDto;
