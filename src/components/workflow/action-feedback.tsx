@@ -13,18 +13,27 @@ export const EMPTY_WORKFLOW_ACTION_RESULT: WorkflowSubmitActionResult = {
   submission: null,
 };
 
-export function useStableSubmissionId(initialValue?: string): string {
-  const [submissionId, setSubmissionId] = useState(initialValue ?? "");
+export function useStableSubmissionId(
+  initialValue?: string,
+  excludedValue?: string,
+): string {
+  const [submissionId, setSubmissionId] = useState(
+    initialValue && initialValue !== excludedValue ? initialValue : "",
+  );
 
   useEffect(() => {
     if (submissionId) return;
 
     const timeoutId = globalThis.setTimeout(() => {
-      setSubmissionId(globalThis.crypto.randomUUID());
+      let candidate = globalThis.crypto.randomUUID();
+      while (candidate === excludedValue) {
+        candidate = globalThis.crypto.randomUUID();
+      }
+      setSubmissionId(candidate);
     }, 0);
 
     return () => globalThis.clearTimeout(timeoutId);
-  }, [submissionId]);
+  }, [excludedValue, submissionId]);
 
   return submissionId;
 }

@@ -8,11 +8,18 @@ import { requireLecturerIdentity } from "@/lib/auth/authorization";
 
 import { withWorkflowTransaction, type WorkflowTransaction } from "./context";
 import {
+  CORE_DISPLAY_FIELD_NAMES,
+  SUBMISSION_EDITABLE_FIELD_NAMES,
+} from "./field-policy";
+import {
+  findLatestCoreRow,
   resolveStoredSubmissionEvents,
   type StoredSubmissionEvent,
 } from "./submission-query";
 
 import type {
+  CoreBusinessRow,
+  EditableBusinessFields,
   ResolvedSubmission,
   RowSubmissionPayload,
   SubmissionState,
@@ -74,6 +81,41 @@ export interface PendingSubmissionByRecordDto {
   readonly recordUid: string;
   readonly submittedAt: Date;
 }
+
+interface LecturerResubmissionDraftBase {
+  readonly parentSubmissionId: string;
+  readonly recordUid: string;
+  readonly rejectionReason: string;
+  readonly rejectedAt: Date;
+  readonly previousBaseStt: number | null;
+  readonly previousBaseVersionNo: number | null;
+}
+
+export type LecturerResubmissionDraftDto =
+  | (LecturerResubmissionDraftBase & {
+      readonly submissionType: "CONFIRM_UNCHANGED";
+      readonly currentRow: CoreBusinessRow;
+      readonly latestBaseStt: number;
+      readonly latestBaseVersionNo: number;
+      readonly baseChanged: boolean;
+      readonly editableFields: null;
+    })
+  | (LecturerResubmissionDraftBase & {
+      readonly submissionType: "UPDATE_EXISTING";
+      readonly currentRow: CoreBusinessRow;
+      readonly latestBaseStt: number;
+      readonly latestBaseVersionNo: number;
+      readonly baseChanged: boolean;
+      readonly editableFields: EditableBusinessFields;
+    })
+  | (LecturerResubmissionDraftBase & {
+      readonly submissionType: "CREATE_NEW";
+      readonly currentRow: null;
+      readonly latestBaseStt: null;
+      readonly latestBaseVersionNo: null;
+      readonly baseChanged: false;
+      readonly editableFields: EditableBusinessFields;
+    });
 
 export async function getLecturerSubmissions(
   input: LecturerSubmissionListQuery = {},
@@ -181,6 +223,87 @@ export async function getLecturerSubmissionDetail(
 
   if (!detail) notFound();
   return detail;
+}
+
+export async function getLecturerResubmissionDraft(
+  parentSubmissionId: string,
+): Promise<LecturerResubmissionDraftDto> {
+  const validatedId = submissionIdSchema.parse(parentSubmissionId);
+  const principal = await requireLecturerIdentity();
+
+  const draft = await withWorkflowTransaction(
+    principal,
+    async (transaction) => {
+      const resolved = await loadResolvedSubmissions(transaction, [
+        validatedId,
+      ]);
+      const parent = resolved[0];
+      if (
+        !parent ||
+        parent.lecturerUid !== principal.lecturerUid ||
+        parent.state !== "REJECTED" ||
+        parent.terminalEvent?.eventType !== "REJECTED"
+      ) {
+        return null;
+      }
+
+      const common = {
+        parentSubmissionId: parent.submissionId,
+        recordUid: parent.recordUid,
+        rejectionReason: parent.terminalEvent.reason,
+        rejectedAt: parent.terminalEvent.createdAt,
+        previousBaseStt: parent.submittedEvent.baseStt,
+        previousBaseVersionNo: parent.submittedEvent.baseVersionNo,
+      };
+
+      if (parent.submissionType === "CREATE_NEW") {
+        if (await findLatestCoreRow(transaction, parent.recordUid)) return null;
+        return {
+          ...common,
+          submissionType: "CREATE_NEW" as const,
+          currentRow: null,
+          latestBaseStt: null,
+          latestBaseVersionNo: null,
+          baseChanged: false as const,
+          editableFields: pickEditableFields(parent.submittedEvent.payload),
+        };
+      }
+
+      const latest = await findLatestCoreRow(transaction, parent.recordUid);
+      if (!latest || latest.lecturerUid !== principal.lecturerUid) return null;
+      const currentRow = Object.fromEntries(
+        CORE_DISPLAY_FIELD_NAMES.map((field) => [field, latest[field]]),
+      ) as unknown as CoreBusinessRow;
+      const baseChanged =
+        parent.submittedEvent.baseStt !== latest.stt ||
+        parent.submittedEvent.baseVersionNo !== latest.versionNo;
+
+      if (parent.submissionType === "CONFIRM_UNCHANGED") {
+        return {
+          ...common,
+          submissionType: "CONFIRM_UNCHANGED" as const,
+          currentRow,
+          latestBaseStt: latest.stt,
+          latestBaseVersionNo: latest.versionNo,
+          baseChanged,
+          editableFields: null,
+        };
+      }
+
+      return {
+        ...common,
+        submissionType: "UPDATE_EXISTING" as const,
+        currentRow,
+        latestBaseStt: latest.stt,
+        latestBaseVersionNo: latest.versionNo,
+        baseChanged,
+        editableFields: pickEditableFields(parent.submittedEvent.payload),
+      };
+    },
+  );
+
+  if (!draft) notFound();
+  return draft;
 }
 
 export async function getPendingSubmissionsForLecturerRecords(
@@ -307,6 +430,14 @@ function toSummary(
     baseStt: submission.submittedEvent.baseStt,
     baseVersionNo: submission.submittedEvent.baseVersionNo,
   };
+}
+
+function pickEditableFields(
+  payload: RowSubmissionPayload,
+): EditableBusinessFields {
+  return Object.fromEntries(
+    SUBMISSION_EDITABLE_FIELD_NAMES.map((field) => [field, payload[field]]),
+  ) as unknown as EditableBusinessFields;
 }
 
 function requireResolved(

@@ -35,10 +35,14 @@ type EditableFormMode =
       readonly baseStt: number;
       readonly baseVersionNo: number;
       readonly currentRow: CoreBusinessRow;
+      readonly initialEditableFields?: EditableBusinessFields;
+      readonly parentSubmissionId?: string;
     }
   | {
       readonly kind: "CREATE_NEW";
       readonly submissionId?: string;
+      readonly initialEditableFields?: EditableBusinessFields;
+      readonly parentSubmissionId?: string;
     };
 
 const emptyEditableFields = Object.fromEntries(
@@ -49,7 +53,10 @@ const emptyEditableFields = Object.fromEntries(
 ) as unknown as EditableBusinessFields;
 
 export function EditableRowForm(props: Readonly<EditableFormMode>) {
-  const submissionId = useStableSubmissionId(props.submissionId);
+  const submissionId = useStableSubmissionId(
+    props.submissionId,
+    props.parentSubmissionId,
+  );
   const [editableFields, setEditableFields] = useState<EditableBusinessFields>(
     () => pickInitialEditableFields(props),
   );
@@ -70,6 +77,13 @@ export function EditableRowForm(props: Readonly<EditableFormMode>) {
         type="hidden"
         value={JSON.stringify(editableFields)}
       />
+      {props.parentSubmissionId && (
+        <input
+          name="parentSubmissionId"
+          type="hidden"
+          value={props.parentSubmissionId}
+        />
+      )}
       {props.kind === "UPDATE_EXISTING" && (
         <>
           <input name="recordUid" type="hidden" value={props.recordUid} />
@@ -171,7 +185,8 @@ function pickInitialEditableFields(
   props: Readonly<EditableFormMode>,
 ): EditableBusinessFields {
   const source =
-    props.kind === "UPDATE_EXISTING" ? props.currentRow : emptyEditableFields;
+    props.initialEditableFields ??
+    (props.kind === "UPDATE_EXISTING" ? props.currentRow : emptyEditableFields);
   return Object.fromEntries(
     EDITABLE_BUSINESS_FIELD_NAMES.map((field) => [field, source[field]]),
   ) as unknown as EditableBusinessFields;

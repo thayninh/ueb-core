@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { SubmissionStatusBadge } from "@/components/workflow/submission-status-badge";
+import { LecturerResubmissionAction } from "@/components/workflow/lecturer-resubmission-action";
 import {
   SUBMISSION_TYPE_LABELS,
   formatWorkflowDate,
@@ -116,6 +117,12 @@ export default async function LecturerSubmissionDetailPage({
           </p>
         </section>
       )}
+
+      <LecturerResubmissionAction
+        state={detail.state}
+        submissionId={detail.submissionId}
+        submissionType={detail.submissionType}
+      />
 
       <section>
         <h2 className="text-xl font-semibold text-zinc-950 dark:text-zinc-50">

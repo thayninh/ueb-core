@@ -27,6 +27,7 @@
     "test:phase4:lecturer:e2e": "tsx scripts/phase-4/run-lecturer-portal-e2e.ts --confirm-reset-phase4-lecturer-portal",
     "test:phase4:leader:integration": "PHASE4_LEADER_INTEGRATION=1 vitest run --fileParallelism=false tests/phase-4/leader-submission-query.integration.test.ts tests/phase-4/workflow-reject.integration.test.ts",
     "test:phase4:leader:e2e": "tsx scripts/phase-4/run-leader-reject-e2e.ts --confirm-reset-phase4-leader-reject",
+    "test:phase4:resubmission:e2e": "tsx scripts/phase-4/run-resubmission-e2e.ts --confirm-reset-phase4-resubmission",
     "test:phase4:approval:integration": "PHASE4_APPROVAL_INTEGRATION=1 vitest run --fileParallelism=false tests/phase-4/workflow-approve.integration.test.ts tests/phase-4/workflow-approval-concurrency.integration.test.ts tests/phase-4/core-approved-insert-policy.integration.test.ts",
     "test:phase4:approval:e2e": "tsx scripts/phase-4/run-leader-approve-e2e.ts --confirm-reset-phase4-leader-approve",
     "data:inspect": "tsx scripts/phase-2/inspect-source.ts",

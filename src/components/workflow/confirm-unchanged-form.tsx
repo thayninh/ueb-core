@@ -15,13 +15,18 @@ export function ConfirmUnchangedForm({
   recordUid,
   baseStt,
   baseVersionNo,
+  parentSubmissionId,
 }: Readonly<{
   submissionId?: string;
   recordUid: string;
   baseStt: number;
   baseVersionNo: number;
+  parentSubmissionId?: string;
 }>) {
-  const submissionId = useStableSubmissionId(initialSubmissionId);
+  const submissionId = useStableSubmissionId(
+    initialSubmissionId,
+    parentSubmissionId,
+  );
   const [result, formAction, pending] = useActionState(
     submitUnchangedRowFormAction,
     EMPTY_WORKFLOW_ACTION_RESULT,
@@ -33,9 +38,16 @@ export function ConfirmUnchangedForm({
       <input name="recordUid" type="hidden" value={recordUid} />
       <input name="baseStt" type="hidden" value={baseStt} />
       <input name="baseVersionNo" type="hidden" value={baseVersionNo} />
+      {parentSubmissionId && (
+        <input
+          name="parentSubmissionId"
+          type="hidden"
+          value={parentSubmissionId}
+        />
+      )}
       <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-        Bạn đang gửi xác nhận rằng dòng này không thay đổi. Sau khi gửi, bản gửi
-        sẽ bị khóa và chờ lãnh đạo xử lý.
+        Bạn đang gửi xác nhận rằng dòng này không thay đổi. Sau khi gửi, một bản
+        gửi mới sẽ được tạo và chờ lãnh đạo xử lý.
       </p>
       <WorkflowActionFeedback result={result} />
       {!result.success && (
