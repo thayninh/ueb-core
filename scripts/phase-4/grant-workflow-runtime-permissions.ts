@@ -24,6 +24,15 @@ const TARGET_TABLE_PRIVILEGES = {
   workflow_event: ["SELECT", "INSERT"],
 } as const satisfies Record<string, readonly TablePrivilege[]>;
 
+const RLS_HELPER_TABLES = [
+  "access_profile",
+  "role_assignment",
+  "organization_unit",
+  "unit_scope_assignment",
+] as const;
+
+type RlsHelperTable = (typeof RLS_HELPER_TABLES)[number];
+
 const environmentSchema = z.object({
   MIGRATION_DATABASE_URL: z
     .string({ error: "MIGRATION_DATABASE_URL is required." })
@@ -53,6 +62,7 @@ export interface RuntimePermissionReport {
   readonly runtimeNonOwner: true;
   readonly core: TablePrivilegeState;
   readonly workflow: TablePrivilegeState;
+  readonly rlsHelpers: Readonly<Record<RlsHelperTable, TablePrivilegeState>>;
   readonly sequenceName: string;
   readonly sequenceUsage: true;
   readonly sequenceSelect: false;
@@ -93,7 +103,7 @@ interface SequenceIdentity {
 }
 
 interface TablePrivilegeRow {
-  readonly table_name: keyof typeof TARGET_TABLE_PRIVILEGES;
+  readonly table_name: string;
   readonly can_select: boolean;
   readonly can_insert: boolean;
   readonly can_update: boolean;
@@ -428,6 +438,14 @@ async function reconcileTablePrivileges(
       `GRANT SELECT, INSERT ON TABLE "public"."${tableName}" TO ${roleIdentifier}`,
     );
   }
+  for (const tableName of RLS_HELPER_TABLES) {
+    await client.query(
+      `REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE "public"."${tableName}" FROM ${roleIdentifier}`,
+    );
+    await client.query(
+      `GRANT SELECT ON TABLE "public"."${tableName}" TO ${roleIdentifier}`,
+    );
+  }
 }
 
 async function reconcileSequencePrivileges(
@@ -465,7 +483,7 @@ async function verifyTargetPrivileges(
         AND table_name = ANY($2::text[])
       ORDER BY table_name
     `,
-    [roleName, Object.keys(TARGET_TABLE_PRIVILEGES)],
+    [roleName, [...Object.keys(TARGET_TABLE_PRIVILEGES), ...RLS_HELPER_TABLES]],
   );
   const sequencePrivileges = (
     await client.query<SequencePrivilegeRow>(
@@ -481,9 +499,16 @@ async function verifyTargetPrivileges(
 
   const core = tableState(tables.rows, "ueb_core_data");
   const workflow = tableState(tables.rows, "workflow_event");
+  const rlsHelpers = Object.fromEntries(
+    RLS_HELPER_TABLES.map((tableName) => [
+      tableName,
+      tableState(tables.rows, tableName),
+    ]),
+  ) as Record<RlsHelperTable, TablePrivilegeState>;
   if (
     !matchesTarget(core) ||
     !matchesTarget(workflow) ||
+    Object.values(rlsHelpers).some((state) => !matchesSelectOnly(state)) ||
     !sequencePrivileges?.can_use ||
     sequencePrivileges.can_select ||
     sequencePrivileges.can_update
@@ -501,6 +526,7 @@ async function verifyTargetPrivileges(
     runtimeNonOwner: true,
     core,
     workflow,
+    rlsHelpers,
     sequenceName: `${sequence.schema_name}.${sequence.sequence_name}`,
     sequenceUsage: true,
     sequenceSelect: false,
@@ -511,7 +537,7 @@ async function verifyTargetPrivileges(
 
 function tableState(
   rows: readonly TablePrivilegeRow[],
-  tableName: keyof typeof TARGET_TABLE_PRIVILEGES,
+  tableName: string,
 ): TablePrivilegeState {
   const row = rows.find((candidate) => candidate.table_name === tableName);
   if (!row) {
@@ -528,6 +554,18 @@ function tableState(
     references: row.can_references,
     trigger: row.can_trigger,
   };
+}
+
+function matchesSelectOnly(state: TablePrivilegeState): boolean {
+  return (
+    state.select &&
+    !state.insert &&
+    !state.update &&
+    !state.delete &&
+    !state.truncate &&
+    !state.references &&
+    !state.trigger
+  );
 }
 
 function matchesTarget(state: TablePrivilegeState): boolean {
@@ -563,6 +601,21 @@ function printReport(report: RuntimePermissionReport): void {
     `WORKFLOW_UPDATE=${yesNo(report.workflow.update)}`,
     `WORKFLOW_DELETE=${yesNo(report.workflow.delete)}`,
     `WORKFLOW_TRUNCATE=${yesNo(report.workflow.truncate)}`,
+    `RLS_HELPER_TABLES=${RLS_HELPER_TABLES.join(",")}`,
+    `RLS_HELPER_SELECT=${yesNo(
+      Object.values(report.rlsHelpers).every((state) => state.select),
+    )}`,
+    `RLS_HELPER_WRITE=${yesNo(
+      Object.values(report.rlsHelpers).some(
+        (state) =>
+          state.insert ||
+          state.update ||
+          state.delete ||
+          state.truncate ||
+          state.references ||
+          state.trigger,
+      ),
+    )}`,
     `SEQUENCE_NAME=${report.sequenceName}`,
     `SEQUENCE_USAGE=${yesNo(report.sequenceUsage)}`,
     `SEQUENCE_SELECT=${yesNo(report.sequenceSelect)}`,
