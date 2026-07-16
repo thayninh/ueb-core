@@ -79,18 +79,31 @@ model ImportRun {
 }
 
 model WorkflowEvent {
-  eventId            String   @id @default(uuid()) @map("event_id") @db.Uuid
-  submissionId       String   @map("submission_id") @db.Uuid
-  parentSubmissionId String?  @map("parent_submission_id") @db.Uuid
-  eventType          String   @map("event_type") @db.VarChar(64)
-  lecturerUid        String   @map("lecturer_uid") @db.Uuid
-  approvalUnit       String?  @map("approval_unit") @db.Text
-  payload            Json     @db.JsonB
-  actorUserId        String?  @map("actor_user_id") @db.Uuid
-  reason             String?  @db.Text
-  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  eventId            String                  @id @default(uuid()) @map("event_id") @db.Uuid
+  submissionId       String                  @map("submission_id") @db.Uuid
+  parentSubmissionId String?                 @map("parent_submission_id") @db.Uuid
+  eventType          WorkflowEventType       @map("event_type")
+  submissionType     WorkflowSubmissionType? @map("submission_type")
+  recordUid          String?                 @map("record_uid") @db.Uuid
+  lecturerUid        String                  @map("lecturer_uid") @db.Uuid
+  approvalUnit       String?                 @map("approval_unit") @db.Text
+  baseStt            Int?                    @map("base_stt")
+  baseVersionNo      Int?                    @map("base_version_no")
+  payload            Json?                   @db.JsonB
+  payloadChecksum    String?                 @map("payload_checksum") @db.Text
+  actorUserId        String?                 @map("actor_user_id") @db.Uuid
+  reason             String?                 @db.Text
+  resultStt          Int?                    @map("result_stt")
+  resultVersionNo    Int?                    @map("result_version_no")
+  createdAt          DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@index([submissionId, createdAt], map: "workflow_event_submission_id_created_at_idx")
+  @@index([lecturerUid, createdAt], map: "workflow_event_lecturer_uid_created_at_idx")
+  @@index([lecturerUid, recordUid, createdAt], map: "workflow_event_lecturer_uid_record_uid_created_at_idx")
+  @@index([approvalUnit, createdAt], map: "workflow_event_approval_unit_created_at_idx")
+  @@index([eventType, createdAt], map: "workflow_event_event_type_created_at_idx")
+  @@index([recordUid, createdAt], map: "workflow_event_record_uid_created_at_idx")
+  @@index([parentSubmissionId, createdAt], map: "workflow_event_parent_submission_id_created_at_idx")
   @@map("workflow_event")
 }
 
@@ -264,4 +277,20 @@ enum BusinessRole {
   ADMIN
 
   @@map("business_role")
+}
+
+enum WorkflowEventType {
+  SUBMITTED
+  REJECTED
+  APPROVED
+
+  @@map("workflow_event_type")
+}
+
+enum WorkflowSubmissionType {
+  CONFIRM_UNCHANGED
+  UPDATE_EXISTING
+  CREATE_NEW
+
+  @@map("workflow_submission_type")
 }
