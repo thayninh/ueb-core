@@ -260,7 +260,7 @@ async function readBaselineReport(
         (SELECT count(*)::integer FROM public.auth_user) AS auth_users,
         (
           SELECT count(*)::integer FROM public.auth_session
-          WHERE expires_at > clock_timestamp()
+          WHERE "expiresAt" > clock_timestamp()
         ) AS active_sessions
     `)
   ).rows[0];

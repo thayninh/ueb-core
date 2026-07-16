@@ -83,6 +83,15 @@ describe("Phase 5 UAT baseline and canonical evidence", () => {
     );
   });
 
+  it("counts active sessions using the quoted schema expiry column", () => {
+    const source = readFileSync(
+      new URL("../../scripts/phase-5/lib/uat-database.ts", import.meta.url),
+      "utf8",
+    );
+    expect(source).toContain('WHERE "expiresAt" > clock_timestamp()');
+    expect(source).not.toMatch(/\bexpires_at\b/u);
+  });
+
   it("limits copied-session deletion to the UAT session table", () => {
     const source = readFileSync(
       new URL("../../scripts/phase-5/revoke-uat-sessions.ts", import.meta.url),
