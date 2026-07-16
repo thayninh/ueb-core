@@ -1,5 +1,12 @@
 # Phase 5 identity approval input contract
 
+> **Step 6 executable-contract note:** `11_identity_input_runbook.md` defines
+> the authoritative JSON field names and validation behavior for approved
+> lecturer and faculty-leader inputs. Its strict Step 6 schema supersedes the
+> generic manifest shape in Section 3 below for files passed to
+> `phase5:validate-identities`. This document remains the provisioning and
+> approval-policy context; neither contract authorizes a database write.
+
 ## 1. Mục đích
 
 Contract này quy định dữ liệu tối thiểu để phê duyệt từng pilot identity trước provisioning. Nó không phải danh sách người dùng và không cho phép đưa PII thật vào repository.
