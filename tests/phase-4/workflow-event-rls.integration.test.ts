@@ -323,7 +323,7 @@ isolatedDescribe("Phase 4 isolated workflow_event RLS", () => {
     ).rejects.toThrow(/permission denied/iu);
   });
 
-  it("30. creates no core INSERT policy", async () => {
+  it("30. creates exactly one approved-workflow core INSERT policy", async () => {
     const result = await owner.query<{ count: number }>(`
       SELECT count(*)::int AS count
       FROM pg_catalog.pg_policies
@@ -331,21 +331,40 @@ isolatedDescribe("Phase 4 isolated workflow_event RLS", () => {
         AND tablename = 'ueb_core_data'
         AND cmd = 'INSERT'
     `);
-    expect(result.rows[0]?.count).toBe(0);
+    expect(result.rows[0]?.count).toBe(1);
   });
 
-  it("31. keeps runtime unable to INSERT core data", async () => {
-    const privilege = await runtimePool.query<{ can_insert: boolean }>(`
+  it("31. grants only column-scoped core INSERT and rejects default rows", async () => {
+    const privilege = await runtimePool.query<{
+      table_insert: boolean;
+      any_column_insert: boolean;
+      stt_insert: boolean;
+    }>(`
       SELECT has_table_privilege(
         current_user,
         'public.ueb_core_data',
         'INSERT'
-      ) AS can_insert
+      ) AS table_insert,
+      has_any_column_privilege(
+        current_user,
+        'public.ueb_core_data',
+        'INSERT'
+      ) AS any_column_insert,
+      has_column_privilege(
+        current_user,
+        'public.ueb_core_data',
+        'stt',
+        'INSERT'
+      ) AS stt_insert
     `);
-    expect(privilege.rows[0]?.can_insert).toBe(false);
+    expect(privilege.rows[0]).toEqual({
+      table_insert: false,
+      any_column_insert: true,
+      stt_insert: false,
+    });
     await expect(
       runtimePool.query("INSERT INTO public.ueb_core_data DEFAULT VALUES"),
-    ).rejects.toThrow(/permission denied/iu);
+    ).rejects.toThrow(/permission denied|row-level security/iu);
   });
 });
 

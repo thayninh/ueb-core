@@ -1,5 +1,6 @@
 import "server-only";
 
+import { Prisma } from "@/generated/prisma/client";
 import { withCoreDataRlsContext } from "@/lib/auth/dal";
 
 import type { Principal } from "@/lib/auth/principal";
@@ -16,6 +17,9 @@ export type WorkflowTransaction = Parameters<
 export function withWorkflowTransaction<T>(
   principal: Pick<Principal, "userId">,
   operation: (transaction: WorkflowTransaction) => Promise<T>,
+  options: Readonly<{
+    isolationLevel?: Prisma.TransactionIsolationLevel;
+  }> = {},
 ): Promise<T> {
-  return withCoreDataRlsContext(principal, operation);
+  return withCoreDataRlsContext(principal, operation, options);
 }

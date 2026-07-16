@@ -1,14 +1,14 @@
 import "server-only";
 
 import {
-  AccessProfileStatus,
   BusinessRole,
   Prisma,
   WorkflowEventType,
 } from "@/generated/prisma/client";
 import { requireAnyRole } from "@/lib/auth/authorization";
 
-import { withWorkflowTransaction, type WorkflowTransaction } from "./context";
+import { withWorkflowTransaction } from "./context";
+import { assertCurrentDecisionScope } from "./decision-authorization";
 import { WorkflowError } from "./errors";
 import { lockRecord, lockSubmission } from "./locks";
 import { rejectSubmissionInputSchema } from "./reject-policy";
@@ -18,7 +18,6 @@ import {
   resolveStoredSubmissionEvents,
 } from "./submission-query";
 
-import type { Principal } from "@/lib/auth/principal";
 import type { SubmissionType } from "./types";
 
 export { rejectSubmissionInputSchema } from "./reject-policy";
@@ -112,46 +111,4 @@ export async function rejectSubmission(
       rejectedAt: event.createdAt,
     };
   });
-}
-
-async function assertCurrentDecisionScope(
-  transaction: WorkflowTransaction,
-  principal: Principal,
-  approvalUnit: string,
-): Promise<void> {
-  const profile = await transaction.accessProfile.findUnique({
-    where: { userId: principal.userId },
-    select: {
-      status: true,
-      user: {
-        select: {
-          roleAssignments: {
-            where: { revokedAt: null },
-            select: { role: true },
-          },
-          unitScopeAssignments: {
-            where: {
-              revokedAt: null,
-              organizationUnit: {
-                isActive: true,
-                sourceValue: approvalUnit,
-              },
-            },
-            select: { id: true },
-          },
-        },
-      },
-    },
-  });
-  if (!profile || profile.status !== AccessProfileStatus.ACTIVE) {
-    throw new WorkflowError("WORKFLOW_SCOPE_DENIED");
-  }
-  const roles = new Set(profile.user.roleAssignments.map(({ role }) => role));
-  if (roles.has(BusinessRole.ADMIN)) return;
-  if (
-    !roles.has(BusinessRole.FACULTY_LEADER) ||
-    profile.user.unitScopeAssignments.length === 0
-  ) {
-    throw new WorkflowError("WORKFLOW_SCOPE_DENIED");
-  }
 }

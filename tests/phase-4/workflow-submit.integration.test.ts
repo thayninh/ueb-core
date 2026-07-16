@@ -591,10 +591,10 @@ describe.sequential("Phase 4 isolated lecturer row submission service", () => {
     expect(rows.rows[0]?.parent_submission_id).toBe(rejectedCreateParentId);
   });
 
-  it("43. runtime role still cannot insert, update, or delete core", async () => {
+  it("43. runtime role cannot insert an invalid row, update, or delete core", async () => {
     await expect(
       runtimePool.query("INSERT INTO public.ueb_core_data DEFAULT VALUES"),
-    ).rejects.toThrow(/permission denied/iu);
+    ).rejects.toThrow(/permission denied|row-level security/iu);
     await expect(
       runtimePool.query(
         "UPDATE public.ueb_core_data SET stt = stt WHERE false",

@@ -155,12 +155,12 @@ describe("Phase 4 workflow domain types", () => {
     );
   });
 
-  it("does not change the Prisma schema or Phase 4 database migration", () => {
+  it("locks the current Prisma schema and keeps the base Phase 4 migration unchanged", () => {
     const repositoryRoot = new URL("../../", import.meta.url);
     const files = [
       [
         "prisma/schema.prisma",
-        "bd0dfee1bfe265324fc9389f4186c854f11794783da04daaf568ac4f22076f1a",
+        "69818041f9cb17351a08b9ba70a633fb54656ef2070e3bf8ef7dc53922ccecd4",
       ],
       [
         "prisma/migrations/20260716040000_phase_4_row_workflow_contract/migration.sql",

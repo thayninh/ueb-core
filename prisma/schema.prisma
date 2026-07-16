@@ -34,22 +34,23 @@ model UebCoreData {
 
   lecturerUid        String   @map("lecturer_uid") @db.Uuid
   recordUid          String   @map("record_uid") @db.Uuid
-  snapshotId         String   @map("snapshot_id") @db.Uuid
+  snapshotId         String   @default(uuid()) @map("snapshot_id") @db.Uuid
   versionNo          Int      @map("version_no")
-  identityStatus     String   @map("identity_status") @db.VarChar(16)
-  sourceRowNumber    Int      @map("source_row_number")
-  sourceRowChecksum  String   @map("source_row_checksum") @db.Char(64)
-  sourceImportRunId  String   @map("source_import_run_id") @db.Uuid
+  identityStatus     String   @default("RESOLVED") @map("identity_status") @db.VarChar(16)
+  sourceRowNumber    Int?     @map("source_row_number")
+  sourceRowChecksum  String?  @map("source_row_checksum") @db.Char(64)
+  sourceImportRunId  String?  @map("source_import_run_id") @db.Uuid
   sourceSubmissionId String?  @map("source_submission_id") @db.Uuid
   approvalUnit       String?  @map("approval_unit") @db.Text
   origin             String   @db.VarChar(32)
   approvedBy         String?  @map("approved_by") @db.Uuid
-  approvedAt         DateTime @map("approved_at") @db.Timestamptz(6)
+  approvedAt         DateTime @default(dbgenerated("clock_timestamp()")) @map("approved_at") @db.Timestamptz(6)
   createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  sourceImportRun ImportRun @relation(fields: [sourceImportRunId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  sourceImportRun ImportRun? @relation(fields: [sourceImportRunId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@unique([recordUid, snapshotId], map: "ueb_core_data_record_uid_snapshot_id_key")
+  @@unique([recordUid, versionNo], map: "ueb_core_data_record_uid_version_no_key")
   @@unique([lecturerUid, versionNo, recordUid], map: "ueb_core_data_lecturer_uid_version_no_record_uid_key")
   @@index([lecturerUid, stt(sort: Desc)], map: "ueb_core_data_lecturer_uid_stt_idx")
   @@index([snapshotId], map: "ueb_core_data_snapshot_id_idx")

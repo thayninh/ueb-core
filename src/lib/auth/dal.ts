@@ -72,11 +72,19 @@ type CoreDataTransaction = Omit<
 export async function withCoreDataRlsContext<T>(
   principal: Pick<Principal, "userId">,
   query: (transaction: CoreDataTransaction) => Promise<T>,
+  options: Readonly<{
+    isolationLevel?: Prisma.TransactionIsolationLevel;
+  }> = {},
 ): Promise<T> {
-  return getPrismaClient().$transaction(async (transaction) => {
-    await transaction.$queryRaw(
-      Prisma.sql`SELECT set_config('app.current_user_id', ${principal.userId}, true)`,
-    );
-    return query(transaction);
-  });
+  return getPrismaClient().$transaction(
+    async (transaction) => {
+      await transaction.$queryRaw(
+        Prisma.sql`SELECT set_config('app.current_user_id', ${principal.userId}, true)`,
+      );
+      return query(transaction);
+    },
+    options.isolationLevel
+      ? { isolationLevel: options.isolationLevel }
+      : undefined,
+  );
 }

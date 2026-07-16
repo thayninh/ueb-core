@@ -35,6 +35,34 @@ const EXPECTED_TABLE_PRIVILEGES = {
 
 const RUNTIME_TABLES = Object.keys(EXPECTED_TABLE_PRIVILEGES);
 const IDENTITY_SEQUENCE = "ueb_core_data_stt_seq";
+const APPROVED_CORE_INSERT_COLUMNS = [
+  "don_vi_phu_trach_hoc_phan",
+  "bo_mon_phu_trach_hoc_phan",
+  "khoi_kien_thuc",
+  "ma_hoc_phan",
+  "ten_hoc_phan",
+  "ten_giang_vien",
+  "ma_so_can_bo",
+  "email_tai_khoan_vnu",
+  "bo_mon",
+  "don_vi",
+  "core_1_2_3",
+  "tc1_tro_giang",
+  "tc2_sh_chuyen_mon",
+  "tc3_tong_hop",
+  "tc3_1_nganh_tot_nghiep_phu_hop",
+  "tc3_2_bien_soan_de_cuong_giao_trinh",
+  "tc3_3_chu_nhiem_de_tai_nckh_lien_quan",
+  "tc3_4_bai_bao_lien_quan",
+  "tc4_giang_thu",
+  "lecturer_uid",
+  "record_uid",
+  "version_no",
+  "source_submission_id",
+  "approval_unit",
+  "origin",
+  "approved_by",
+] as const;
 
 const permissionEnvironmentSchema = z.object({
   MIGRATION_DATABASE_URL: z
@@ -408,6 +436,12 @@ async function grantExpectedPrivileges(
       `GRANT ${privileges.join(", ")} ON TABLE "public"."${table}" TO ${roleIdentifier}`,
     );
   }
+  await client.query(
+    `GRANT INSERT (${APPROVED_CORE_INSERT_COLUMNS.map((column) => `"${column}"`).join(", ")}) ON TABLE "public"."ueb_core_data" TO ${roleIdentifier}`,
+  );
+  await client.query(
+    `GRANT USAGE ON SEQUENCE "public"."${IDENTITY_SEQUENCE}" TO ${roleIdentifier}`,
+  );
 }
 
 async function verifyPrivileges(
@@ -471,6 +505,25 @@ async function verifyPrivileges(
       [roleName],
     )
   ).rows[0];
+  const coreInsertColumns = await client.query<{
+    column_name: string;
+    can_insert: boolean;
+  }>(
+    `
+      SELECT
+        column_name,
+        has_column_privilege(
+          $1,
+          'public.ueb_core_data',
+          column_name,
+          'INSERT'
+        ) AS can_insert
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'ueb_core_data'
+    `,
+    [roleName],
+  );
 
   const tablePermissionsMatch =
     tables.rows.length === RUNTIME_TABLES.length &&
@@ -485,6 +538,15 @@ async function verifyPrivileges(
           table[PRIVILEGE_COLUMNS[privilege]] === expected.has(privilege),
       );
     });
+  const allowedCoreInsertColumns = new Set<string>(
+    APPROVED_CORE_INSERT_COLUMNS,
+  );
+  const coreInsertColumnsMatch =
+    coreInsertColumns.rows.length > APPROVED_CORE_INSERT_COLUMNS.length &&
+    coreInsertColumns.rows.every(
+      ({ column_name, can_insert }) =>
+        can_insert === allowedCoreInsertColumns.has(column_name),
+    );
 
   if (
     !database?.can_connect ||
@@ -493,7 +555,8 @@ async function verifyPrivileges(
     !schema?.can_use ||
     schema.can_create ||
     !tablePermissionsMatch ||
-    sequence?.can_use ||
+    !coreInsertColumnsMatch ||
+    !sequence?.can_use ||
     sequence?.can_select ||
     sequence?.can_update
   ) {
