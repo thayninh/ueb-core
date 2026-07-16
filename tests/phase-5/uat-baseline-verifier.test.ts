@@ -92,6 +92,19 @@ describe("Phase 5 UAT baseline and canonical evidence", () => {
     expect(source).not.toMatch(/\bexpires_at\b/u);
   });
 
+  it("types the sequence privilege parameter to prevent SQLSTATE 42P18", () => {
+    const source = readFileSync(
+      new URL("../../scripts/phase-5/lib/uat-database.ts", import.meta.url),
+      "utf8",
+    );
+    const sequencePrivilegeQuery = source.match(
+      /const sequencePrivileges = \([\s\S]*?\)\.rows\[0\];/u,
+    )?.[0];
+    expect(sequencePrivilegeQuery).toBeDefined();
+    expect(sequencePrivilegeQuery?.match(/\$2::text/gu)).toHaveLength(3);
+    expect(sequencePrivilegeQuery).not.toContain("format('public.%I', $2)");
+  });
+
   it("limits copied-session deletion to the UAT session table", () => {
     const source = readFileSync(
       new URL("../../scripts/phase-5/revoke-uat-sessions.ts", import.meta.url),

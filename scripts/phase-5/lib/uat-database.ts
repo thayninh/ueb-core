@@ -424,9 +424,9 @@ async function assertUatRuntimeContract(
     }>(
       `
       SELECT
-        has_sequence_privilege($1, format('public.%I', $2), 'USAGE') AS can_use,
-        has_sequence_privilege($1, format('public.%I', $2), 'SELECT') AS can_select,
-        has_sequence_privilege($1, format('public.%I', $2), 'UPDATE') AS can_update
+        has_sequence_privilege($1, format('public.%I', $2::text), 'USAGE') AS can_use,
+        has_sequence_privilege($1, format('public.%I', $2::text), 'SELECT') AS can_select,
+        has_sequence_privilege($1, format('public.%I', $2::text), 'UPDATE') AS can_update
     `,
       [runtimeRole, sequence.sequence_name],
     )
