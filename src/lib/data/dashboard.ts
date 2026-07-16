@@ -67,6 +67,16 @@ function allowedFeatures(roles: readonly BusinessRole[]) {
       description: "Tra cứu dữ liệu thuộc các đơn vị được giao.",
     });
   }
+  if (
+    roles.includes(BusinessRole.FACULTY_LEADER) ||
+    roles.includes(BusinessRole.ADMIN)
+  ) {
+    features.push({
+      href: "/leader/submissions",
+      label: "Bản gửi chờ xử lý",
+      description: "Xem chi tiết, so sánh và từ chối bản gửi trong phạm vi.",
+    });
+  }
   if (roles.includes(BusinessRole.ADMIN)) {
     features.push({
       href: "/admin/users",

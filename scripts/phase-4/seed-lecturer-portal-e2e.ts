@@ -12,7 +12,8 @@ import {
 } from "./lib/lecturer-portal-test-database";
 import { readPhase4LecturerPortalFixtures } from "./lib/lecturer-portal-fixtures";
 
-const UNIT = "Phase 4 E2E Unit";
+const UNIT_A = "Phase 4 E2E Unit A";
+const UNIT_B = "Phase 4 E2E Unit B";
 
 export async function seedPhase4LecturerPortalE2e(
   environment: Readonly<Record<string, string | undefined>>,
@@ -38,12 +39,16 @@ export async function seedPhase4LecturerPortalE2e(
 
     const lecturerA = { userId: randomUUID(), lecturerUid: randomUUID() };
     const lecturerB = { userId: randomUUID(), lecturerUid: randomUUID() };
+    const leaderA = { userId: randomUUID(), lecturerUid: null };
+    const leaderB = { userId: randomUUID(), lecturerUid: null };
     const passwordHash = await hashPassword(fixture.password);
     const importRunId = randomUUID();
     await client.query("BEGIN");
+    const unitAId = randomUUID();
+    const unitBId = randomUUID();
     await client.query(
-      "INSERT INTO public.organization_unit (id, unit_key, source_value, display_name) VALUES ($1::uuid, 'phase4-e2e-unit', $2, $2)",
-      [randomUUID(), UNIT],
+      "INSERT INTO public.organization_unit (id, unit_key, source_value, display_name) VALUES ($1::uuid, 'phase4-e2e-unit-a', $2, $2), ($3::uuid, 'phase4-e2e-unit-b', $4, $4)",
+      [unitAId, UNIT_A, unitBId, UNIT_B],
     );
     await client.query(
       "INSERT INTO public.import_run (id, source_filename, source_sha256, source_sheet, source_contract_version, source_row_count, source_min_stt, source_max_stt, canonical_dataset_sha256, report, imported_at) VALUES ($1::uuid, 'phase4-e2e-fixture.xlsx', $2, 'fixture', 'phase4-e2e', 5, 41001, 42001, $3, '{}'::jsonb, clock_timestamp())",
@@ -55,6 +60,8 @@ export async function seedPhase4LecturerPortalE2e(
       fixture.lecturerAEmail,
       "Phase 4 Lecturer A",
       passwordHash,
+      "LECTURER",
+      null,
     );
     await createUser(
       client,
@@ -62,6 +69,26 @@ export async function seedPhase4LecturerPortalE2e(
       fixture.lecturerBEmail,
       "Phase 4 Lecturer B",
       passwordHash,
+      "LECTURER",
+      null,
+    );
+    await createUser(
+      client,
+      leaderA,
+      fixture.leaderAEmail,
+      "Phase 4 Leader A",
+      passwordHash,
+      "FACULTY_LEADER",
+      unitAId,
+    );
+    await createUser(
+      client,
+      leaderB,
+      fixture.leaderBEmail,
+      "Phase 4 Leader B",
+      passwordHash,
+      "FACULTY_LEADER",
+      unitBId,
     );
     const recordA1 = randomUUID();
     const recordA2 = randomUUID();
@@ -74,6 +101,7 @@ export async function seedPhase4LecturerPortalE2e(
       41001,
       1,
       "A1-v1",
+      UNIT_A,
     );
     await insertCore(
       client,
@@ -83,6 +111,7 @@ export async function seedPhase4LecturerPortalE2e(
       41002,
       2,
       "A1-v2",
+      UNIT_A,
     );
     await insertCore(
       client,
@@ -92,6 +121,7 @@ export async function seedPhase4LecturerPortalE2e(
       41003,
       1,
       "A2",
+      UNIT_A,
     );
     await insertCore(
       client,
@@ -101,6 +131,7 @@ export async function seedPhase4LecturerPortalE2e(
       41004,
       1,
       "A3",
+      UNIT_A,
     );
     const recordB = randomUUID();
     await insertCore(
@@ -111,6 +142,7 @@ export async function seedPhase4LecturerPortalE2e(
       42001,
       1,
       "B1",
+      UNIT_B,
     );
     const lecturerBSubmissionId = randomUUID();
     await insertSubmittedEvent(
@@ -121,6 +153,7 @@ export async function seedPhase4LecturerPortalE2e(
       42001,
       "CONFIRM_UNCHANGED",
       "B1",
+      UNIT_B,
     );
     await client.query("COMMIT");
     console.log(
@@ -141,10 +174,12 @@ export async function seedPhase4LecturerPortalE2e(
 
 async function createUser(
   client: Client,
-  identity: { userId: string; lecturerUid: string },
+  identity: { userId: string; lecturerUid: string | null },
   email: string,
   name: string,
   passwordHash: string,
+  role: "LECTURER" | "FACULTY_LEADER",
+  unitId: string | null,
 ): Promise<void> {
   await client.query(
     'INSERT INTO public.auth_user (id, name, email, "emailVerified", "updatedAt") VALUES ($1::uuid, $2, $3, false, clock_timestamp())',
@@ -159,9 +194,15 @@ async function createUser(
     [identity.userId, identity.lecturerUid],
   );
   await client.query(
-    "INSERT INTO public.role_assignment (id, user_id, role, granted_by) VALUES ($1::uuid, $2::uuid, 'LECTURER', $2::uuid)",
-    [randomUUID(), identity.userId],
+    "INSERT INTO public.role_assignment (id, user_id, role, granted_by) VALUES ($1::uuid, $2::uuid, $3::public.business_role, $2::uuid)",
+    [randomUUID(), identity.userId, role],
   );
+  if (unitId) {
+    await client.query(
+      "INSERT INTO public.unit_scope_assignment (id, user_id, organization_unit_id, granted_by) VALUES ($1::uuid, $2::uuid, $3::uuid, $2::uuid)",
+      [randomUUID(), identity.userId, unitId],
+    );
+  }
 }
 
 async function insertCore(
@@ -172,12 +213,13 @@ async function insertCore(
   stt: number,
   versionNo: number,
   seed: string,
+  approvalUnit: string,
 ): Promise<void> {
   await client.query(
     "INSERT INTO public.ueb_core_data (stt, don_vi_phu_trach_hoc_phan, bo_mon_phu_trach_hoc_phan, khoi_kien_thuc, ma_hoc_phan, ten_hoc_phan, ten_giang_vien, ma_so_can_bo, email_tai_khoan_vnu, bo_mon, don_vi, core_1_2_3, lecturer_uid, record_uid, snapshot_id, version_no, identity_status, source_row_number, source_row_checksum, source_import_run_id, approval_unit, origin, approved_at) OVERRIDING SYSTEM VALUE VALUES ($1, $2, 'Bộ môn E2E', 1, $3, $4, 'Phase 4 Lecturer', 'P4-E2E', 'lecturer@phase4.invalid', 'Bộ môn E2E', $2, '1', $5::uuid, $6::uuid, $7::uuid, $8, 'RESOLVED', $1, $9, $10::uuid, $2, 'LEGACY_IMPORT', clock_timestamp())",
     [
       stt,
-      UNIT,
+      approvalUnit,
       "P4-" + seed,
       "Học phần " + seed,
       lecturerUid,
@@ -198,6 +240,7 @@ async function insertSubmittedEvent(
   baseStt: number,
   type: "CONFIRM_UNCHANGED",
   seed: string,
+  approvalUnit: string,
 ): Promise<void> {
   await client.query(
     "INSERT INTO public.workflow_event (event_id, submission_id, event_type, submission_type, record_uid, lecturer_uid, approval_unit, base_stt, base_version_no, payload, payload_checksum, actor_user_id) VALUES ($1::uuid, $2::uuid, 'SUBMITTED', $3::public.workflow_submission_type, $4::uuid, $5::uuid, $6, $7, 1, $8::jsonb, 'e2e-fixture-checksum', $9::uuid)",
@@ -207,17 +250,20 @@ async function insertSubmittedEvent(
       type,
       recordUid,
       identity.lecturerUid,
-      UNIT,
+      approvalUnit,
       baseStt,
-      JSON.stringify(payload(seed)),
+      JSON.stringify(payload(seed, approvalUnit)),
       identity.userId,
     ],
   );
 }
 
-function payload(seed: string): Record<string, string | number | null> {
+function payload(
+  seed: string,
+  approvalUnit: string,
+): Record<string, string | number | null> {
   return {
-    don_vi_phu_trach_hoc_phan: UNIT,
+    don_vi_phu_trach_hoc_phan: approvalUnit,
     bo_mon_phu_trach_hoc_phan: "Bộ môn E2E",
     khoi_kien_thuc: 1,
     ma_hoc_phan: "P4-" + seed,
@@ -226,7 +272,7 @@ function payload(seed: string): Record<string, string | number | null> {
     ma_so_can_bo: "P4-E2E",
     email_tai_khoan_vnu: "lecturer@phase4.invalid",
     bo_mon: "Bộ môn E2E",
-    don_vi: UNIT,
+    don_vi: approvalUnit,
     core_1_2_3: "1",
     tc1_tro_giang: null,
     tc2_sh_chuyen_mon: null,

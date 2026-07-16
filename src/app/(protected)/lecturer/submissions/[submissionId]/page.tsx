@@ -96,6 +96,9 @@ export default async function LecturerSubmissionDetailPage({
       {detail.state === "REJECTED" && (
         <section className="rounded-2xl border border-red-300 bg-red-50 p-6 dark:border-red-800 dark:bg-red-950/40">
           <h2 className="font-semibold">Lý do từ chối</h2>
+          <p className="mt-2 text-xs font-medium uppercase tracking-wide text-red-700 dark:text-red-300">
+            Thời điểm từ chối: {formatWorkflowDate(detail.terminalAt)}
+          </p>
           <p className="mt-2 whitespace-pre-wrap text-sm">
             {detail.rejectionReason}
           </p>

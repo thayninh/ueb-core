@@ -7,7 +7,17 @@ import {
 } from "@/generated/prisma/client";
 
 import type { WorkflowTransaction } from "./context";
-import type { CoreBusinessRow } from "./types";
+import { rowSubmissionPayloadSchema } from "./payload-schema";
+import { resolveSubmission } from "./state-machine";
+
+import type {
+  ApprovedWorkflowEvent,
+  CoreBusinessRow,
+  RejectedWorkflowEvent,
+  ResolvedSubmission,
+  SubmittedWorkflowEvent,
+  WorkflowEvent,
+} from "./types";
 
 export interface LatestWorkflowCoreRow extends CoreBusinessRow {
   readonly recordUid: string;
@@ -161,6 +171,88 @@ export function findSubmissionEvents(
       createdAt: true,
     },
   });
+}
+
+/**
+ * Converts persisted rows to the shared immutable-event state machine input.
+ * Query modules must not derive workflow state independently.
+ */
+export function resolveStoredSubmissionEvents(
+  rows: readonly StoredSubmissionEvent[],
+): ResolvedSubmission {
+  return resolveSubmission(rows.map(toWorkflowEvent));
+}
+
+function toWorkflowEvent(row: StoredSubmissionEvent): WorkflowEvent {
+  const common = {
+    eventId: row.eventId,
+    submissionId: row.submissionId,
+    recordUid: requireStoredString(row.recordUid),
+    lecturerUid: row.lecturerUid,
+    approvalUnit: requireStoredString(row.approvalUnit),
+    actorUserId: requireStoredString(row.actorUserId),
+    createdAt: row.createdAt,
+  };
+
+  if (row.eventType === WorkflowEventType.SUBMITTED) {
+    if (!row.submissionType) invalidStoredEvent();
+    const base = {
+      ...common,
+      eventType: "SUBMITTED" as const,
+      submissionType: row.submissionType,
+      parentSubmissionId: row.parentSubmissionId,
+      payload: rowSubmissionPayloadSchema.parse(row.payload),
+      payloadChecksum: requireStoredString(row.payloadChecksum),
+    };
+    if (row.submissionType === "CREATE_NEW") {
+      if (row.baseStt !== null || row.baseVersionNo !== null) {
+        invalidStoredEvent();
+      }
+      return {
+        ...base,
+        submissionType: "CREATE_NEW",
+        baseStt: null,
+        baseVersionNo: null,
+      };
+    }
+    if (row.baseStt === null || row.baseVersionNo === null) {
+      invalidStoredEvent();
+    }
+    return {
+      ...base,
+      submissionType: row.submissionType,
+      baseStt: row.baseStt,
+      baseVersionNo: row.baseVersionNo,
+    } as SubmittedWorkflowEvent;
+  }
+
+  if (row.eventType === WorkflowEventType.REJECTED) {
+    if (!row.reason) invalidStoredEvent();
+    return {
+      ...common,
+      eventType: "REJECTED",
+      reason: row.reason,
+    } satisfies RejectedWorkflowEvent;
+  }
+
+  if (row.resultStt === null || row.resultVersionNo === null) {
+    invalidStoredEvent();
+  }
+  return {
+    ...common,
+    eventType: "APPROVED",
+    resultStt: row.resultStt,
+    resultVersionNo: row.resultVersionNo,
+  } satisfies ApprovedWorkflowEvent;
+}
+
+function requireStoredString(value: string | null): string {
+  if (!value) invalidStoredEvent();
+  return value;
+}
+
+function invalidStoredEvent(): never {
+  throw new Error("Stored workflow event violates the Phase 4 contract.");
 }
 
 export async function findPendingSubmissionId(

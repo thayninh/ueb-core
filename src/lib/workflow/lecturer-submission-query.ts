@@ -3,26 +3,20 @@ import "server-only";
 import { notFound } from "next/navigation";
 import { z } from "zod";
 
-import {
-  Prisma,
-  WorkflowEventType,
-  WorkflowSubmissionType,
-} from "@/generated/prisma/client";
+import { Prisma } from "@/generated/prisma/client";
 import { requireLecturerIdentity } from "@/lib/auth/authorization";
 
 import { withWorkflowTransaction, type WorkflowTransaction } from "./context";
-import { rowSubmissionPayloadSchema } from "./payload-schema";
-import { resolveSubmission } from "./state-machine";
+import {
+  resolveStoredSubmissionEvents,
+  type StoredSubmissionEvent,
+} from "./submission-query";
 
 import type {
-  ApprovedWorkflowEvent,
-  RejectedWorkflowEvent,
   ResolvedSubmission,
   RowSubmissionPayload,
   SubmissionState,
   SubmissionType,
-  SubmittedWorkflowEvent,
-  WorkflowEvent,
 } from "./types";
 
 export const LECTURER_SUBMISSION_PAGE_SIZE = 20;
@@ -50,6 +44,7 @@ export interface LecturerSubmissionSummaryDto {
   readonly state: SubmissionState;
   readonly submittedAt: Date;
   readonly terminalAt: Date | null;
+  readonly rejectionReason: string | null;
   readonly baseStt: number | null;
   readonly baseVersionNo: number | null;
 }
@@ -78,26 +73,6 @@ export interface PendingSubmissionByRecordDto {
   readonly submissionType: SubmissionType;
   readonly recordUid: string;
   readonly submittedAt: Date;
-}
-
-interface StoredEventRow {
-  readonly eventId: string;
-  readonly submissionId: string;
-  readonly parentSubmissionId: string | null;
-  readonly eventType: WorkflowEventType;
-  readonly submissionType: WorkflowSubmissionType | null;
-  readonly recordUid: string | null;
-  readonly lecturerUid: string;
-  readonly approvalUnit: string | null;
-  readonly baseStt: number | null;
-  readonly baseVersionNo: number | null;
-  readonly payload: Prisma.JsonValue | null;
-  readonly payloadChecksum: string | null;
-  readonly actorUserId: string | null;
-  readonly reason: string | null;
-  readonly resultStt: number | null;
-  readonly resultVersionNo: number | null;
-  readonly createdAt: Date;
 }
 
 export async function getLecturerSubmissions(
@@ -299,7 +274,7 @@ async function loadResolvedSubmissions(
       createdAt: true,
     },
   });
-  const grouped = new Map<string, StoredEventRow[]>();
+  const grouped = new Map<string, StoredSubmissionEvent[]>();
   for (const event of events) {
     const group = grouped.get(event.submissionId) ?? [];
     group.push(event);
@@ -307,57 +282,8 @@ async function loadResolvedSubmissions(
   }
   return submissionIds.flatMap((id) => {
     const group = grouped.get(id);
-    return group ? [resolveSubmission(group.map(toWorkflowEvent))] : [];
+    return group ? [resolveStoredSubmissionEvents(group)] : [];
   });
-}
-
-function toWorkflowEvent(row: StoredEventRow): WorkflowEvent {
-  const common = {
-    eventId: row.eventId,
-    submissionId: row.submissionId,
-    recordUid: requireString(row.recordUid),
-    lecturerUid: row.lecturerUid,
-    approvalUnit: requireString(row.approvalUnit),
-    actorUserId: requireString(row.actorUserId),
-    createdAt: row.createdAt,
-  };
-  if (row.eventType === WorkflowEventType.SUBMITTED) {
-    const submissionType = submissionTypeSchema.parse(row.submissionType);
-    const base = {
-      ...common,
-      eventType: "SUBMITTED" as const,
-      submissionType,
-      parentSubmissionId: row.parentSubmissionId,
-      payload: rowSubmissionPayloadSchema.parse(row.payload),
-      payloadChecksum: requireString(row.payloadChecksum),
-    };
-    if (submissionType === "CREATE_NEW") {
-      if (row.baseStt !== null || row.baseVersionNo !== null) invalidEvent();
-      return { ...base, submissionType, baseStt: null, baseVersionNo: null };
-    }
-    if (row.baseStt === null || row.baseVersionNo === null) invalidEvent();
-    return {
-      ...base,
-      submissionType,
-      baseStt: row.baseStt,
-      baseVersionNo: row.baseVersionNo,
-    } as SubmittedWorkflowEvent;
-  }
-  if (row.eventType === WorkflowEventType.REJECTED) {
-    if (!row.reason) invalidEvent();
-    return {
-      ...common,
-      eventType: "REJECTED",
-      reason: row.reason,
-    } satisfies RejectedWorkflowEvent;
-  }
-  if (row.resultStt === null || row.resultVersionNo === null) invalidEvent();
-  return {
-    ...common,
-    eventType: "APPROVED",
-    resultStt: row.resultStt,
-    resultVersionNo: row.resultVersionNo,
-  } satisfies ApprovedWorkflowEvent;
 }
 
 function toSummary(
@@ -370,6 +296,10 @@ function toSummary(
     state: submission.state,
     submittedAt: submission.submittedEvent.createdAt,
     terminalAt: submission.terminalEvent?.createdAt ?? null,
+    rejectionReason:
+      submission.terminalEvent?.eventType === "REJECTED"
+        ? submission.terminalEvent.reason
+        : null,
     baseStt: submission.submittedEvent.baseStt,
     baseVersionNo: submission.submittedEvent.baseVersionNo,
   };
@@ -382,11 +312,6 @@ function requireResolved(
   const submission = submissions.get(submissionId);
   if (!submission) invalidEvent();
   return submission;
-}
-
-function requireString(value: string | null): string {
-  if (!value) invalidEvent();
-  return value;
 }
 
 function invalidEvent(): never {
