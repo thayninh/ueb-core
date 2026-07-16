@@ -52,6 +52,36 @@ export const PHASE_4_BUSINESS_FIELDS = [
 
 export type Phase4BusinessField = (typeof PHASE_4_BUSINESS_FIELDS)[number];
 
+// Core rows expose all 20 business fields. Submission payloads intentionally
+// exclude stt because PostgreSQL allocates a new stt only when approval inserts
+// the resulting core row.
+export const PHASE_4_CORE_DISPLAY_FIELDS = PHASE_4_BUSINESS_FIELDS;
+
+export const PHASE_4_SUBMISSION_PAYLOAD_FIELDS = [
+  "don_vi_phu_trach_hoc_phan",
+  "bo_mon_phu_trach_hoc_phan",
+  "khoi_kien_thuc",
+  "ma_hoc_phan",
+  "ten_hoc_phan",
+  "ten_giang_vien",
+  "ma_so_can_bo",
+  "email_tai_khoan_vnu",
+  "bo_mon",
+  "don_vi",
+  "core_1_2_3",
+  "tc1_tro_giang",
+  "tc2_sh_chuyen_mon",
+  "tc3_tong_hop",
+  "tc3_1_nganh_tot_nghiep_phu_hop",
+  "tc3_2_bien_soan_de_cuong_giao_trinh",
+  "tc3_3_chu_nhiem_de_tai_nckh_lien_quan",
+  "tc3_4_bai_bao_lien_quan",
+  "tc4_giang_thu",
+] as const satisfies readonly Phase4BusinessField[];
+
+export type Phase4SubmissionPayloadField =
+  (typeof PHASE_4_SUBMISSION_PAYLOAD_FIELDS)[number];
+
 export const PHASE_4_READ_ONLY_FIELDS = [
   "stt",
   "ten_giang_vien",
@@ -62,6 +92,17 @@ export const PHASE_4_READ_ONLY_FIELDS = [
 ] as const satisfies readonly Phase4BusinessField[];
 
 export type Phase4ReadOnlyField = (typeof PHASE_4_READ_ONLY_FIELDS)[number];
+
+export const PHASE_4_SUBMISSION_READ_ONLY_FIELDS = [
+  "ten_giang_vien",
+  "ma_so_can_bo",
+  "email_tai_khoan_vnu",
+  "bo_mon",
+  "don_vi",
+] as const satisfies readonly Phase4SubmissionPayloadField[];
+
+export type Phase4SubmissionReadOnlyField =
+  (typeof PHASE_4_SUBMISSION_READ_ONLY_FIELDS)[number];
 
 export const PHASE_4_EDITABLE_FIELDS = [
   "don_vi_phu_trach_hoc_phan",
@@ -81,6 +122,11 @@ export const PHASE_4_EDITABLE_FIELDS = [
 ] as const satisfies readonly Phase4BusinessField[];
 
 export type Phase4EditableField = (typeof PHASE_4_EDITABLE_FIELDS)[number];
+
+export const PHASE_4_SUBMISSION_EDITABLE_FIELDS = PHASE_4_EDITABLE_FIELDS;
+
+export type Phase4SubmissionEditableField =
+  (typeof PHASE_4_SUBMISSION_EDITABLE_FIELDS)[number];
 
 export const PHASE_4_SERVER_DERIVED_TECHNICAL_FIELDS = [
   "event_id",
@@ -149,8 +195,12 @@ export interface Phase4WorkflowPolicy {
   };
   readonly fields: {
     readonly business: readonly Phase4BusinessField[];
+    readonly coreDisplay: readonly Phase4BusinessField[];
+    readonly submissionPayload: readonly Phase4SubmissionPayloadField[];
     readonly readOnly: readonly Phase4ReadOnlyField[];
+    readonly submissionReadOnly: readonly Phase4SubmissionReadOnlyField[];
     readonly editable: readonly Phase4EditableField[];
+    readonly submissionEditable: readonly Phase4SubmissionEditableField[];
     readonly serverDerivedTechnical: readonly Phase4ServerDerivedTechnicalField[];
     readonly rejectUnknownOrForbiddenClientFields: true;
   };
@@ -223,8 +273,12 @@ export const PHASE_4_WORKFLOW_POLICY = {
   },
   fields: {
     business: PHASE_4_BUSINESS_FIELDS,
+    coreDisplay: PHASE_4_CORE_DISPLAY_FIELDS,
+    submissionPayload: PHASE_4_SUBMISSION_PAYLOAD_FIELDS,
     readOnly: PHASE_4_READ_ONLY_FIELDS,
+    submissionReadOnly: PHASE_4_SUBMISSION_READ_ONLY_FIELDS,
     editable: PHASE_4_EDITABLE_FIELDS,
+    submissionEditable: PHASE_4_SUBMISSION_EDITABLE_FIELDS,
     serverDerivedTechnical: PHASE_4_SERVER_DERIVED_TECHNICAL_FIELDS,
     rejectUnknownOrForbiddenClientFields: true,
   },

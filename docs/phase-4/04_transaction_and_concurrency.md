@@ -36,7 +36,7 @@ Không dùng mutex trong Node.js vì không bảo vệ nhiều process/container
 5. Re-read current core row, parent chain và pending state trong transaction.
 6. Từ chối nếu đã có pending submission cho `record_uid`.
 7. Suy ra `approval_unit`; chặn khi thiếu/không duy nhất/inactive.
-8. Dựng canonical full-row payload bằng strict field allowlist.
+8. Dựng canonical 19-field non-`stt` payload bằng strict field allowlist; lưu `base_stt` riêng cho existing row.
 9. Sinh server `submission_id`, insert đúng một `SUBMITTED` event.
 10. Commit và trả server representation; không insert core.
 
@@ -46,7 +46,7 @@ Không dùng mutex trong Node.js vì không bảo vệ nhiều process/container
 
 ### Create new
 
-`CREATE_NEW` phải chứng minh `record_uid` chưa có core row, canonical lecturer identity/unit là duy nhất và `row.stt = NULL`. Không gọi `nextval()` ở submit.
+`CREATE_NEW` phải chứng minh `record_uid` chưa có core row, canonical lecturer identity/unit là duy nhất và submitted `row` không có key `stt`. Không gọi `nextval()` ở submit.
 
 ### Resubmit
 
@@ -71,12 +71,12 @@ Retry sau rejection không insert event mới. Service có thể trả trạng t
 3. Lấy advisory lock theo `record_uid`, rồi đọc lại event chain/current core state.
 4. Xác minh state `PENDING` và authorize active `ADMIN` hoặc assigned active leader.
 5. Chạy stale-base checks.
-6. Dựng đúng một core row từ canonical submitted payload và server fields.
-7. Insert `APPROVED` terminal event.
-8. Insert đúng một core row với `source_submission_id = submission_id`; không truyền `stt` để PostgreSQL sequence cấp.
-9. Yêu cầu `INSERT ... RETURNING` trả đúng một row; commit cả event/core hoặc rollback cả hai.
+6. Dựng đúng một core row từ canonical 19-field submitted payload và server fields; không lấy hoặc truyền `stt` từ payload.
+7. Insert đúng một core row với `source_submission_id = submission_id`; PostgreSQL sequence cấp `stt`.
+8. Yêu cầu `INSERT ... RETURNING stt` trả đúng một row, dùng giá trị đó làm `result_stt` và insert `APPROVED` terminal event.
+9. Commit cả event/core hoặc rollback cả hai.
 
-Terminal event được insert trước core trong cùng transaction để core INSERT RLS policy có thể yêu cầu một matching `APPROVED` event đã visible trong transaction. Thứ tự này không làm lộ partial state vì transaction atomic.
+Core row và terminal event vẫn atomic trong cùng transaction. Mọi database approval trigger/policy bổ sung sau này phải tương thích với thứ tự cấp `stt` thực tế này và chỉ so sánh 19 payload fields; không được yêu cầu payload chứa hoặc checksum bao phủ generated `stt`.
 
 PostgreSQL sequence không transactional; rollback có thể để lại khoảng trống `stt`. Khoảng trống được chấp nhận, không được lấp hoặc tái sử dụng và không ảnh hưởng version logic.
 
@@ -85,15 +85,15 @@ PostgreSQL sequence không transactional; rollback có thể để lại khoản
 ### `CONFIRM_UNCHANGED`
 
 - current version phải bằng stored `base_version_no`;
-- submitted 20-field payload phải bằng base current row;
+- stored `base_stt` phải định danh đúng base row và submitted 19-field payload phải bằng 19 field non-`stt` của base current row;
 - giữ `record_uid`, đặt `version_no = base + 1`;
-- dùng 20 business values của current row, trừ `stt` được sequence cấp mới.
+- dùng 19 business values của current row; `stt` là field thứ 20 được sequence cấp mới.
 
 ### `UPDATE_EXISTING`
 
 - current version phải bằng stored `base_version_no`;
 - giữ `record_uid`, đặt `version_no = base + 1`;
-- 6 read-only fields phải bằng current row;
+- 5 identity fields read-only trong payload phải bằng current row; `base_stt` được kiểm tra riêng;
 - dùng 14 editable fields từ immutable canonical submitted payload;
 - `stt` do sequence cấp mới.
 
@@ -104,6 +104,8 @@ PostgreSQL sequence không transactional; rollback có thể để lại khoản
 - đặt `version_no = 1`;
 - `stt` do sequence cấp;
 - giữ server-derived lecturer/unit/identity fields từ submitted payload.
+
+Sau core insert, `INSERT ... RETURNING` cung cấp `result_stt` để ghi trên `APPROVED` event/result contract. `base_stt` và `result_stt` là event metadata, không tham gia canonical payload hoặc `payload_checksum`.
 
 Mọi type tạo `snapshot_id` mới, `origin = APPROVED_SUBMISSION`, actor/time từ server/database và `source_submission_id` unique.
 

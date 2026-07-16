@@ -3,6 +3,8 @@ import type {
   Phase4EditableField,
   Phase4EventType,
   Phase4ReadOnlyField,
+  Phase4SubmissionPayloadField,
+  Phase4SubmissionReadOnlyField,
   Phase4SubmissionType,
   Phase4WorkflowState,
 } from "../../../config/phase-4/workflow-policy";
@@ -13,6 +15,8 @@ export type SubmissionState = Phase4WorkflowState;
 export type BusinessFieldName = Phase4BusinessField;
 export type EditableBusinessFieldName = Phase4EditableField;
 export type ReadOnlyBusinessFieldName = Phase4ReadOnlyField;
+export type SubmissionPayloadFieldName = Phase4SubmissionPayloadField;
+export type SubmissionReadOnlyFieldName = Phase4SubmissionReadOnlyField;
 
 export interface CoreBusinessRow {
   readonly stt: number;
@@ -37,19 +41,15 @@ export interface CoreBusinessRow {
   readonly tc4_giang_thu: string | null;
 }
 
-export interface RowSubmissionPayload extends Omit<CoreBusinessRow, "stt"> {
-  readonly stt: number | null;
-}
+export type RowSubmissionPayload = Omit<CoreBusinessRow, "stt">;
 
 export type EditableBusinessFields = Readonly<
   Pick<RowSubmissionPayload, EditableBusinessFieldName>
 >;
 
 export type CreateNewServerDerivedFields = Readonly<
-  Pick<RowSubmissionPayload, ReadOnlyBusinessFieldName>
-> & {
-  readonly stt: null;
-};
+  Pick<RowSubmissionPayload, SubmissionReadOnlyFieldName>
+>;
 
 interface WorkflowEventBase {
   readonly eventId: string;

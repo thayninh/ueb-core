@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  BUSINESS_FIELD_NAMES,
+  SUBMISSION_PAYLOAD_FIELD_NAMES,
   calculateRowSubmissionChecksum,
   canonicalizeRowSubmissionPayload,
   verifyRowSubmissionChecksum,
@@ -12,7 +12,6 @@ import {
 import type { RowSubmissionPayload } from "../../src/lib/workflow";
 
 const PAYLOAD = {
-  stt: 42,
   don_vi_phu_trach_hoc_phan: "Unit A",
   bo_mon_phu_trach_hoc_phan: null,
   khoi_kien_thuc: 1,
@@ -55,21 +54,27 @@ describe("Phase 4 workflow payload checksum", () => {
     );
   });
 
-  it("changes when one business field changes", () => {
+  it("changes when one of the nineteen payload fields changes", () => {
     expect(
       calculateRowSubmissionChecksum({ ...PAYLOAD, ten_hoc_phan: "Changed" }),
     ).not.toBe(calculateRowSubmissionChecksum(PAYLOAD));
   });
 
-  it("canonicalizes keys in the exact 20-field contract order", () => {
+  it("canonicalizes keys in the exact 19-field payload order", () => {
     const canonicalPayload = JSON.parse(
       canonicalizeRowSubmissionPayload(PAYLOAD),
     ) as Record<string, unknown>;
 
-    expect(Object.keys(canonicalPayload)).toEqual(BUSINESS_FIELD_NAMES);
+    expect(Object.keys(canonicalPayload)).toEqual(
+      SUBMISSION_PAYLOAD_FIELD_NAMES,
+    );
+    expect(canonicalPayload).not.toHaveProperty("stt");
   });
 
   it("rejects technical metadata instead of including or dropping it", () => {
+    expect(() =>
+      calculateRowSubmissionChecksum({ ...PAYLOAD, stt: 42 }),
+    ).toThrow();
     expect(() =>
       calculateRowSubmissionChecksum({
         ...PAYLOAD,
@@ -82,6 +87,15 @@ describe("Phase 4 workflow payload checksum", () => {
         payload_checksum: "a".repeat(64),
       }),
     ).toThrow();
+  });
+
+  it("is unaffected when only baseStt event metadata differs", () => {
+    const firstSubmission = { baseStt: 42, payload: PAYLOAD };
+    const secondSubmission = { baseStt: 2570, payload: PAYLOAD };
+
+    expect(calculateRowSubmissionChecksum(firstSubmission.payload)).toBe(
+      calculateRowSubmissionChecksum(secondSubmission.payload),
+    );
   });
 
   it("rejects invalid payloads before hashing", () => {

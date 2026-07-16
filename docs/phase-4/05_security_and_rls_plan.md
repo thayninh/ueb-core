@@ -50,21 +50,33 @@ Database validation phải buộc terminal `lecturer_uid`, `record_uid`, `approv
 
 ## 3. Core `INSERT` policy đề xuất
 
-RLS `ueb_core_data` giữ SELECT policy Phase 3 nhưng current-data DAL phải lọc latest version. Bổ sung policy `FOR INSERT WITH CHECK` chỉ cho approved workflow transaction khi:
+RLS `ueb_core_data` giữ SELECT policy Phase 3 nhưng current-data DAL phải lọc latest version. Approval dùng đúng thứ tự atomic sau trong một transaction:
+
+1. xác minh submission có đúng một `SUBMITTED` event và chưa có terminal event;
+2. authorize current actor là active `ADMIN`, hoặc active `FACULTY_LEADER` có exact active unit scope khớp stored `approval_unit`;
+3. lấy advisory lock theo `record_uid`, đọc lại current state và từ chối stale base;
+4. insert đúng một core row mà không truyền `stt`, dùng `INSERT ... RETURNING stt, version_no` để lấy kết quả PostgreSQL thực tế;
+5. insert `APPROVED` event với `result_stt` và `result_version_no` từ kết quả `RETURNING`;
+6. commit cả core row và terminal event; nếu insert `APPROVED` hoặc bước validation nào thất bại thì rollback toàn transaction.
+
+Core `INSERT` policy hoặc validation trigger chỉ được cho phép approved workflow transaction khi:
 
 - current user là active `ADMIN` hoặc assigned active leader khớp `approval_unit`;
 - `origin = APPROVED_SUBMISSION`;
-- `source_submission_id IS NOT NULL` và matching `APPROVED` event tồn tại trong transaction;
-- approved event actor là current user;
-- core `lecturer_uid`, `record_uid`, `approval_unit` và approved payload khớp immutable submission;
+- `source_submission_id IS NOT NULL`, chưa từng được dùng và tham chiếu đúng một matching `SUBMITTED` event;
+- matching submission chưa có `APPROVED` hoặc `REJECTED` terminal event;
+- `SUBMITTED.actor_user_id`, lecturer ownership, parent/pending state và immutable metadata hợp lệ;
+- core `lecturer_uid`, `record_uid`, `approval_unit` và đúng 19 submission payload fields khớp immutable `SUBMITTED` event;
 - `approved_by = current user`;
 - provenance legacy-only không bị giả mạo;
-- version rule đúng với submission type;
+- base version chưa stale và version rule đúng với submission type;
 - `stt` đến từ identity sequence/default, không từ client/application payload.
+
+Policy/trigger không được yêu cầu matching `APPROVED` event đã tồn tại trước core insert. Database validation chỉ so sánh 19 field trong canonical submission payload; generated `stt` không thuộc payload, checksum hoặc phép so sánh này. Core row sau insert vẫn có đủ 20 trường hiển thị vì PostgreSQL sequence cấp field thứ 20 là `stt`.
 
 Runtime chỉ được grant `INSERT` trên các cột cần cho approved row và `USAGE` trên identity sequence; không grant sequence `UPDATE`/`setval`, core `UPDATE`, `DELETE`, `TRUNCATE`, `REFERENCES` hoặc `TRIGGER`.
 
-Policy là defense-in-depth. Transaction service vẫn phải kiểm tra state, stale base, exact row count và field contract trước insert.
+Policy là defense-in-depth. Transaction service vẫn phải kiểm tra state, stale base, exact row count và field contract trước insert. Partial unique terminal-event index, global uniqueness của non-null `source_submission_id`, advisory lock và transaction atomic cùng bảo vệ double approval; không lớp nào yêu cầu terminal event phải được ghi trước core row.
 
 ## 4. Role behavior
 
@@ -114,9 +126,12 @@ Nếu một user có nhiều role, mỗi action vẫn cần grant tương ứng;
 | Resubmit | CREATE_NEW rejected chain đổi `record_uid` từ client | Từ chối; server giữ UID parent |
 | Approval | REJECTED tạo core row | Test fail; count phải 0 |
 | Approval | APPROVED tạo 0 hoặc hơn 1 core row | Transaction rollback/test fail |
+| Approval | Core insert thành công nhưng insert `APPROVED` thất bại | Toàn transaction rollback; không còn core row |
+| Approval | `result_stt`/`result_version_no` khác `INSERT ... RETURNING` | Database/app từ chối; rollback |
 | Approval | Duplicate `source_submission_id` ở record khác | Unique violation; rollback |
 | Approval | Application truyền explicit `stt` | Contract/RLS test từ chối |
 | Approval | Application tính `MAX(stt) + 1` | Static/SQL contract test fail |
+| Approval | Validation so sánh generated `stt` với payload | Static/SQL contract test fail; chỉ so sánh 19 payload fields |
 | Approval | Approved row giả `source_import_run_id` | Từ chối provenance |
 | RLS | Thiếu `app.current_user_id` | SELECT 0 row, INSERT denied |
 | RLS | Runtime trực tiếp insert arbitrary workflow/core row | RLS/constraint denied |

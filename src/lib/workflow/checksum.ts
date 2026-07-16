@@ -1,12 +1,15 @@
 import { createHash } from "node:crypto";
 
-import { BUSINESS_FIELD_NAMES } from "./field-policy";
+import { SUBMISSION_PAYLOAD_FIELD_NAMES } from "./field-policy";
 import { rowSubmissionPayloadSchema } from "./payload-schema";
 
 export function canonicalizeRowSubmissionPayload(payload: unknown): string {
   const validatedPayload = rowSubmissionPayloadSchema.parse(payload);
   const canonicalPayload = Object.fromEntries(
-    BUSINESS_FIELD_NAMES.map((field) => [field, validatedPayload[field]]),
+    SUBMISSION_PAYLOAD_FIELD_NAMES.map((field) => [
+      field,
+      validatedPayload[field],
+    ]),
   );
 
   return JSON.stringify(canonicalPayload);

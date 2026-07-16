@@ -1,6 +1,7 @@
 // @vitest-environment node
 
 import { readFileSync, readdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 
 import { describe, expect, expectTypeOf, it } from "vitest";
 
@@ -11,6 +12,8 @@ import type {
   ReadOnlyBusinessFieldName,
   RejectedWorkflowEvent,
   RowSubmissionPayload,
+  SubmissionPayloadFieldName,
+  SubmissionReadOnlyFieldName,
   SubmissionState,
   SubmissionType,
   SubmittedWorkflowEvent,
@@ -34,32 +37,36 @@ describe("Phase 4 workflow domain types", () => {
   });
 
   it("derives all field-name types from the committed field contract", () => {
-    expectTypeOf<BusinessFieldName>().toMatchTypeOf<
+    expectTypeOf<SubmissionPayloadFieldName>().toEqualTypeOf<
       keyof RowSubmissionPayload
     >();
     expectTypeOf<EditableBusinessFieldName>().toMatchTypeOf<BusinessFieldName>();
     expectTypeOf<ReadOnlyBusinessFieldName>().toMatchTypeOf<BusinessFieldName>();
+    expectTypeOf<SubmissionReadOnlyFieldName>().toMatchTypeOf<SubmissionPayloadFieldName>();
+    expectTypeOf<
+      Extract<"stt", keyof RowSubmissionPayload>
+    >().toEqualTypeOf<never>();
   });
 
   it("keeps technical metadata out of RowSubmissionPayload", () => {
     type TechnicalField =
-      | "event_id"
-      | "submission_id"
-      | "parent_submission_id"
-      | "lecturer_uid"
-      | "record_uid"
-      | "snapshot_id"
-      | "version_no"
-      | "source_submission_id"
-      | "approval_unit"
-      | "approved_by"
-      | "approved_at"
-      | "created_at"
-      | "payload_checksum"
-      | "base_stt"
-      | "base_version_no"
-      | "result_stt"
-      | "result_version_no";
+      | "eventId"
+      | "submissionId"
+      | "parentSubmissionId"
+      | "lecturerUid"
+      | "recordUid"
+      | "snapshotId"
+      | "versionNo"
+      | "sourceSubmissionId"
+      | "approvalUnit"
+      | "approvedBy"
+      | "approvedAt"
+      | "createdAt"
+      | "payloadChecksum"
+      | "baseStt"
+      | "baseVersionNo"
+      | "resultStt"
+      | "resultVersionNo";
     type TechnicalOverlap = Extract<keyof RowSubmissionPayload, TechnicalField>;
 
     expectTypeOf<TechnicalOverlap>().toEqualTypeOf<never>();
@@ -76,7 +83,6 @@ describe("Phase 4 workflow domain types", () => {
       createdAt: new Date("2026-07-16T00:00:00.000Z"),
     } as const;
     const payload = {
-      stt: null,
       don_vi_phu_trach_hoc_phan: null,
       bo_mon_phu_trach_hoc_phan: null,
       khoi_kien_thuc: 1,
@@ -140,5 +146,26 @@ describe("Phase 4 workflow domain types", () => {
     expect(source).not.toMatch(
       /PrismaClient|getPrismaClient|@prisma|generated\/prisma|next\/headers|next\/cookies|server-only|better-auth|src\/lib\/data/u,
     );
+  });
+
+  it("does not change the Prisma schema or Phase 4 database migration", () => {
+    const repositoryRoot = new URL("../../", import.meta.url);
+    const files = [
+      [
+        "prisma/schema.prisma",
+        "bd0dfee1bfe265324fc9389f4186c854f11794783da04daaf568ac4f22076f1a",
+      ],
+      [
+        "prisma/migrations/20260716040000_phase_4_row_workflow_contract/migration.sql",
+        "6045e43735abfa55d6953178794532f99f664a0772d23894ceb92285ffcff398",
+      ],
+    ] as const;
+
+    for (const [path, expectedHash] of files) {
+      const source = readFileSync(new URL(path, repositoryRoot));
+      expect(createHash("sha256").update(source).digest("hex")).toBe(
+        expectedHash,
+      );
+    }
   });
 });

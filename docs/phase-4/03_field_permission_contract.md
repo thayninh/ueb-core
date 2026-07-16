@@ -40,27 +40,27 @@ Validation phải giữ các quyết định data contract Phase 2: `khoi_kien_t
 
 | Field group | `CONFIRM_UNCHANGED` | `UPDATE_EXISTING` | `CREATE_NEW` |
 | --- | --- | --- | --- |
-| 6 read-only | Server copy current row | Server copy current row | Server lấy canonical lecturer identity/current data; `stt = NULL` cho tới approval |
+| 6 read-only ở UI/core | Server copy 5 identity fields; lưu `base_stt` riêng | Server copy 5 identity fields; lưu `base_stt` riêng | Server lấy 5 canonical identity fields; payload không có `stt` |
 | 14 editable | Client không gửi; server copy current row | Client gửi đủ canonical editable payload theo schema | Client gửi đủ canonical editable payload theo schema |
 | `record_uid` | Server resolve current row | Server resolve current row | Server sinh khi initial submit; resubmit giữ UID đã sinh |
 | `version_no` | Server lưu base; approval lấy current + 1 | Server lưu base; approval lấy current + 1 | `NULL` ở base; approval đặt 1 |
 | `approval_unit` | Current core version | Current core version | Unique current lecturer unit |
 | `stt` khi approval | Omit explicit value, sequence cấp STT mới | Omit explicit value, sequence cấp STT mới | Omit explicit value, sequence cấp STT mới |
 
-Mọi approval đều tạo row mới nên cả confirm/update cũng nhận `stt` mới từ sequence. `stt` cũ chỉ nằm trong canonical submitted row để đối chiếu; khi dựng core insert, application không truyền lại `stt` cũ.
+Mọi approval đều tạo row mới nên cả confirm/update cũng nhận `stt` mới từ sequence. `stt` cũ chỉ nằm ở event metadata `base_stt`; `stt` mới được ghi ở terminal metadata `result_stt`. Không giá trị nào nằm trong `row` payload hoặc payload checksum.
 
-## 5. Canonical full-row payload
+## 5. Canonical submission payload
 
-Submission lưu đủ 20 field để audit, nhưng nguồn từng field khác nhau:
+Core/display contract vẫn có đủ 20 field. Persisted submission payload chỉ có đúng 19 field non-`stt`:
 
-- server dựng toàn bộ object theo danh sách `PHASE_4_BUSINESS_FIELDS`;
-- server copy 6 read-only fields;
+- server dựng object theo danh sách `PHASE_4_SUBMISSION_PAYLOAD_FIELDS`;
+- server copy 5 identity fields read-only;
 - server merge/validate 14 editable fields khi type cho phép;
-- `CREATE_NEW.row.stt = NULL` cho tới approval;
+- `stt`, `base_stt`, `result_stt` và các technical fields không nằm trong payload;
 - unknown key và duplicate/ambiguous representation bị từ chối;
 - không lưu raw form body hoặc technical field ngoài contract vào row payload.
 
-Đối với `CONFIRM_UNCHANGED`, server so sánh canonical payload với current row và yêu cầu giống đủ 20 field. Đối với `UPDATE_EXISTING`, server chứng minh 6 read-only field không đến từ client và row sau merge đủ 20 field.
+Đối với `CONFIRM_UNCHANGED`, server so sánh canonical payload với đúng 19 field non-`stt` của current row. Đối với `UPDATE_EXISTING`, server chứng minh 5 identity fields không đến từ client và row sau merge đủ 19 field. Checksum canonical hóa đúng 19 field theo stable order; thay đổi `base_stt`/`result_stt` không làm đổi checksum.
 
 ## 6. Technical fields do server suy ra
 

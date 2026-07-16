@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  BUSINESS_FIELD_NAMES,
+  SUBMISSION_PAYLOAD_FIELD_NAMES,
   buildConfirmUnchangedPayload,
   buildCreateNewPayload,
   buildUpdateExistingPayload,
@@ -63,13 +63,14 @@ const EDITABLE_FIELDS = {
 } as const satisfies EditableBusinessFields;
 
 const CREATE_SERVER_FIELDS = {
-  stt: null,
   ten_giang_vien: "Test Lecturer",
   ma_so_can_bo: "TEST-001",
   email_tai_khoan_vnu: "lecturer@example.test",
   bo_mon: "Test Department",
   don_vi: "Test Faculty",
 } as const satisfies CreateNewServerDerivedFields;
+
+const CURRENT_PAYLOAD = buildConfirmUnchangedPayload(CURRENT_ROW);
 
 describe("Phase 4 workflow payload schemas and builders", () => {
   it("accepts the exact confirm-unchanged locator and base metadata", () => {
@@ -197,15 +198,16 @@ describe("Phase 4 workflow payload schemas and builders", () => {
     ).toBe(false);
   });
 
-  it("builds confirm unchanged from exactly the current row", () => {
+  it("builds confirm unchanged from the nineteen non-STT current fields", () => {
     const payload = buildConfirmUnchangedPayload(CURRENT_ROW);
 
-    expect(payload).toEqual(CURRENT_ROW);
-    expect(Object.keys(payload)).toEqual(BUSINESS_FIELD_NAMES);
+    expect(payload).toEqual(CURRENT_PAYLOAD);
+    expect(payload).not.toHaveProperty("stt");
+    expect(Object.keys(payload)).toEqual(SUBMISSION_PAYLOAD_FIELD_NAMES);
     expect(payload).not.toBe(CURRENT_ROW);
   });
 
-  it("builds update with six current read-only and fourteen edited fields", () => {
+  it("builds update with five current identity and fourteen edited fields", () => {
     const payload = buildUpdateExistingPayload(CURRENT_ROW, EDITABLE_FIELDS);
 
     expect(payload.ten_giang_vien).toBe(CURRENT_ROW.ten_giang_vien);
@@ -213,22 +215,23 @@ describe("Phase 4 workflow payload schemas and builders", () => {
     expect(payload.email_tai_khoan_vnu).toBe(CURRENT_ROW.email_tai_khoan_vnu);
     expect(payload.bo_mon).toBe(CURRENT_ROW.bo_mon);
     expect(payload.don_vi).toBe(CURRENT_ROW.don_vi);
-    expect(payload.stt).toBe(CURRENT_ROW.stt);
+    expect(payload).not.toHaveProperty("stt");
+    expect(Object.keys(payload)).toEqual(SUBMISSION_PAYLOAD_FIELD_NAMES);
     expect(payload.ten_hoc_phan).toBe(EDITABLE_FIELDS.ten_hoc_phan);
     expect(payload.khoi_kien_thuc).toBe(EDITABLE_FIELDS.khoi_kien_thuc);
   });
 
-  it("builds create new with server identity and a null unassigned STT", () => {
+  it("builds create new with server identity and no STT placeholder", () => {
     const payload = buildCreateNewPayload(
       CREATE_SERVER_FIELDS,
       EDITABLE_FIELDS,
     );
 
-    expect(payload.stt).toBeNull();
+    expect(payload).not.toHaveProperty("stt");
     expect(payload.ten_giang_vien).toBe(CREATE_SERVER_FIELDS.ten_giang_vien);
     expect(payload.don_vi).toBe(CREATE_SERVER_FIELDS.don_vi);
     expect(payload.ma_hoc_phan).toBe(EDITABLE_FIELDS.ma_hoc_phan);
-    expect(Object.keys(payload)).toEqual(BUSINESS_FIELD_NAMES);
+    expect(Object.keys(payload)).toEqual(SUBMISSION_PAYLOAD_FIELD_NAMES);
   });
 
   it("does not mutate current, editable, or server-derived arguments", () => {
@@ -266,13 +269,13 @@ describe("Phase 4 workflow payload schemas and builders", () => {
   it("rejects invalid number and text data types", () => {
     expect(
       rowSubmissionPayloadSchema.safeParse({
-        ...CURRENT_ROW,
+        ...CURRENT_PAYLOAD,
         khoi_kien_thuc: "1",
       }).success,
     ).toBe(false);
     expect(
       rowSubmissionPayloadSchema.safeParse({
-        ...CURRENT_ROW,
+        ...CURRENT_PAYLOAD,
         ten_hoc_phan: 123,
       }).success,
     ).toBe(false);
@@ -280,7 +283,7 @@ describe("Phase 4 workflow payload schemas and builders", () => {
 
   it("preserves empty strings and accepts null only on nullable text fields", () => {
     const emptyTextPayload = rowSubmissionPayloadSchema.parse({
-      ...CURRENT_ROW,
+      ...CURRENT_PAYLOAD,
       ten_hoc_phan: "",
       tc1_tro_giang: null,
     });
@@ -289,8 +292,29 @@ describe("Phase 4 workflow payload schemas and builders", () => {
     expect(emptyTextPayload.tc1_tro_giang).toBeNull();
     expect(
       rowSubmissionPayloadSchema.safeParse({
-        ...CURRENT_ROW,
+        ...CURRENT_PAYLOAD,
         khoi_kien_thuc: null,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects stt and base/result metadata in the persisted payload", () => {
+    expect(
+      rowSubmissionPayloadSchema.safeParse({
+        ...CURRENT_PAYLOAD,
+        stt: CURRENT_ROW.stt,
+      }).success,
+    ).toBe(false);
+    expect(
+      rowSubmissionPayloadSchema.safeParse({
+        ...CURRENT_PAYLOAD,
+        baseStt: CURRENT_ROW.stt,
+      }).success,
+    ).toBe(false);
+    expect(
+      rowSubmissionPayloadSchema.safeParse({
+        ...CURRENT_PAYLOAD,
+        resultStt: 2570,
       }).success,
     ).toBe(false);
   });

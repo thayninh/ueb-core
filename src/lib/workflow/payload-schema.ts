@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { SUBMISSION_PAYLOAD_FIELD_NAMES } from "./field-policy";
+
 import type {
   CoreBusinessRow,
   CreateNewServerDerivedFields,
@@ -11,8 +13,15 @@ const nullableBusinessTextSchema = z.string().nullable();
 const sttSchema = z.number().int();
 const versionNoSchema = z.number().int().min(1);
 
-const businessRowShape = {
-  stt: sttSchema.nullable(),
+function selectSubmissionFields(
+  currentRow: CoreBusinessRow,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    SUBMISSION_PAYLOAD_FIELD_NAMES.map((field) => [field, currentRow[field]]),
+  );
+}
+
+const submissionPayloadShape = {
   don_vi_phu_trach_hoc_phan: nullableBusinessTextSchema,
   bo_mon_phu_trach_hoc_phan: nullableBusinessTextSchema,
   khoi_kien_thuc: z.number().int(),
@@ -35,13 +44,13 @@ const businessRowShape = {
 } as const;
 
 export const rowSubmissionPayloadSchema = z
-  .object(businessRowShape)
+  .object(submissionPayloadShape)
   .strict() satisfies z.ZodType<RowSubmissionPayload>;
 
 const coreBusinessRowSchema = z
   .object({
-    ...businessRowShape,
     stt: sttSchema,
+    ...submissionPayloadShape,
   })
   .strict() satisfies z.ZodType<CoreBusinessRow>;
 
@@ -66,7 +75,6 @@ const editableBusinessFieldsSchema = z
 
 const createNewServerDerivedFieldsSchema = z
   .object({
-    stt: z.null(),
     ten_giang_vien: nullableBusinessTextSchema,
     ma_so_can_bo: nullableBusinessTextSchema,
     email_tai_khoan_vnu: nullableBusinessTextSchema,
@@ -111,9 +119,11 @@ export type CreateNewInput = z.infer<typeof createNewInputSchema>;
 export function buildConfirmUnchangedPayload(
   currentRow: CoreBusinessRow,
 ): RowSubmissionPayload {
-  return rowSubmissionPayloadSchema.parse(
+  const submittedFields = selectSubmissionFields(
     coreBusinessRowSchema.parse(currentRow),
   );
+
+  return rowSubmissionPayloadSchema.parse(submittedFields);
 }
 
 export function buildUpdateExistingPayload(
@@ -123,9 +133,10 @@ export function buildUpdateExistingPayload(
   const validatedCurrentRow = coreBusinessRowSchema.parse(currentRow);
   const validatedEditableInput =
     editableBusinessFieldsSchema.parse(editableInput);
+  const submittedFields = selectSubmissionFields(validatedCurrentRow);
 
   return rowSubmissionPayloadSchema.parse({
-    ...validatedCurrentRow,
+    ...submittedFields,
     ...validatedEditableInput,
   });
 }

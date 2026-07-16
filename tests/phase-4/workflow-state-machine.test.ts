@@ -18,7 +18,6 @@ import type {
 } from "../../src/lib/workflow";
 
 const PAYLOAD = {
-  stt: 42,
   don_vi_phu_trach_hoc_phan: null,
   bo_mon_phu_trach_hoc_phan: null,
   khoi_kien_thuc: 1,
