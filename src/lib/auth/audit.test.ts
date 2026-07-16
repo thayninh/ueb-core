@@ -6,6 +6,7 @@ import {
   appendAuthAuditEvent,
   AUTH_AUDIT_EVENT_TYPES,
   hashAuditIdentifier,
+  withPhase5ProvisioningAuditContext,
 } from "@/lib/auth/audit";
 
 describe("authentication audit policy", () => {
@@ -25,6 +26,7 @@ describe("authentication audit policy", () => {
       "LECTURER_MAPPING_ASSIGNED",
       "LECTURER_MAPPING_REMOVED",
       "SESSION_REVOKED",
+      "PROVISIONING_BATCH_RECONCILED",
     ]);
   });
 
@@ -57,5 +59,23 @@ describe("authentication audit policy", () => {
     expect(create.mock.calls[0]?.[0]).not.toHaveProperty("data.email");
     expect(create.mock.calls[0]?.[0]).not.toHaveProperty("data.password");
     expect(create.mock.calls[0]?.[0]).not.toHaveProperty("data.sessionToken");
+  });
+
+  it("adds only controlled Phase 5 batch evidence fields", () => {
+    expect(
+      withPhase5ProvisioningAuditContext(
+        { role: "LECTURER" },
+        {
+          approvalBatchId: "phase5-pilot-01",
+          inputChecksum: "a".repeat(64),
+          operation: "APPLY",
+        },
+      ),
+    ).toEqual({
+      role: "LECTURER",
+      phase5ApprovalBatchId: "phase5-pilot-01",
+      phase5InputChecksum: "a".repeat(64),
+      phase5Operation: "APPLY",
+    });
   });
 });

@@ -17,6 +17,7 @@ export const AUTH_AUDIT_EVENT_TYPES = [
   "LECTURER_MAPPING_ASSIGNED",
   "LECTURER_MAPPING_REMOVED",
   "SESSION_REVOKED",
+  "PROVISIONING_BATCH_RECONCILED",
 ] as const;
 
 export type AuthAuditEventType = (typeof AUTH_AUDIT_EVENT_TYPES)[number];
@@ -24,6 +25,12 @@ export type AuthAuditOutcome = "SUCCESS" | "FAILED";
 export type AuthAuditMetadata = Readonly<
   Record<string, string | number | null>
 >;
+
+export interface Phase5ProvisioningAuditContext {
+  readonly approvalBatchId: string;
+  readonly inputChecksum: string;
+  readonly operation: "APPLY" | "ROLLBACK";
+}
 
 const MINIMUM_AUDIT_SECRET_LENGTH = 32;
 
@@ -73,4 +80,17 @@ export async function appendAuthAuditEvent(
       metadata: event.metadata,
     },
   });
+}
+
+export function withPhase5ProvisioningAuditContext(
+  metadata: AuthAuditMetadata,
+  context?: Phase5ProvisioningAuditContext,
+): AuthAuditMetadata {
+  if (!context) return metadata;
+  return {
+    ...metadata,
+    phase5ApprovalBatchId: context.approvalBatchId,
+    phase5InputChecksum: context.inputChecksum,
+    phase5Operation: context.operation,
+  };
 }

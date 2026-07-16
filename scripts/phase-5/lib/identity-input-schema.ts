@@ -9,6 +9,17 @@ export const APPROVED_UNIT_UIDS = [
   "KTKT",
 ] as const;
 
+export const APPROVED_UNIT_SOURCE_VALUES: Readonly<
+  Record<(typeof APPROVED_UNIT_UIDS)[number], string>
+> = {
+  KTPT: "Khoa KTPT",
+  QTKD: "Viện QTKD",
+  KTKDQT: "Khoa KT&KDQT",
+  KTCT: "Khoa KTCT",
+  TCNH: "Khoa TCNH",
+  KTKT: "Khoa KTKT",
+};
+
 export const IDENTITY_INPUT_ERROR_CODES = [
   "DOCUMENT_NOT_ARRAY",
   "INPUT_RECORD_LIMIT_EXCEEDED",
