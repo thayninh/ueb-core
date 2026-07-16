@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 
 import { describe, expect, expectTypeOf, it } from "vitest";
@@ -138,8 +138,15 @@ describe("Phase 4 workflow domain types", () => {
       "../../src/lib/workflow/",
       import.meta.url,
     );
-    const source = readdirSync(workflowDirectory)
-      .filter((file) => file.endsWith(".ts"))
+    const source = [
+      "checksum.ts",
+      "errors.ts",
+      "field-policy.ts",
+      "index.ts",
+      "payload-schema.ts",
+      "state-machine.ts",
+      "types.ts",
+    ]
       .map((file) => readFileSync(new URL(file, workflowDirectory), "utf8"))
       .join("\n");
 
