@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BusinessRole } from "@/generated/prisma/client";
 import { getAdminData } from "@/lib/data/admin-data";
-import { UEB_CORE_DATA_DTO_SELECT } from "@/lib/data/dto";
 import { getLeaderData, getLeaderDataPage } from "@/lib/data/leader-data";
 import { getLecturerData } from "@/lib/data/lecturer-data";
 
@@ -13,8 +12,6 @@ const mocks = vi.hoisted(() => ({
   requireLecturerIdentity: vi.fn(),
   requireRole: vi.fn(),
   requireUnitScope: vi.fn(),
-  coreFindMany: vi.fn(),
-  coreCount: vi.fn(),
   unitFindMany: vi.fn(),
   unitFindFirst: vi.fn(),
   queryRaw: vi.fn(),
@@ -37,16 +34,16 @@ vi.mock("@/lib/server/prisma", () => ({
 describe("role-scoped core data DAL", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.coreFindMany.mockResolvedValue([]);
-    mocks.queryRaw.mockResolvedValue([{ set_config: "" }]);
+    mocks.queryRaw.mockImplementation((query: { strings?: readonly string[] }) => {
+      const sql = query.strings?.join("?") ?? "";
+      if (sql.includes("set_config")) return Promise.resolve([{ set_config: "" }]);
+      if (sql.includes("count(*)")) return Promise.resolve([{ totalRows: 51 }]);
+      return Promise.resolve([]);
+    });
     mocks.transaction.mockImplementation(
       async (
         callback: (transaction: {
           $queryRaw: typeof mocks.queryRaw;
-          uebCoreData: {
-            findMany: typeof mocks.coreFindMany;
-            count: typeof mocks.coreCount;
-          };
           organizationUnit: {
             findMany: typeof mocks.unitFindMany;
             findFirst: typeof mocks.unitFindFirst;
@@ -55,10 +52,6 @@ describe("role-scoped core data DAL", () => {
       ) =>
         callback({
           $queryRaw: mocks.queryRaw,
-          uebCoreData: {
-            findMany: mocks.coreFindMany,
-            count: mocks.coreCount,
-          },
           organizationUnit: {
             findMany: mocks.unitFindMany,
             findFirst: mocks.unitFindFirst,
@@ -75,15 +68,13 @@ describe("role-scoped core data DAL", () => {
 
     await getLecturerData();
 
-    expect(mocks.coreFindMany).toHaveBeenCalledWith({
-      where: { lecturerUid: "lecturer-from-database" },
-      orderBy: { stt: "asc" },
-      select: UEB_CORE_DATA_DTO_SELECT,
-    });
-    expect(mocks.queryRaw).toHaveBeenCalledOnce();
+    expect(mocks.requireLecturerIdentity).toHaveBeenCalledOnce();
+    expect(mocks.queryRaw).toHaveBeenCalledTimes(2);
     expect(mocks.queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.coreFindMany.mock.invocationCallOrder[0] ?? 0,
+      mocks.queryRaw.mock.invocationCallOrder[1] ?? 0,
     );
+    expect(rawQueryValues(1)).toContain("lecturer-from-database");
+    expect(rawQueryText(1)).toContain('PARTITION BY "core"."record_uid"');
     expect(getLecturerData).toHaveLength(0);
   });
 
@@ -108,14 +99,8 @@ describe("role-scoped core data DAL", () => {
       },
       select: { sourceValue: true },
     });
-    expect(mocks.coreFindMany).toHaveBeenCalledWith({
-      where: {
-        approvalUnit: { in: ["Exact database approval unit"] },
-      },
-      orderBy: { stt: "asc" },
-      select: UEB_CORE_DATA_DTO_SELECT,
-    });
-    expect(mocks.queryRaw).toHaveBeenCalledOnce();
+    expect(mocks.queryRaw).toHaveBeenCalledTimes(2);
+    expect(rawQueryValues(1)).toContain("Exact database approval unit");
     expect(getLeaderData).toHaveLength(0);
   });
 
@@ -125,11 +110,8 @@ describe("role-scoped core data DAL", () => {
     await getAdminData();
 
     expect(mocks.requireAdmin).toHaveBeenCalledOnce();
-    expect(mocks.coreFindMany).toHaveBeenCalledWith({
-      orderBy: { stt: "asc" },
-      select: UEB_CORE_DATA_DTO_SELECT,
-    });
-    expect(mocks.queryRaw).toHaveBeenCalledOnce();
+    expect(mocks.queryRaw).toHaveBeenCalledTimes(2);
+    expect(rawQueryText(1)).toContain('WHERE TRUE');
   });
 
   it("validates the selected unit and applies server-side search and pagination", async () => {
@@ -139,8 +121,6 @@ describe("role-scoped core data DAL", () => {
       displayName: "Assigned unit",
       sourceValue: "Exact assigned source value",
     });
-    mocks.coreCount.mockResolvedValue(51);
-
     const result = await getLeaderDataPage({
       unitId: "assigned-unit-id",
       search: "  Lecturer name  ",
@@ -152,20 +132,11 @@ describe("role-scoped core data DAL", () => {
       where: { id: "assigned-unit-id", isActive: true },
       select: { id: true, displayName: true, sourceValue: true },
     });
-    expect(mocks.coreCount).toHaveBeenCalledWith({
-      where: expect.objectContaining({
-        approvalUnit: "Exact assigned source value",
-        OR: expect.any(Array),
-      }),
-    });
-    expect(mocks.coreFindMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          approvalUnit: "Exact assigned source value",
-        }),
-        skip: 25,
-        take: 25,
-      }),
+    expect(mocks.queryRaw).toHaveBeenCalledTimes(3);
+    expect(rawQueryText(1)).toContain("count(*)");
+    expect(rawQueryText(2)).toContain("LIMIT");
+    expect(rawQueryValues(1)).toEqual(
+      expect.arrayContaining(["Exact assigned source value", "%Lecturer name%"]),
     );
     expect(result).toMatchObject({
       search: "Lecturer name",
@@ -176,3 +147,17 @@ describe("role-scoped core data DAL", () => {
     });
   });
 });
+
+function rawQueryText(index: number): string {
+  const query = mocks.queryRaw.mock.calls[index]?.[0] as {
+    strings?: readonly string[];
+  };
+  return query.strings?.join("?") ?? "";
+}
+
+function rawQueryValues(index: number): readonly unknown[] {
+  const query = mocks.queryRaw.mock.calls[index]?.[0] as {
+    values?: readonly unknown[];
+  };
+  return query.values ?? [];
+}

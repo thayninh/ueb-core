@@ -1,5 +1,5 @@
-import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CoreDataTable } from "@/components/core-data-table";
 import type { UebCoreDataDto } from "@/lib/data/dto";
@@ -38,6 +38,8 @@ const row: UebCoreDataDto = {
 };
 
 describe("CoreDataTable", () => {
+  afterEach(cleanup);
+
   it("renders all 20 source-contract business columns", () => {
     render(<CoreDataTable rows={[row]} />);
 
@@ -46,5 +48,23 @@ describe("CoreDataTable", () => {
     expect(within(dataRow).getAllByRole("cell")).toHaveLength(20);
     expect(screen.getByText("Email tài khoản VNU")).toBeInTheDocument();
     expect(screen.getByText("TC4: Giảng thử")).toBeInTheDocument();
+  });
+
+  it("marks the first ordered history row as current", () => {
+    render(
+      <CoreDataTable
+        rows={[{ ...row, stt: 3, versionNo: 2, snapshotId: "snapshot-2" }, row]}
+        showVersionMetadata
+      />,
+    );
+
+    const historyRows = screen.getAllByRole("row").slice(1);
+    expect(historyRows).toHaveLength(2);
+    expect(historyRows[0]).toHaveAttribute("data-current-version", "true");
+    expect(historyRows[0]).toHaveAttribute("data-version-no", "2");
+    expect(within(historyRows[0]!).getByText("Hiện hành")).toBeInTheDocument();
+    expect(
+      within(historyRows[1]!).getByText("Phiên bản cũ"),
+    ).toBeInTheDocument();
   });
 });

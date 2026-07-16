@@ -10,6 +10,7 @@ export default defineConfig({
       "src/**/*.test.{ts,tsx}",
       "tests/phase-2/**/*.test.ts",
       "tests/phase-3/**/*.test.ts",
+      "tests/phase-4/**/*.test.{ts,tsx}",
     ],
     setupFiles: ["./vitest.setup.ts"],
   },

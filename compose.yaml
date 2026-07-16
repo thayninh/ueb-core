@@ -31,6 +31,10 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://${APP_DATABASE_USER:?APP_DATABASE_USER is required}:${APP_DATABASE_PASSWORD:?APP_DATABASE_PASSWORD is required}@db:5432/${POSTGRES_DB}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:?BETTER_AUTH_URL is required}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required}
+      AUTH_TRUSTED_ORIGINS: ${AUTH_TRUSTED_ORIGINS:?AUTH_TRUSTED_ORIGINS is required}
+      AUDIT_HMAC_SECRET: ${AUDIT_HMAC_SECRET:?AUDIT_HMAC_SECRET is required}
     ports:
       - "127.0.0.1:${APP_PORT:-3000}:3000"
     depends_on:

@@ -34,22 +34,23 @@ model UebCoreData {
 
   lecturerUid        String   @map("lecturer_uid") @db.Uuid
   recordUid          String   @map("record_uid") @db.Uuid
-  snapshotId         String   @map("snapshot_id") @db.Uuid
+  snapshotId         String   @default(uuid()) @map("snapshot_id") @db.Uuid
   versionNo          Int      @map("version_no")
-  identityStatus     String   @map("identity_status") @db.VarChar(16)
-  sourceRowNumber    Int      @map("source_row_number")
-  sourceRowChecksum  String   @map("source_row_checksum") @db.Char(64)
-  sourceImportRunId  String   @map("source_import_run_id") @db.Uuid
+  identityStatus     String   @default("RESOLVED") @map("identity_status") @db.VarChar(16)
+  sourceRowNumber    Int?     @map("source_row_number")
+  sourceRowChecksum  String?  @map("source_row_checksum") @db.Char(64)
+  sourceImportRunId  String?  @map("source_import_run_id") @db.Uuid
   sourceSubmissionId String?  @map("source_submission_id") @db.Uuid
   approvalUnit       String?  @map("approval_unit") @db.Text
   origin             String   @db.VarChar(32)
   approvedBy         String?  @map("approved_by") @db.Uuid
-  approvedAt         DateTime @map("approved_at") @db.Timestamptz(6)
+  approvedAt         DateTime @default(dbgenerated("clock_timestamp()")) @map("approved_at") @db.Timestamptz(6)
   createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  sourceImportRun ImportRun @relation(fields: [sourceImportRunId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  sourceImportRun ImportRun? @relation(fields: [sourceImportRunId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@unique([recordUid, snapshotId], map: "ueb_core_data_record_uid_snapshot_id_key")
+  @@unique([recordUid, versionNo], map: "ueb_core_data_record_uid_version_no_key")
   @@unique([lecturerUid, versionNo, recordUid], map: "ueb_core_data_lecturer_uid_version_no_record_uid_key")
   @@index([lecturerUid, stt(sort: Desc)], map: "ueb_core_data_lecturer_uid_stt_idx")
   @@index([snapshotId], map: "ueb_core_data_snapshot_id_idx")
@@ -79,18 +80,31 @@ model ImportRun {
 }
 
 model WorkflowEvent {
-  eventId            String   @id @default(uuid()) @map("event_id") @db.Uuid
-  submissionId       String   @map("submission_id") @db.Uuid
-  parentSubmissionId String?  @map("parent_submission_id") @db.Uuid
-  eventType          String   @map("event_type") @db.VarChar(64)
-  lecturerUid        String   @map("lecturer_uid") @db.Uuid
-  approvalUnit       String?  @map("approval_unit") @db.Text
-  payload            Json     @db.JsonB
-  actorUserId        String?  @map("actor_user_id") @db.Uuid
-  reason             String?  @db.Text
-  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  eventId            String                  @id @default(uuid()) @map("event_id") @db.Uuid
+  submissionId       String                  @map("submission_id") @db.Uuid
+  parentSubmissionId String?                 @map("parent_submission_id") @db.Uuid
+  eventType          WorkflowEventType       @map("event_type")
+  submissionType     WorkflowSubmissionType? @map("submission_type")
+  recordUid          String?                 @map("record_uid") @db.Uuid
+  lecturerUid        String                  @map("lecturer_uid") @db.Uuid
+  approvalUnit       String?                 @map("approval_unit") @db.Text
+  baseStt            Int?                    @map("base_stt")
+  baseVersionNo      Int?                    @map("base_version_no")
+  payload            Json?                   @db.JsonB
+  payloadChecksum    String?                 @map("payload_checksum") @db.Text
+  actorUserId        String?                 @map("actor_user_id") @db.Uuid
+  reason             String?                 @db.Text
+  resultStt          Int?                    @map("result_stt")
+  resultVersionNo    Int?                    @map("result_version_no")
+  createdAt          DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@index([submissionId, createdAt], map: "workflow_event_submission_id_created_at_idx")
+  @@index([lecturerUid, createdAt], map: "workflow_event_lecturer_uid_created_at_idx")
+  @@index([lecturerUid, recordUid, createdAt], map: "workflow_event_lecturer_uid_record_uid_created_at_idx")
+  @@index([approvalUnit, createdAt], map: "workflow_event_approval_unit_created_at_idx")
+  @@index([eventType, createdAt], map: "workflow_event_event_type_created_at_idx")
+  @@index([recordUid, createdAt], map: "workflow_event_record_uid_created_at_idx")
+  @@index([parentSubmissionId, createdAt], map: "workflow_event_parent_submission_id_created_at_idx")
   @@map("workflow_event")
 }
 
@@ -264,4 +278,20 @@ enum BusinessRole {
   ADMIN
 
   @@map("business_role")
+}
+
+enum WorkflowEventType {
+  SUBMITTED
+  REJECTED
+  APPROVED
+
+  @@map("workflow_event_type")
+}
+
+enum WorkflowSubmissionType {
+  CONFIRM_UNCHANGED
+  UPDATE_EXISTING
+  CREATE_NEW
+
+  @@map("workflow_submission_type")
 }
