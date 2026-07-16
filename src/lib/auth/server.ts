@@ -4,6 +4,7 @@ import { prismaAdapter } from "@better-auth/prisma-adapter";
 import { betterAuth } from "better-auth";
 
 import { AccessProfileStatus } from "@/generated/prisma/client";
+import { recordLoginSuccess, recordLogout } from "@/lib/auth/audit-writer";
 import { readAuthEnvironment } from "@/lib/auth/environment";
 import { createBetterAuthOptions } from "@/lib/auth/options";
 import { getPrismaClient } from "@/lib/server/prisma";
@@ -30,6 +31,8 @@ export function getAuth(): UebCoreAuth {
 
           return profile?.status === AccessProfileStatus.ACTIVE;
         },
+        onLoginSuccess: recordLoginSuccess,
+        onLogout: recordLogout,
       }),
     );
   })();

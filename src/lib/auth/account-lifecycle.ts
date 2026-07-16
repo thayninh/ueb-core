@@ -6,6 +6,7 @@ import {
   Prisma,
   type PrismaClient,
 } from "@/generated/prisma/client";
+import { appendAuthAuditEvent } from "@/lib/auth/audit";
 import { getPrismaClient } from "@/lib/server/prisma";
 
 export interface DisableUserInput {
@@ -61,17 +62,15 @@ export async function disableUserAndRevokeSessions(
       });
 
       if (status === "DISABLED" || revokedSessions.count > 0) {
-        await transaction.authAuditEvent.create({
-          data: {
-            eventType: "USER_DISABLED",
-            outcome: "SUCCESS",
-            actorUserId: input.actorUserId,
-            targetUserId: input.targetUserId,
-            metadata: {
-              version: 1,
-              previousStatus: targetProfile.status,
-              revokedSessionCount: revokedSessions.count,
-            },
+        await appendAuthAuditEvent(transaction, {
+          eventType: "USER_DISABLED",
+          outcome: "SUCCESS",
+          actorUserId: input.actorUserId,
+          targetUserId: input.targetUserId,
+          metadata: {
+            previousStatus: targetProfile.status,
+            revocationType: "DISABLE_ACCOUNT",
+            revokedSessionCount: revokedSessions.count,
           },
         });
       }

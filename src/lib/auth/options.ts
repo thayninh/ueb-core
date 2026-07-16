@@ -26,6 +26,8 @@ export function createBetterAuthOptions(input: {
   database: AuthDatabase;
   environment: AuthEnvironment;
   isUserSessionEligible: (userId: string) => Promise<boolean>;
+  onLoginSuccess?: (session: { id: string; userId: string }) => Promise<void>;
+  onLogout?: (session: { id: string; userId: string }) => Promise<void>;
 }): BetterAuthOptions {
   return {
     appName: "UEB Core",
@@ -81,6 +83,21 @@ export function createBetterAuthOptions(input: {
                 "UNAUTHORIZED",
                 BASE_ERROR_CODES.INVALID_EMAIL_OR_PASSWORD,
               );
+            }
+          },
+          after: async (session, context) => {
+            if (context?.path === "/sign-in/email" && input.onLoginSuccess) {
+              await input.onLoginSuccess({
+                id: session.id,
+                userId: session.userId,
+              });
+            }
+          },
+        },
+        delete: {
+          after: async (session, context) => {
+            if (context?.path === "/sign-out" && input.onLogout) {
+              await input.onLogout({ id: session.id, userId: session.userId });
             }
           },
         },

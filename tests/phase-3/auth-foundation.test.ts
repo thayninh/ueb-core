@@ -1,7 +1,7 @@
 // @vitest-environment node
 
 import type { BetterAuthOptions } from "better-auth";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   parseTrustedOrigins,
@@ -94,6 +94,38 @@ describe("Better Auth foundation", () => {
       ),
     ).rejects.toMatchObject({
       body: { code: "INVALID_EMAIL_OR_PASSWORD" },
+    });
+  });
+
+  it("audits only email login session creation and explicit logout deletion", async () => {
+    const onLoginSuccess = vi.fn();
+    const onLogout = vi.fn();
+    const options = createBetterAuthOptions({
+      database: {} as NonNullable<BetterAuthOptions["database"]>,
+      environment,
+      isUserSessionEligible: async () => true,
+      onLoginSuccess,
+      onLogout,
+    });
+    const session = {
+      id: "22222222-2222-4222-8222-222222222222",
+      userId: "11111111-1111-4111-8111-111111111111",
+    } as never;
+
+    await options.databaseHooks?.session?.create?.after?.(session, {
+      path: "/sign-in/email",
+    } as never);
+    await options.databaseHooks?.session?.delete?.after?.(session, {
+      path: "/sign-out",
+    } as never);
+
+    expect(onLoginSuccess).toHaveBeenCalledWith({
+      id: "22222222-2222-4222-8222-222222222222",
+      userId: "11111111-1111-4111-8111-111111111111",
+    });
+    expect(onLogout).toHaveBeenCalledWith({
+      id: "22222222-2222-4222-8222-222222222222",
+      userId: "11111111-1111-4111-8111-111111111111",
     });
   });
 

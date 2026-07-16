@@ -5,6 +5,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { AccessProfileStatus, Prisma } from "@/generated/prisma/client";
+import { appendAuthAuditEvent } from "@/lib/auth/audit";
 import { getAuth } from "@/lib/auth/server";
 import { getPrismaClient } from "@/lib/server/prisma";
 
@@ -48,16 +49,14 @@ async function enforceActiveProfile(userId: string): Promise<boolean> {
         where: { userId },
       });
       if (revokedSessions.count > 0) {
-        await transaction.authAuditEvent.create({
-          data: {
-            eventType: "INELIGIBLE_USER_SESSIONS_REVOKED",
-            outcome: "SUCCESS",
-            targetUserId: userId,
-            metadata: {
-              version: 1,
-              reason: profile?.status ?? "MISSING_ACCESS_PROFILE",
-              revokedSessionCount: revokedSessions.count,
-            },
+        await appendAuthAuditEvent(transaction, {
+          eventType: "SESSION_REVOKED",
+          outcome: "SUCCESS",
+          targetUserId: userId,
+          metadata: {
+            profileStatus: profile?.status ?? "MISSING_ACCESS_PROFILE",
+            revocationType: "INELIGIBLE_PROFILE",
+            revokedSessionCount: revokedSessions.count,
           },
         });
       }

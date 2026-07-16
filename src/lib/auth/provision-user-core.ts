@@ -1,4 +1,4 @@
-import { createHmac, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 
 import { hashPassword } from "better-auth/crypto";
 
@@ -8,6 +8,11 @@ import {
   Prisma,
   type PrismaClient,
 } from "@/generated/prisma/client";
+import {
+  appendAuthAuditEvent,
+  hashAuditIdentifier,
+  readAuditHmacSecret,
+} from "@/lib/auth/audit";
 import {
   assertLecturerEmailMapping,
   validateProvisionUserInput,
@@ -32,7 +37,6 @@ export interface ProvisionUserResult {
 }
 
 const CREDENTIAL_PROVIDER_ID = "credential";
-const MINIMUM_AUDIT_SECRET_LENGTH = 32;
 
 export async function provisionUser(
   input: ProvisionUserInput,
@@ -45,6 +49,11 @@ export async function provisionUser(
 
   return prisma.$transaction(
     async (transaction) => {
+      if (validated.actorUserId) {
+        await transaction.$queryRaw(
+          Prisma.sql`SELECT set_config('app.current_user_id', ${validated.actorUserId}, true)`,
+        );
+      }
       const lecturerMatches = await findLecturerMatchesByEmail(
         transaction,
         validated.email,
@@ -61,7 +70,6 @@ export async function provisionUser(
           transaction,
           existingUser.id,
           validated,
-          options.bootstrapInitialAdmin === true,
         );
       }
 
@@ -115,22 +123,50 @@ export async function provisionUser(
       }
 
       const bootstrap = options.bootstrapInitialAdmin === true;
-      await transaction.authAuditEvent.create({
-        data: {
-          eventType: bootstrap ? "USER_BOOTSTRAPPED" : "USER_PROVISIONED",
+      await appendAuthAuditEvent(transaction, {
+        eventType: "USER_CREATED",
+        outcome: "SUCCESS",
+        actorUserId,
+        targetUserId,
+        identifierHash: hashAuditIdentifier(validated.email, auditHmacSecret),
+        metadata: {
+          creationType: bootstrap ? "LOCAL_BOOTSTRAP" : "ADMIN_CONTROLLED",
+        },
+      });
+      await appendAuthAuditEvent(transaction, {
+        eventType: "PASSWORD_SET_BY_ADMIN",
+        outcome: "SUCCESS",
+        actorUserId,
+        targetUserId,
+        metadata: { passwordType: "TEMPORARY_CREDENTIAL" },
+      });
+      if (validated.lecturerUid) {
+        await appendAuthAuditEvent(transaction, {
+          eventType: "LECTURER_MAPPING_ASSIGNED",
           outcome: "SUCCESS",
           actorUserId,
           targetUserId,
-          identifierHash: hashIdentifier(validated.email, auditHmacSecret),
-          metadata: {
-            version: 1,
-            mode: bootstrap ? "LOCAL_BOOTSTRAP" : "ADMIN_CONTROLLED",
-            roles: validated.roles,
-            lecturerMapped: validated.lecturerUid !== undefined,
-            unitScopeCount: validated.unitIds.length,
-          },
-        },
-      });
+          metadata: { lecturerUid: validated.lecturerUid },
+        });
+      }
+      for (const role of validated.roles) {
+        await appendAuthAuditEvent(transaction, {
+          eventType: "ROLE_GRANTED",
+          outcome: "SUCCESS",
+          actorUserId,
+          targetUserId,
+          metadata: { role },
+        });
+      }
+      for (const organizationUnitId of validated.unitIds) {
+        await appendAuthAuditEvent(transaction, {
+          eventType: "UNIT_SCOPE_GRANTED",
+          outcome: "SUCCESS",
+          actorUserId,
+          targetUserId,
+          metadata: { organizationUnitId },
+        });
+      }
 
       return toProvisionUserResult("CREATED", targetUserId, validated);
     },
@@ -220,7 +256,6 @@ async function assertExistingProvisioningIsCompatible(
   transaction: Prisma.TransactionClient,
   userId: string,
   input: ValidatedProvisionUserInput,
-  bootstrap: boolean,
 ): Promise<ProvisionUserResult> {
   const [credentialAccounts, profile, roles, unitScopes, auditEvent] =
     await Promise.all([
@@ -243,7 +278,7 @@ async function assertExistingProvisioningIsCompatible(
       transaction.authAuditEvent.findFirst({
         where: {
           targetUserId: userId,
-          eventType: bootstrap ? "USER_BOOTSTRAPPED" : "USER_PROVISIONED",
+          eventType: "USER_CREATED",
           outcome: "SUCCESS",
         },
         select: { id: true },
@@ -286,21 +321,4 @@ function toProvisionUserResult(
     lecturerMapped: input.lecturerUid !== undefined,
     unitScopeCount: input.unitIds.length,
   };
-}
-
-function readAuditHmacSecret(explicitSecret: string | undefined): string {
-  const secret = explicitSecret ?? process.env.AUDIT_HMAC_SECRET;
-  if (
-    !secret ||
-    secret.length < MINIMUM_AUDIT_SECRET_LENGTH ||
-    secret.trim() !== secret ||
-    secret.toLowerCase().includes("replace_with")
-  ) {
-    throw new Error("A non-placeholder AUDIT_HMAC_SECRET is required.");
-  }
-  return secret;
-}
-
-function hashIdentifier(identifier: string, secret: string): string {
-  return createHmac("sha256", secret).update(identifier, "utf8").digest("hex");
 }
