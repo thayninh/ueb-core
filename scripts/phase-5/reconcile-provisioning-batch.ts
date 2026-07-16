@@ -2,7 +2,10 @@ import "dotenv/config";
 
 import { pathToFileURL } from "node:url";
 
-import { closeRuntimeDatabaseConnections } from "../phase-3/lib/runtime-database";
+import {
+  createProvisioningDatabase,
+  type ProvisioningDatabase,
+} from "./lib/provisioning-database";
 import {
   assertProvisioningDatabaseSafety,
   buildProvisioningPlan,
@@ -16,7 +19,7 @@ async function reconcileProvisioningBatch(
   arguments_: readonly string[],
   environment: Readonly<Record<string, string | undefined>>,
 ): Promise<{ readonly report: string; readonly exitCode: number }> {
-  let databaseOpened = false;
+  let database: ProvisioningDatabase | undefined;
   try {
     const command = parseReconciliationCommand(arguments_);
     const loaded = await loadProvisioningBundle({
@@ -24,12 +27,14 @@ async function reconcileProvisioningBatch(
       approvalBatchId: command.approvalBatchId,
       expectedChecksum: command.inputChecksum,
     });
-    await assertProvisioningDatabaseSafety(
+    const databaseContext = await assertProvisioningDatabaseSafety(
       environment,
       command.expectedDatabase,
     );
-    databaseOpened = true;
+    database = createProvisioningDatabase(databaseContext.connections);
+    const { prisma } = database;
     const { plan, evidence } = await withAuthorizedProvisioningReadContext({
+      prisma,
       actorUserId: command.actorUserId,
       query: async (transaction) => ({
         plan: await buildProvisioningPlan({
@@ -92,7 +97,7 @@ async function reconcileProvisioningBatch(
       exitCode: 2,
     };
   } finally {
-    if (databaseOpened) await closeRuntimeDatabaseConnections();
+    await database?.close();
   }
 }
 

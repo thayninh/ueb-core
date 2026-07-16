@@ -26,25 +26,73 @@ Environment local phải có:
 ```text
 MIGRATION_DATABASE_URL=<local owner URL>
 DATABASE_URL=<local runtime URL>
+PHASE5_PROVISIONING_DATABASE_URL=<local dedicated provisioner URL>
 POSTGRES_USER=<owner role>
 APP_DATABASE_USER=<runtime role>
+PHASE5_PROVISIONING_USER=ueb_core_uat_provisioner
 AUDIT_HMAC_SECRET=<secret outside Git>
 ```
 
-Hai URL phải cùng target `127.0.0.1:55432/ueb_core_uat` hoặc tên bắt đầu
-`ueb_core_uat_`, nhưng dùng role khác nhau. Guard read-only kiểm tra:
+Ba URL phải cùng target `127.0.0.1:55432/ueb_core_uat` hoặc tên bắt đầu
+`ueb_core_uat_`, nhưng dùng ba role khác nhau. Guard read-only kiểm tra:
 
 - owner URL thực sự dùng database owner;
-- runtime URL dùng non-owner, non-superuser, `NOBYPASSRLS` role;
+- runtime URL dùng shared app non-owner, non-superuser, `NOBYPASSRLS` role;
+- provisioning URL xác thực chính xác role `ueb_core_uat_provisioner`;
+- provisioner là `NOINHERIT`, non-owner, non-superuser, `NOCREATEDB`,
+  `NOCREATEROLE`, `NOREPLICATION`, `NOBYPASSRLS`, không sở hữu object;
+- provisioner chỉ có exact table privileges cần cho controlled provisioning;
+- shared app runtime không có DML trên managed identity/RBAC tables;
 - database name khớp `--expected-database`;
 - 7 migrations applied và 0 pending;
 - `NODE_ENV` không phải `production`.
 
-Owner connection chỉ dùng catalog guard read-only. Mọi provisioning mutation dùng
-runtime Prisma client và các auth service hiện hữu; không có raw mutation SQL.
+Owner connection chỉ dùng catalog guard read-only. Shared app runtime chỉ dùng
+identity/runtime traffic thông thường. Mọi provisioning read và mutation dùng
+dedicated provisioner Prisma client và các auth service hiện hữu; không có raw
+mutation SQL. Apply hoặc rollback fail closed nếu URL provisioner bị thiếu, là
+owner URL, là app runtime URL, hoặc role/ACL bị drift.
 Mọi provisioning plan read chạy trong một read-only transaction với
 transaction-local `app.current_user_id` của active ADMIN actor. Thiếu actor,
 inactive actor hoặc actor không có active `ADMIN` role đều fail closed.
+
+### 2.1 Bootstrap và reconcile dedicated role
+
+Chỉ operator có UAT owner credential chạy ba command guarded sau. Password mạnh
+và các URL ở secure environment ngoài Git; command không output secret:
+
+```bash
+PHASE5_PROVISIONING_USER=ueb_core_uat_provisioner \
+PHASE5_PROVISIONING_PASSWORD=<SECURE_DISTINCT_PASSWORD> \
+pnpm phase5:bootstrap-provisioning-role -- \
+  --expected-database=ueb_core_uat_phase5 \
+  --confirm-bootstrap-provisioning-role
+
+PHASE5_PROVISIONING_USER=ueb_core_uat_provisioner \
+pnpm phase5:grant-provisioning-permissions -- \
+  --expected-database=ueb_core_uat_phase5 \
+  --confirm-provisioning-grants
+
+pnpm phase5:verify-provisioning-role -- \
+  --expected-database=ueb_core_uat_phase5
+```
+
+Bootstrap và grant chỉ chấp nhận local UAT target. Không dùng các command này với
+canonical `ueb_core`. Provisioner nhận matrix tối thiểu:
+
+| Table | Privileges |
+| --- | --- |
+| `ueb_core_data` | `SELECT` |
+| `auth_user`, `auth_account` | `SELECT`, `INSERT` |
+| `access_profile`, `role_assignment`, `unit_scope_assignment` | `SELECT`, `INSERT`, `UPDATE` |
+| `organization_unit` | `SELECT` |
+| `auth_session` | `SELECT`, `DELETE` |
+| `auth_audit_event` | `SELECT`, `INSERT` |
+
+Không có sequence privilege, DDL, role administration hoặc quyền đọc/mutation
+workflow. Core source chỉ được đọc dưới transaction-local active ADMIN context.
+UAT database cũng thu hồi `TEMPORARY` mặc định khỏi `PUBLIC` để provisioner
+không thể tạo temporary table; canonical database không nằm trong guard target.
 
 ## 3. Secure approved bundle
 

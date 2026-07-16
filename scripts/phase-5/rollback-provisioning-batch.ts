@@ -9,8 +9,10 @@ import {
   setUserUnitScope,
 } from "../../src/lib/auth/admin-user-management";
 import type { Phase5ProvisioningAuditContext } from "../../src/lib/auth/audit";
-import { getPrismaClient } from "../../src/lib/server/prisma";
-import { closeRuntimeDatabaseConnections } from "../phase-3/lib/runtime-database";
+import {
+  createProvisioningDatabase,
+  type ProvisioningDatabase,
+} from "./lib/provisioning-database";
 import {
   assertProvisioningDatabaseSafety,
   buildProvisioningPlan,
@@ -31,16 +33,16 @@ async function runProvisioningRollback(
   arguments_: readonly string[],
   environment: Readonly<Record<string, string | undefined>>,
 ): Promise<{ readonly report: string; readonly exitCode: number }> {
-  let databaseOpened = false;
+  let database: ProvisioningDatabase | undefined;
   let writesStarted = false;
   try {
     const command = parseRollbackCommand(arguments_);
-    await assertProvisioningDatabaseSafety(
+    const databaseContext = await assertProvisioningDatabaseSafety(
       environment,
       command.expectedDatabase,
     );
-    databaseOpened = true;
-    const prisma = getPrismaClient();
+    database = createProvisioningDatabase(databaseContext.connections);
+    const { prisma } = database;
     if (!command.apply) {
       const loaded = await loadProvisioningBundle({
         inputPath: command.inputPath!,
@@ -48,6 +50,7 @@ async function runProvisioningRollback(
         expectedChecksum: command.inputChecksum,
       });
       const plan = await withAuthorizedProvisioningReadContext({
+        prisma,
         actorUserId: command.actorUserId,
         query: (transaction) =>
           buildProvisioningPlan({
@@ -71,11 +74,16 @@ async function runProvisioningRollback(
         exitCode: 0,
       };
     }
-    const evidence = await readBatchEvidence({
+    const evidence = await withAuthorizedProvisioningReadContext({
       prisma,
-      approvalBatchId: command.approvalBatchId,
-      inputChecksum: command.inputChecksum,
-      operation: "APPLY",
+      actorUserId: command.actorUserId,
+      query: (transaction) =>
+        readBatchEvidence({
+          prisma: transaction,
+          approvalBatchId: command.approvalBatchId,
+          inputChecksum: command.inputChecksum,
+          operation: "APPLY",
+        }),
     });
     const targets = toRollbackTargets(evidence);
     if (targets.length === 0) throw new Error("No batch evidence.");
@@ -99,35 +107,47 @@ async function runProvisioningRollback(
         (left, right) => roleRollbackOrder(left) - roleRollbackOrder(right),
       );
       for (const role of roles) {
-        await setUserRole({
-          actorUserId,
-          targetUserId: target.targetUserId,
-          role,
-          enabled: false,
-          phase5AuditContext: auditContext,
-        });
+        await setUserRole(
+          {
+            actorUserId,
+            targetUserId: target.targetUserId,
+            role,
+            enabled: false,
+            phase5AuditContext: auditContext,
+          },
+          prisma,
+        );
       }
       for (const organizationUnitId of target.organizationUnitIds) {
-        await setUserUnitScope({
-          actorUserId,
-          targetUserId: target.targetUserId,
-          organizationUnitId,
-          enabled: false,
-          phase5AuditContext: auditContext,
-        });
+        await setUserUnitScope(
+          {
+            actorUserId,
+            targetUserId: target.targetUserId,
+            organizationUnitId,
+            enabled: false,
+            phase5AuditContext: auditContext,
+          },
+          prisma,
+        );
       }
       if (target.createdByBatch) {
-        await disableUserAndRevokeSessions({
-          actorUserId,
-          targetUserId: target.targetUserId,
-          phase5AuditContext: auditContext,
-        });
+        await disableUserAndRevokeSessions(
+          {
+            actorUserId,
+            targetUserId: target.targetUserId,
+            phase5AuditContext: auditContext,
+          },
+          prisma,
+        );
       } else {
-        await revokeUserSessions({
-          actorUserId,
-          targetUserId: target.targetUserId,
-          phase5AuditContext: auditContext,
-        });
+        await revokeUserSessions(
+          {
+            actorUserId,
+            targetUserId: target.targetUserId,
+            phase5AuditContext: auditContext,
+          },
+          prisma,
+        );
       }
     }
     return {
@@ -157,7 +177,7 @@ async function runProvisioningRollback(
       exitCode: 2,
     };
   } finally {
-    if (databaseOpened) await closeRuntimeDatabaseConnections();
+    await database?.close();
   }
 }
 

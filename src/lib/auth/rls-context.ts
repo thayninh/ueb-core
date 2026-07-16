@@ -19,9 +19,10 @@ export async function withCoreDataRlsContext<T>(
   options: Readonly<{
     isolationLevel?: Prisma.TransactionIsolationLevel;
     readOnly?: boolean;
+    prisma?: PrismaClient;
   }> = {},
 ): Promise<T> {
-  return getPrismaClient().$transaction(
+  return (options.prisma ?? getPrismaClient()).$transaction(
     async (transaction) => {
       if (options.readOnly) {
         await transaction.$executeRaw(Prisma.sql`SET TRANSACTION READ ONLY`);

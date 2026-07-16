@@ -11,8 +11,10 @@ import {
 } from "../../src/lib/auth/admin-user-management";
 import type { Phase5ProvisioningAuditContext } from "../../src/lib/auth/audit";
 import { provisionUser } from "../../src/lib/auth/provision-user-core";
-import { getPrismaClient } from "../../src/lib/server/prisma";
-import { closeRuntimeDatabaseConnections } from "../phase-3/lib/runtime-database";
+import {
+  createProvisioningDatabase,
+  type ProvisioningDatabase,
+} from "./lib/provisioning-database";
 import { recordProvisioningBatchReconciled } from "./lib/provisioning-audit";
 import {
   assertExternalOutputPath,
@@ -34,7 +36,7 @@ export async function runControlledProvisioning(input: {
   readonly arguments: readonly string[];
   readonly environment: Readonly<Record<string, string | undefined>>;
 }): Promise<{ readonly report: string; readonly exitCode: number }> {
-  let databaseOpened = false;
+  let database: ProvisioningDatabase | undefined;
   let writesStarted = false;
   try {
     const command = parseProvisioningCommand(input.arguments);
@@ -43,13 +45,14 @@ export async function runControlledProvisioning(input: {
       approvalBatchId: command.approvalBatchId,
       expectedChecksum: command.inputChecksum,
     });
-    await assertProvisioningDatabaseSafety(
+    const databaseContext = await assertProvisioningDatabaseSafety(
       input.environment,
       command.expectedDatabase,
     );
-    databaseOpened = true;
-    const prisma = getPrismaClient();
+    database = createProvisioningDatabase(databaseContext.connections);
+    const { prisma } = database;
     const plan = await withAuthorizedProvisioningReadContext({
+      prisma,
       actorUserId: command.actorUserId,
       query: (transaction) =>
         buildProvisioningPlan({
@@ -101,36 +104,45 @@ export async function runControlledProvisioning(input: {
             roles: ["LECTURER"],
             lecturerUid: entry.lecturerUid,
           },
-          { phase5AuditContext: auditContext },
+          { phase5AuditContext: auditContext, prisma },
         );
         continue;
       }
       const targetUserId = entry.targetUserId!;
       if (entry.assignLecturerMapping) {
-        await setLecturerMapping({
-          actorUserId,
-          targetUserId,
-          lecturerUid: entry.lecturerUid!,
-          phase5AuditContext: auditContext,
-        });
+        await setLecturerMapping(
+          {
+            actorUserId,
+            targetUserId,
+            lecturerUid: entry.lecturerUid!,
+            phase5AuditContext: auditContext,
+          },
+          prisma,
+        );
       }
       for (const scope of entry.unitScopesToGrant) {
-        await setUserUnitScope({
-          actorUserId,
-          targetUserId,
-          organizationUnitId: scope.organizationUnitId,
-          enabled: true,
-          phase5AuditContext: auditContext,
-        });
+        await setUserUnitScope(
+          {
+            actorUserId,
+            targetUserId,
+            organizationUnitId: scope.organizationUnitId,
+            enabled: true,
+            phase5AuditContext: auditContext,
+          },
+          prisma,
+        );
       }
       for (const role of entry.rolesToGrant) {
-        await setUserRole({
-          actorUserId,
-          targetUserId,
-          role,
-          enabled: true,
-          phase5AuditContext: auditContext,
-        });
+        await setUserRole(
+          {
+            actorUserId,
+            targetUserId,
+            role,
+            enabled: true,
+            phase5AuditContext: auditContext,
+          },
+          prisma,
+        );
       }
       if (entry.needsReconciliationMarker) {
         await recordProvisioningBatchReconciled({
@@ -156,7 +168,7 @@ export async function runControlledProvisioning(input: {
       exitCode: 2,
     };
   } finally {
-    if (databaseOpened) await closeRuntimeDatabaseConnections();
+    await database?.close();
   }
 }
 

@@ -18,6 +18,11 @@ import {
   type ApprovedLeaderInput,
   type ApprovedLecturerInput,
 } from "./identity-input-schema";
+import {
+  parseProvisioningConnectionEnvironment,
+  verifyProvisioningRole,
+  type ProvisioningConnectionEnvironment,
+} from "./provisioning-role";
 
 const MAX_BATCH_RECORDS = 20;
 const MAX_INPUT_BYTES = 5 * 1024 * 1024;
@@ -25,7 +30,6 @@ const UAT_DATABASE = /^ueb_core_uat(?:_[a-z0-9]+)*$/u;
 const DATABASE_IDENTIFIER = /^[a-z][a-z0-9_]*$/u;
 const SAFE_BATCH_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 const SHA256 = /^[a-f0-9]{64}$/u;
-const LOCAL_DATABASE_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
 
 export type ProvisioningErrorCode =
   | "INPUT_FILE_GUARD_FAILED"
@@ -97,6 +101,8 @@ export interface ProvisioningDatabaseContext {
   readonly targetFingerprint: string;
   readonly databaseName: string;
   readonly runtimeUser: string;
+  readonly provisioningUser: string;
+  readonly connections: ProvisioningConnectionEnvironment;
 }
 
 type ProvisioningReadClient = Pick<
@@ -312,98 +318,46 @@ export async function assertProvisioningDatabaseSafety(
   environment: Readonly<Record<string, string | undefined>>,
   expectedDatabase: string,
 ): Promise<ProvisioningDatabaseContext> {
-  assertUatDatabaseName(expectedDatabase);
-  if (environment.NODE_ENV === "production") {
+  let connections: ProvisioningConnectionEnvironment;
+  try {
+    connections = parseProvisioningConnectionEnvironment(
+      environment,
+      expectedDatabase,
+    );
+    await verifyProvisioningRole({ connections });
+  } catch {
     throw new SafeProvisioningError("DATABASE_GUARD_FAILED");
   }
-  const ownerUrl = parseGuardedDatabaseUrl(
-    environment.MIGRATION_DATABASE_URL,
-    expectedDatabase,
-  );
-  const runtimeUrl = parseGuardedDatabaseUrl(
-    environment.DATABASE_URL,
-    expectedDatabase,
-  );
-  const ownerUser = decodeURIComponent(ownerUrl.username);
-  const runtimeUser = decodeURIComponent(runtimeUrl.username);
-  if (
-    ownerUser === runtimeUser ||
-    ownerUrl.hostname !== runtimeUrl.hostname ||
-    ownerUrl.port !== runtimeUrl.port ||
-    (environment.POSTGRES_USER && environment.POSTGRES_USER !== ownerUser) ||
-    (environment.APP_DATABASE_USER &&
-      environment.APP_DATABASE_USER !== runtimeUser)
-  ) {
-    throw new SafeProvisioningError("DATABASE_GUARD_FAILED");
-  }
-
   const owner = new Client({
-    connectionString: ownerUrl.toString(),
-    application_name: "ueb-core-phase5-provisioning-owner-guard",
-  });
-  const runtime = new Client({
-    connectionString: runtimeUrl.toString(),
-    application_name: "ueb-core-phase5-provisioning-runtime-guard",
+    connectionString: connections.ownerUrl,
+    application_name: "ueb-core-phase5-provisioning-migration-guard",
   });
   try {
-    await Promise.all([owner.connect(), runtime.connect()]);
-    const [ownerState, runtimeState, migrations] = await Promise.all([
-      owner.query<{
-        current_user: string;
-        database_owner: string;
-      }>(
-        `SELECT current_user, pg_get_userbyid(datdba) AS database_owner
-         FROM pg_database WHERE datname = current_database()`,
-      ),
-      runtime.query<{
-        current_user: string;
-        current_database: string;
-        rolsuper: boolean;
-        rolbypassrls: boolean;
-      }>(
-        `SELECT current_user, current_database(), rolsuper, rolbypassrls
-         FROM pg_roles WHERE rolname = current_user`,
-      ),
-      owner.query<{ applied: number; pending: number }>(
+    await owner.connect();
+    const migration = (
+      await owner.query<{ applied: number; pending: number }>(
         `SELECT
            count(*) FILTER (WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL)::integer AS applied,
            count(*) FILTER (WHERE finished_at IS NULL AND rolled_back_at IS NULL)::integer AS pending
          FROM public._prisma_migrations`,
-      ),
-    ]);
-    const ownerRow = ownerState.rows[0];
-    const runtimeRow = runtimeState.rows[0];
-    const migrationRow = migrations.rows[0];
-    if (
-      !ownerRow ||
-      ownerRow.current_user !== ownerUser ||
-      ownerRow.database_owner !== ownerUser ||
-      !runtimeRow ||
-      runtimeRow.current_user !== runtimeUser ||
-      runtimeRow.current_database !== expectedDatabase ||
-      runtimeRow.rolsuper ||
-      runtimeRow.rolbypassrls ||
-      !migrationRow ||
-      migrationRow.applied !== 7 ||
-      migrationRow.pending !== 0
-    ) {
+      )
+    ).rows[0];
+    if (!migration || migration.applied !== 7 || migration.pending !== 0) {
       throw new SafeProvisioningError("DATABASE_GUARD_FAILED");
     }
-  } catch (error) {
-    if (error instanceof SafeProvisioningError) throw error;
+  } catch {
     throw new SafeProvisioningError("DATABASE_GUARD_FAILED");
   } finally {
-    await Promise.all([
-      owner.end().catch(() => undefined),
-      runtime.end().catch(() => undefined),
-    ]);
+    await owner.end().catch(() => undefined);
   }
   return {
     databaseName: expectedDatabase,
-    runtimeUser,
+    runtimeUser: connections.appRuntimeUser,
+    provisioningUser: connections.provisioningUser,
+    connections,
     targetFingerprint: createHash("sha256")
       .update(
-        `${runtimeUrl.hostname}:${runtimeUrl.port}/${expectedDatabase}/${runtimeUser}`,
+        `${new URL(connections.provisioningUrl).hostname}:${new URL(connections.provisioningUrl).port}/${expectedDatabase}/${connections.provisioningUser}`,
       )
       .digest("hex"),
   };
@@ -627,6 +581,7 @@ export async function buildProvisioningPlan(input: {
 }
 
 export async function withAuthorizedProvisioningReadContext<T>(input: {
+  readonly prisma: PrismaClient;
   readonly actorUserId: string;
   readonly query: (prisma: ProvisioningReadClient) => Promise<T>;
 }): Promise<T> {
@@ -642,6 +597,7 @@ export async function withAuthorizedProvisioningReadContext<T>(input: {
     {
       isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
       readOnly: true,
+      prisma: input.prisma,
     },
   );
 }
@@ -809,30 +765,6 @@ function assertUatDatabaseName(databaseName: string): void {
   ) {
     throw new SafeProvisioningError("DATABASE_GUARD_FAILED");
   }
-}
-
-function parseGuardedDatabaseUrl(
-  value: string | undefined,
-  expectedDatabase: string,
-): URL {
-  if (!value) throw new SafeProvisioningError("DATABASE_GUARD_FAILED");
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    throw new SafeProvisioningError("DATABASE_GUARD_FAILED");
-  }
-  if (
-    (url.protocol !== "postgres:" && url.protocol !== "postgresql:") ||
-    !LOCAL_DATABASE_HOSTS.has(url.hostname) ||
-    url.port !== "55432" ||
-    decodeURIComponent(url.pathname.slice(1)) !== expectedDatabase ||
-    !url.username ||
-    !url.password
-  ) {
-    throw new SafeProvisioningError("DATABASE_GUARD_FAILED");
-  }
-  return url;
 }
 
 async function assertExternalJsonFile(

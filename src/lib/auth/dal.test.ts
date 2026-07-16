@@ -106,4 +106,28 @@ describe("withCoreDataRlsContext", () => {
       query.mock.invocationCallOrder[0]!,
     );
   });
+
+  it("uses an explicitly injected database client for dedicated operations", async () => {
+    const dedicatedTransaction = vi.fn(
+      async (operation: (transaction: unknown) => Promise<unknown>) =>
+        operation({
+          $executeRaw: mocks.executeRaw,
+          $queryRaw: mocks.queryRaw,
+        }),
+    );
+
+    await withCoreDataRlsContext(
+      { userId: "actor-id" },
+      vi.fn().mockResolvedValue("dedicated-result"),
+      {
+        readOnly: true,
+        prisma: {
+          $transaction: dedicatedTransaction,
+        } as never,
+      },
+    );
+
+    expect(dedicatedTransaction).toHaveBeenCalledOnce();
+    expect(mocks.transaction).not.toHaveBeenCalled();
+  });
 });
