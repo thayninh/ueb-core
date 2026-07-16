@@ -5,15 +5,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BusinessRole } from "@/generated/prisma/client";
 import { getAdminData } from "@/lib/data/admin-data";
 import { UEB_CORE_DATA_DTO_SELECT } from "@/lib/data/dto";
-import { getLeaderData } from "@/lib/data/leader-data";
+import { getLeaderData, getLeaderDataPage } from "@/lib/data/leader-data";
 import { getLecturerData } from "@/lib/data/lecturer-data";
 
 const mocks = vi.hoisted(() => ({
   requireAdmin: vi.fn(),
   requireLecturerIdentity: vi.fn(),
   requireRole: vi.fn(),
+  requireUnitScope: vi.fn(),
   coreFindMany: vi.fn(),
+  coreCount: vi.fn(),
   unitFindMany: vi.fn(),
+  unitFindFirst: vi.fn(),
   queryRaw: vi.fn(),
   transaction: vi.fn(),
 }));
@@ -23,6 +26,7 @@ vi.mock("@/lib/auth/authorization", () => ({
   requireAdmin: mocks.requireAdmin,
   requireLecturerIdentity: mocks.requireLecturerIdentity,
   requireRole: mocks.requireRole,
+  requireUnitScope: mocks.requireUnitScope,
 }));
 vi.mock("@/lib/server/prisma", () => ({
   getPrismaClient: () => ({
@@ -39,14 +43,26 @@ describe("role-scoped core data DAL", () => {
       async (
         callback: (transaction: {
           $queryRaw: typeof mocks.queryRaw;
-          uebCoreData: { findMany: typeof mocks.coreFindMany };
-          organizationUnit: { findMany: typeof mocks.unitFindMany };
+          uebCoreData: {
+            findMany: typeof mocks.coreFindMany;
+            count: typeof mocks.coreCount;
+          };
+          organizationUnit: {
+            findMany: typeof mocks.unitFindMany;
+            findFirst: typeof mocks.unitFindFirst;
+          };
         }) => Promise<unknown>,
       ) =>
         callback({
           $queryRaw: mocks.queryRaw,
-          uebCoreData: { findMany: mocks.coreFindMany },
-          organizationUnit: { findMany: mocks.unitFindMany },
+          uebCoreData: {
+            findMany: mocks.coreFindMany,
+            count: mocks.coreCount,
+          },
+          organizationUnit: {
+            findMany: mocks.unitFindMany,
+            findFirst: mocks.unitFindFirst,
+          },
         }),
     );
   });
@@ -114,5 +130,49 @@ describe("role-scoped core data DAL", () => {
       select: UEB_CORE_DATA_DTO_SELECT,
     });
     expect(mocks.queryRaw).toHaveBeenCalledOnce();
+  });
+
+  it("validates the selected unit and applies server-side search and pagination", async () => {
+    mocks.requireUnitScope.mockResolvedValue({ userId: "leader-user-id" });
+    mocks.unitFindFirst.mockResolvedValue({
+      id: "assigned-unit-id",
+      displayName: "Assigned unit",
+      sourceValue: "Exact assigned source value",
+    });
+    mocks.coreCount.mockResolvedValue(51);
+
+    const result = await getLeaderDataPage({
+      unitId: "assigned-unit-id",
+      search: "  Lecturer name  ",
+      page: 2,
+    });
+
+    expect(mocks.requireUnitScope).toHaveBeenCalledWith("assigned-unit-id");
+    expect(mocks.unitFindFirst).toHaveBeenCalledWith({
+      where: { id: "assigned-unit-id", isActive: true },
+      select: { id: true, displayName: true, sourceValue: true },
+    });
+    expect(mocks.coreCount).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        approvalUnit: "Exact assigned source value",
+        OR: expect.any(Array),
+      }),
+    });
+    expect(mocks.coreFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          approvalUnit: "Exact assigned source value",
+        }),
+        skip: 25,
+        take: 25,
+      }),
+    );
+    expect(result).toMatchObject({
+      search: "Lecturer name",
+      page: 2,
+      pageSize: 25,
+      totalRows: 51,
+      totalPages: 3,
+    });
   });
 });

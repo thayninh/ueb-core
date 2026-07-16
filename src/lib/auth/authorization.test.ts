@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AccessProfileStatus, BusinessRole } from "@/generated/prisma/client";
 import {
-  AuthorizationError,
   requireAdmin,
   requireAnyRole,
   requireLecturerIdentity,
@@ -14,6 +13,14 @@ import {
 const mocks = vi.hoisted(() => ({ getCurrentPrincipal: vi.fn() }));
 
 vi.mock("server-only", () => ({}));
+vi.mock("next/navigation", () => ({
+  forbidden: () => {
+    throw Object.assign(new Error("Forbidden"), { digest: "NEXT_FORBIDDEN" });
+  },
+  redirect: () => {
+    throw new Error("Redirect");
+  },
+}));
 vi.mock("@/lib/auth/dal", () => ({
   getCurrentPrincipal: mocks.getCurrentPrincipal,
 }));
@@ -34,8 +41,7 @@ describe("authorization guards", () => {
 
   it("denies roles not granted by the current database principal", async () => {
     await expect(requireAdmin()).rejects.toMatchObject({
-      name: "AuthorizationError",
-      code: "FORBIDDEN",
+      digest: "NEXT_FORBIDDEN",
     });
   });
 
@@ -45,9 +51,9 @@ describe("authorization guards", () => {
       lecturerUid: null,
     });
 
-    await expect(requireLecturerIdentity()).rejects.toBeInstanceOf(
-      AuthorizationError,
-    );
+    await expect(requireLecturerIdentity()).rejects.toMatchObject({
+      digest: "NEXT_FORBIDDEN",
+    });
   });
 
   it("denies an unassigned unit even for a faculty leader", async () => {
@@ -58,7 +64,7 @@ describe("authorization guards", () => {
     });
 
     await expect(requireUnitScope("unit-from-client")).rejects.toMatchObject({
-      code: "FORBIDDEN",
+      digest: "NEXT_FORBIDDEN",
     });
   });
 

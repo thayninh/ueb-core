@@ -1,6 +1,6 @@
 import "server-only";
 
-import { redirect } from "next/navigation";
+import { forbidden, redirect } from "next/navigation";
 
 import { BusinessRole } from "@/generated/prisma/client";
 import { getCurrentPrincipal } from "@/lib/auth/dal";
@@ -41,7 +41,7 @@ export async function requireAnyRole(
 
   const principal = await requireAuthenticated();
   if (!roles.some((role) => principal.roles.includes(role))) {
-    throw new AuthorizationError();
+    forbidden();
   }
   return principal;
 }
@@ -52,7 +52,7 @@ export async function requireAdmin(): Promise<Principal> {
 
 export async function requireLecturerIdentity(): Promise<LecturerPrincipal> {
   const principal = await requireRole(BusinessRole.LECTURER);
-  if (!principal.lecturerUid) throw new AuthorizationError();
+  if (!principal.lecturerUid) forbidden();
   return principal as LecturerPrincipal;
 }
 
@@ -63,7 +63,7 @@ export async function requireUnitScope(unitId: string): Promise<Principal> {
 
   const principal = await requireRole(BusinessRole.FACULTY_LEADER);
   if (!principal.activeUnitIds.includes(unitId)) {
-    throw new AuthorizationError();
+    forbidden();
   }
   return principal;
 }

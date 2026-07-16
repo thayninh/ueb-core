@@ -52,6 +52,16 @@ describe("current principal DAL", () => {
         }),
       }),
     );
+    expect(mocks.findUnique.mock.calls[0]?.[0]).toMatchObject({
+      select: {
+        user: {
+          select: {
+            roleAssignments: { where: { revokedAt: null } },
+            unitScopeAssignments: { where: { revokedAt: null } },
+          },
+        },
+      },
+    });
     expect(mocks.findUnique.mock.calls[0]?.[0]).not.toHaveProperty(
       "select.user.email",
     );
