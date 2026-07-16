@@ -30,6 +30,7 @@
     "test:phase4:resubmission:e2e": "tsx scripts/phase-4/run-resubmission-e2e.ts --confirm-reset-phase4-resubmission",
     "test:phase4:approval:integration": "PHASE4_APPROVAL_INTEGRATION=1 vitest run --fileParallelism=false tests/phase-4/workflow-approve.integration.test.ts tests/phase-4/workflow-approval-concurrency.integration.test.ts tests/phase-4/core-approved-insert-policy.integration.test.ts",
     "test:phase4:approval:e2e": "tsx scripts/phase-4/run-leader-approve-e2e.ts --confirm-reset-phase4-leader-approve",
+    "phase4:grant-runtime-permissions": "tsx scripts/phase-4/grant-workflow-runtime-permissions.ts",
     "data:inspect": "tsx scripts/phase-2/inspect-source.ts",
     "data:profile-column": "tsx scripts/phase-2/profile-column.ts",
     "data:dry-run": "tsx scripts/phase-2/dry-run-import.ts",
