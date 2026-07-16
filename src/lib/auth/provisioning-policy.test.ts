@@ -12,8 +12,19 @@ import {
 
 const lecturerUid = "11111111-1111-4111-8111-111111111111";
 const unitId = "22222222-2222-4222-8222-222222222222";
+const secondUnitId = "33333333-3333-4333-8333-333333333333";
 
 describe("controlled authentication provisioning policy", () => {
+  it("rejects passwords shorter than 12 characters", () => {
+    expect(() =>
+      validateProvisionUserInput({
+        email: "admin@example.edu",
+        temporaryPassword: "short-pass",
+        roles: ["ADMIN"],
+      }),
+    ).toThrow(/temporaryPassword/u);
+  });
+
   it("normalizes email and rejects invalid role mappings", () => {
     expect(
       validateProvisionUserInput({
@@ -61,13 +72,27 @@ describe("controlled authentication provisioning policy", () => {
         temporaryPassword: "a-secure-temporary-password",
         roles: ["LECTURER", "FACULTY_LEADER"],
         lecturerUid,
-        unitIds: [unitId, unitId],
+        unitIds: [unitId, secondUnitId, unitId],
         name: " Faculty Leader ",
       }),
     ).toMatchObject({
       lecturerUid,
-      unitIds: [unitId],
+      unitIds: [unitId, secondUnitId],
       name: "Faculty Leader",
+    });
+  });
+
+  it("allows an ADMIN without lecturer identity or unit scope", () => {
+    expect(
+      validateProvisionUserInput({
+        email: "admin@example.edu",
+        temporaryPassword: "a-secure-temporary-password",
+        roles: ["ADMIN"],
+      }),
+    ).toMatchObject({
+      roles: ["ADMIN"],
+      unitIds: [],
+      lecturerUid: undefined,
     });
   });
 

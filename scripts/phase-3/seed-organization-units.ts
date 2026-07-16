@@ -2,19 +2,42 @@ import "dotenv/config";
 
 import { pathToFileURL } from "node:url";
 
+import { PrismaPg } from "@prisma/adapter-pg";
+import { Pool } from "pg";
+
+import { PrismaClient } from "../../src/generated/prisma/client";
 import { seedOrganizationUnits } from "../../src/lib/auth/organization-unit-seed";
 import { assertLocalPostgresDatabaseUrl } from "../../src/lib/auth/provisioning-policy";
-import { closeRuntimeDatabaseConnections } from "./lib/runtime-database";
 
 async function main(): Promise<void> {
-  let databaseOpened = false;
+  let pool: Pool | undefined;
+  let prisma: PrismaClient | undefined;
   try {
-    const databaseUrl = process.env.DATABASE_URL;
-    if (!databaseUrl) throw new Error("DATABASE_URL is required.");
-    assertLocalPostgresDatabaseUrl(databaseUrl);
-    databaseOpened = true;
+    const migrationDatabaseUrl = process.env.MIGRATION_DATABASE_URL;
+    const runtimeDatabaseUrl = process.env.DATABASE_URL;
+    if (!migrationDatabaseUrl) {
+      throw new Error("MIGRATION_DATABASE_URL is required.");
+    }
+    if (!runtimeDatabaseUrl) throw new Error("DATABASE_URL is required.");
+    assertLocalPostgresDatabaseUrl(migrationDatabaseUrl);
+    assertLocalPostgresDatabaseUrl(runtimeDatabaseUrl);
+    if (
+      new URL(migrationDatabaseUrl).pathname !==
+      new URL(runtimeDatabaseUrl).pathname
+    ) {
+      throw new Error("Migration and runtime URLs must target one database.");
+    }
 
-    const result = await seedOrganizationUnits();
+    pool = new Pool({
+      connectionString: migrationDatabaseUrl,
+      application_name: "ueb-core-organization-unit-seed",
+      max: 1,
+    });
+    prisma = new PrismaClient({
+      adapter: new PrismaPg(pool, { disposeExternalPool: false }),
+    });
+
+    const result = await seedOrganizationUnits(prisma);
     console.log(
       JSON.stringify({
         status: "SUCCESS",
@@ -34,7 +57,8 @@ async function main(): Promise<void> {
     );
     process.exitCode = 1;
   } finally {
-    if (databaseOpened) await closeRuntimeDatabaseConnections();
+    await prisma?.$disconnect().catch(() => undefined);
+    await pool?.end().catch(() => undefined);
   }
 }
 
