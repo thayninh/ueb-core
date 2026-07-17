@@ -18,6 +18,25 @@ Checklist không authorize production hoặc thay thế change authorization.
 
 ## 3. Artifact and environment
 
+Approved planning contract (execution evidence remains unchecked):
+
+```text
+STAGING_AUTHORIZATION=APPROVED
+STAGING_HOST=103.200.25.54
+STAGING_DATABASE=ueb_core_staging
+STAGING_DEPLOYMENT_DIRECTORY=/opt/ueb-core
+PROXY_ARCHITECTURE=REUSE_EXISTING_CADDY_CONTAINER
+EXTERNAL_PROXY_NETWORK=ueb-core-proxy
+STAGING_APP_UPSTREAM=ueb-core-staging-app:3000
+IMAGE_DELIVERY_METHOD=DOCKER_SAVE_SHA256_SCP_DOCKER_LOAD
+APP_MEMORY_LIMIT=512M
+APP_CPU_LIMIT=0.75
+DATABASE_MEMORY_LIMIT=768M
+DATABASE_CPU_LIMIT=0.75
+DATABASE_PUBLIC_PORT=NO
+UAT_CREDENTIAL_REUSE=NO
+```
+
 - [ ] Source commit và immutable image digest khớp approval.
 - [ ] Rollback image có schema compatibility review.
 - [ ] App chạy non-root, read-only filesystem, bounded tmpfs, dropped capabilities.
@@ -39,6 +58,11 @@ Checklist không authorize production hoặc thay thế change authorization.
 - [ ] RLS no-context core/workflow visibility bằng 0 và writes bằng 0.
 
 ## 5. Backup and restore
+
+Approved policy is `/var/backups/ueb-core/staging`, off-host copy to
+`/Users/thayninh/Secure/ueb-core-phase6/off-host-backups`, retention 14 daily +
+8 weekly, RPO 24 hours and RTO 4 hours. Checkboxes remain open until guarded
+jobs produce checksum/catalog/retrieval/restore evidence.
 
 - [ ] Pre-deploy custom-format backup `PASS`.
 - [ ] SHA-256 sidecar và in-memory catalog verification `PASS`.
@@ -76,6 +100,10 @@ Checklist không authorize production hoặc thay thế change authorization.
 
 ## 8. Operational validation
 
+Approved monitoring method is Docker healthcheck + host cron curl + email alert;
+owner/incident contact is `thayninh`. `MONITORING_EMAIL_TO` must be filled and a
+redacted test alert must pass before any deployment.
+
 - [ ] Health/readiness/DB/TLS alerts `PASS`.
 - [ ] Auth/audit/provisioning failure alerts dùng fake/redacted data `PASS`.
 - [ ] Disk/CPU/memory/restart-loop alerts `PASS`.
@@ -108,9 +136,14 @@ Checklist không authorize production hoặc thay thế change authorization.
 ```text
 PHASE6_STATUS=PENDING
 PHASE6_SCOPE=STAGING_ONLY
-STAGING_AUTHORIZATION=PENDING
+STAGING_AUTHORIZATION=APPROVED
 STAGING_DEPLOYMENT=NOT_PERFORMED
 DOMAIN=ueb-core.cargis.vn
+RESOURCE_PROFILE_ACCEPTED=YES_CONDITIONAL_WITH_RESOURCE_LIMITS
+STAGING_GUARDED_TOOLING_READY=NO
+EXTERNAL_PROXY_NETWORK=ueb-core-proxy
+TARGET_TLS_CONFIGURATION=PENDING_EXECUTION
+MONITORING_EMAIL_DESTINATION=PENDING
 PRE_DEPLOY_BACKUP=PENDING
 BACKUP_RESTORE_REHEARSAL=PENDING
 MIGRATION_DEPLOY=PENDING

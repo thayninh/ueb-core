@@ -3,12 +3,13 @@
 ## 1. Purpose
 
 Rehearsal chứng minh ordered staging rollout có thể chạy và rollback an toàn
-trước staging acceptance. Tài liệu này chưa authorize chạy rehearsal hoặc
-deployment; mọi bước cần `AUTH-*` gates tương ứng.
+trước staging acceptance. Staging decisions/resource limits đã được operator
+phê duyệt, nhưng rehearsal/deployment chưa chạy và vẫn bị chặn bởi missing
+staging-safe guarded tooling cùng execution-only gates.
 
 ## 2. Preconditions
 
-- Approved target/change/observation windows và incident/rollback owners.
+- Approved target; change/observation windows và rollback execution reference.
 - Approved source commit, immutable application image và compatible rollback
   image.
 - Dedicated staging database/volume/network; target không phải UAT/canonical.
@@ -17,6 +18,27 @@ deployment; mọi bước cần `AUTH-*` gates tương ứng.
   procedures có negative tests; không bypass Phase 5 UAT-only guards.
 - Off-host backup destination, RPO/RTO, monitoring và support routing được duyệt.
 - Working tree sạch; migration history không modified; full quality gates pass.
+
+Approved target contract:
+
+```text
+STAGING_HOST=103.200.25.54
+STAGING_DATABASE=ueb_core_staging
+STAGING_DEPLOYMENT_DIRECTORY=/opt/ueb-core
+STAGING_PROXY_NETWORK=ueb-core-proxy
+STAGING_APP_UPSTREAM=ueb-core-staging-app:3000
+APP_MEMORY_LIMIT=512M
+APP_CPU_LIMIT=0.75
+DATABASE_MEMORY_LIMIT=768M
+DATABASE_CPU_LIMIT=0.75
+COMBINED_MEMORY_LIMIT_MIB=1280
+IMAGE_DELIVERY=DOCKER_SAVE_SHA256_SCP_DOCKER_LOAD
+STAGING_GUARDED_TOOLING_READY=NO
+```
+
+Exact command order, Caddy backup/validate/reload steps, image transfer,
+monitoring and rollback commands are in
+`docs/phase-6/07_staging_change_and_rollback_plan.md`.
 
 ## 3. Baseline capture
 
@@ -49,6 +71,9 @@ Expected: `ARTIFACT_CONFIG_PREFLIGHT=PASS`, database/app public ports bằng 0.
 Chạy staging-safe owner job tạo custom-format backup. Artifact/sidecar nằm ngoài
 Git/build context, encryption và restrictive access được áp dụng.
 
+Current Phase 5 backup command is local/UAT-only. R-02 remains blocked until a
+staging-safe exact-host/database wrapper with negative tests exists.
+
 Expected: `BACKUP_STATUS=PASS`, `DATABASE_WRITES=0`.
 
 ### R-03 — Checksum, catalog and off-host copy
@@ -71,10 +96,18 @@ Chạy migration deploy riêng bằng owner credential. Require zero failed/pend
 migrations và unchanged applied migration files. Không start app hoặc provision
 trong job này.
 
+The approved runner image does not contain the Node/Prisma operator workspace.
+R-05 therefore requires a separate approved Node 24 operator image/job attached
+only to the private database network.
+
 ### R-06 — Runtime role and ACL reconciliation
 
 Bootstrap/reconcile runtime role riêng, rồi verify non-owner/non-superuser/
 `NOBYPASSRLS`, exact table/helper/sequence privileges và no-context visibility 0.
+
+Runtime primitives are reusable only behind a new staging target guard.
+Provisioning role tools currently require local/UAT database/role patterns and
+must not run against `ueb_core_staging`.
 
 ### R-07 — Application start
 
@@ -131,7 +164,29 @@ temporary private-network interruption và read-only verifier failure simulation
 Không inject failure bằng thay đổi core/workflow, broad ACL, corrupt backup,
 production credential hoặc UAT database.
 
-## 8. Exit criteria
+## 8. Planning readiness and stop conditions
+
+```text
+STAGING_AUTHORIZATION=APPROVED
+RESOURCE_PROFILE_ACCEPTED=YES_CONDITIONAL_WITH_RESOURCE_LIMITS
+PROXY_ARCHITECTURE=REUSE_EXISTING_CADDY_CONTAINER
+EXTERNAL_PROXY_NETWORK=ueb-core-proxy
+CADDY_CHANGE_APPROVED=YES_ADD_ONLY_UEB_CORE_SITE
+CADDY_RELOAD_APPROVED=YES_AFTER_VALIDATE
+TLS_METHOD=CADDY_AUTOMATIC_HTTPS
+RPO_APPROVED=24_HOURS
+RTO_APPROVED=4_HOURS
+STAGING_GUARDED_TOOLING_READY=NO
+DEPLOYMENT_REHEARSAL=NOT_PERFORMED
+```
+
+Do not begin R-02 through R-10 until database bootstrap, role/provisioning,
+backup/restore, fingerprint and RLS verifier tooling accepts only the exact
+staging host/database and has negative tests. A blank monitoring email,
+unapproved change/observation window or missing rollback-image compatibility is
+also a stop condition.
+
+## 9. Exit criteria
 
 ```text
 DEPLOYMENT_REHEARSAL=PASS

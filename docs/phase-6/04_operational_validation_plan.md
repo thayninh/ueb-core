@@ -10,7 +10,9 @@ không authorize production deployment.
 
 External roster phải chỉ rõ staging operator, application owner, database owner,
 security contact, infrastructure owner và business smoke-test owner. Repository
-chỉ lưu opaque references; không lưu tên, email hoặc số liên hệ.
+ghi approved owner identifier `thayninh` cho deployment, DNS, TLS, monitoring và
+incident contact; email/số liên hệ cụ thể vẫn chỉ nằm trong restricted external
+configuration.
 
 Severity/response proposal cần được phê duyệt:
 
@@ -22,6 +24,10 @@ Severity/response proposal cần được phê duyệt:
 | LOW | Non-security cosmetic issue | Next business cycle |
 
 ## 3. Monitoring validation matrix
+
+Approved method is Docker healthcheck plus host cron probes and email alert.
+`MONITORING_EMAIL_TO` must be filled and verified with a redacted test alert
+before deployment; a blank recipient is a hard stop.
 
 | Signal | Planned validation | Pass condition |
 | --- | --- | --- |
@@ -62,8 +68,9 @@ Validation cần chứng minh:
 - không backup/copy UAT credential sang staging;
 - không dùng UAT DB làm staging restore target.
 
-RPO 24 giờ và RTO 4 giờ hiện chỉ là proposal. Phase 6 staging acceptance cần
-data/infrastructure owner phê duyệt hoặc thay bằng giá trị approved khác.
+Approved RPO là 24 giờ và approved RTO là 4 giờ. Phase 6 staging acceptance vẫn
+phải chứng minh schedule, checksum/catalog, off-host copy/retrieval và restore
+rehearsal thực tế đạt hai giá trị này.
 
 ## 6. Credential and session operations
 
@@ -89,6 +96,11 @@ Không reuse UAT secret, không print secret và không dùng UAT-only session c
 - Record observation window; any saturation, restart loop hoặc unexplained error
   blocks acceptance.
 
+Approved fixed limits are app `512m`/`0.75` CPU and database `768m`/`0.75` CPU,
+total memory limit 1280 MiB. Do not increase them without a new capacity review.
+Alert at >=85% of either container memory limit for 10 minutes, any OOM, or
+readiness impact.
+
 ## 8. Security operations
 
 - Verify app/runtime cannot migrate, create role hoặc provision.
@@ -106,7 +118,29 @@ separate authorized operation only after this plan is approved and retention/
 evidence requirements are confirmed. Staging operations must not mount, mutate,
 restore or derive credentials from the UAT database.
 
-## 10. Operational exit criteria
+## 10. Approved operations snapshot
+
+```text
+MONITORING_METHOD=DOCKER_HEALTHCHECK_PLUS_HOST_CRON_CURL_AND_EMAIL_ALERT
+MONITORING_OWNER=thayninh
+INCIDENT_CONTACT=thayninh
+MONITORING_EMAIL_DESTINATION=REQUIRED_BEFORE_DEPLOYMENT
+LOCAL_BACKUP_DIRECTORY=/var/backups/ueb-core/staging
+OFF_HOST_BACKUP_DESTINATION=/Users/thayninh/Secure/ueb-core-phase6/off-host-backups
+BACKUP_RETENTION=14_DAILY_8_WEEKLY
+RPO_APPROVED=24_HOURS
+RTO_APPROVED=4_HOURS
+APP_MEMORY_LIMIT=512M
+DATABASE_MEMORY_LIMIT=768M
+STAGING_GUARDED_BACKUP_RESTORE=NOT_IMPLEMENTED
+```
+
+Minimal probes must cover Docker app/DB health and restart count,
+`/api/health`, `/api/ready`, the public Caddy HTTPS endpoint, disk usage and
+verified-backup freshness (maximum 26 hours). Exact non-secret commands are in
+`docs/phase-6/07_staging_change_and_rollback_plan.md`.
+
+## 11. Operational exit criteria
 
 ```text
 MONITORING_VALIDATION=PASS

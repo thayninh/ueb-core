@@ -2,18 +2,21 @@
 
 ## 1. Status and purpose
 
-Tài liệu này tổng hợp read-only discovery ngày 2026-07-17 và đề xuất các giá
-trị cần được operator/infrastructure/security owners phê duyệt trước staging
-deployment. Proposal không phải approval và không authorize SSH, database
-creation, secret creation, Caddy/DNS/TLS changes hoặc container deployment.
+Tài liệu này tổng hợp read-only discovery ngày 2026-07-17 và ghi nhận các quyết
+định staging được operator phê duyệt. Approval xác định target/architecture và
+cho phép chuẩn bị change plan; execution vẫn phải dừng tại guarded-tooling,
+change-window và acceptance gates. Không production deployment nào được phép.
 
 ```text
-DECISION_PACK_STATUS=PROPOSED_NOT_APPROVED
+DECISION_PACK_STATUS=STAGING_DECISIONS_APPROVED_EXECUTION_BLOCKED
 STAGING_DEPLOYMENT=NOT_PERFORMED
 PRODUCTION_DEPLOYMENT=OUT_OF_SCOPE
-UNRESOLVED_DISCOVERY_FIELD_COUNT=3
+UNRESOLVED_DISCOVERY_FIELD_COUNT=1
 STAGING_HOST_DIAGNOSTICS=READ_ONLY_COMPLETE
-STAGING_AUTHORIZATION=NOT_GRANTED
+STAGING_AUTHORIZATION=APPROVED
+RESOURCE_PROFILE_ACCEPTED=YES_CONDITIONAL_WITH_RESOURCE_LIMITS
+STAGING_GUARDED_TOOLING_READY=NO
+EXECUTION_HARD_GATE=BLOCKED
 ```
 
 ## 2. Read-only discovery evidence
@@ -35,7 +38,7 @@ STAGING_AUTHORIZATION=NOT_GRANTED
 | Existing monitoring evidence | Health/disk/backup checks của hệ thống hiện hữu | Không phải approved Phase 6 monitoring destination/owner |
 | Infrastructure recommendation | Reuse Caddy, dedicated PostgreSQL/private network, no public DB port | Technical architecture only; vẫn chờ external authorization |
 | Off-host backup | Chưa có bằng chứng | Deployment blocker cho đến khi destination/owner/retrieval được duyệt |
-| Domain ownership | Không có owner evidence trong repository | DNS/TLS owner proposal vẫn chờ phê duyệt |
+| Domain ownership | DNS/TLS owner được operator xác nhận là `thayninh` | Contact route cụ thể vẫn nằm ngoài repository |
 
 Không private key, password, secret, connection URL, environment variable hoặc
 database URL được đọc/in/ghi vào tài liệu. Host/user/port đến từ operator input
@@ -45,38 +48,38 @@ và read-only verification; discovery không được hiểu là deployment appr
 
 | Decision | Proposed value | Evidence | Approval status | Blocking impact |
 | --- | --- | --- | --- | --- |
-| Staging scope | Staging only; no production | Phase 6 plan and Phase 5 acceptance | `PROPOSED_NOT_APPROVED` | Block deployment until explicit staging authorization |
-| Staging domain | `ueb-core.cargis.vn` | A record present; Caddy/env contracts use this domain | `PROPOSED_NOT_APPROVED` | DNS/TLS ownership and target mapping remain blockers |
-| Deployment directory | `/opt/ueb-core` | New isolated path proposal; existing `/opt/khtc-ueb` belongs to another system | `PROPOSED_NOT_APPROVED` | Operator cannot place config/image/secrets until approved |
-| Staging database | `ueb_core_staging` | Dedicated-name proposal; UAT/canonical reuse forbidden | `PROPOSED_NOT_APPROVED` | Database creation and migration remain blocked |
-| Migration owner role | `ueb_core_staging_owner` | Phase 5/6 role-separation contract | `PROPOSED_NOT_APPROVED` | Migration/backup/ACL jobs remain blocked |
-| Application runtime role | `ueb_core_staging_app` | Phase 5/6 least-privilege contract | `PROPOSED_NOT_APPROVED` | App start remains blocked |
-| Provisioning role | `ueb_core_staging_provisioner` | Dedicated provisioning-role contract | `PROPOSED_NOT_APPROVED` | Any staging provisioning remains blocked |
+| Staging scope | Staging only; no production | Explicit operator decision | `OPERATOR_APPROVED` | Execution still requires guarded tooling and change window |
+| Staging domain | `ueb-core.cargis.vn` | DNS owner and TLS owner: `thayninh`; Caddy automatic HTTPS approved | `OPERATOR_APPROVED` | TLS remains technically blocked until add-only Caddy change succeeds |
+| Deployment directory | `/opt/ueb-core` | Explicit operator decision; isolated from `/opt/khtc-ueb` | `OPERATOR_APPROVED` | Directory creation belongs to the future approved change |
+| Staging database | `ueb_core_staging` | Explicit dedicated staging target; UAT/canonical reuse forbidden | `OPERATOR_APPROVED` | Creation blocked until staging-safe bootstrap guard exists |
+| Migration owner role | `ueb_core_staging_owner` | Explicit role-separation decision | `OPERATOR_APPROVED` | Creation blocked until staging-safe owner/bootstrap guard exists |
+| Application runtime role | `ueb_core_staging_app` | Explicit least-privilege decision | `OPERATOR_APPROVED` | Guarded bootstrap/ACL verification still required |
+| Provisioning role | `ueb_core_staging_provisioner` | Explicit isolated provisioning-role decision | `OPERATOR_APPROVED` | Current provisioning tooling is UAT-only |
 | Runtime non-owner | `YES` | Mandatory security contract | `REQUIRED_NOT_VERIFIED` | App start blocked until role metadata proves it |
 | Runtime `NOBYPASSRLS` | `YES` | Mandatory RLS contract | `REQUIRED_NOT_VERIFIED` | App start blocked until guarded verifier passes |
 | Database public port | `NO` | Compose contract has zero published DB ports; staging-host `ss` evidence has no listener on 5432 | `STATIC_AND_HOST_DISCOVERY_PASS` | Runtime deployment must preserve this result |
-| UAT credential reuse | `NO` | Phase 6 isolation contract | `REQUIRED_NOT_VERIFIED` | Any reuse is an immediate stop condition |
-| Image delivery | Immutable image tagged by Git commit and pinned by SHA-256 digest; never use `latest` | Phase 5 deployment runbook | `PROPOSED_NOT_APPROVED` | Deployment blocked until registry/transfer and digest are approved |
-| Secret storage | Root-owned files outside repository under `/opt/ueb-core/secrets/`; directory `0700`, files `0600`; app receives runtime secrets only; migration/provisioning secrets are operator-only | Phase 5/6 secret-boundary contract | `PROPOSED_NOT_APPROVED` | Role bootstrap, migration and app start blocked |
-| Local backup directory | `/var/backups/ueb-core/staging` | New UEB Core-specific path proposal | `PROPOSED_NOT_APPROVED` | Pre-deploy backup cannot start |
-| Backup retention | 14 daily backups and 8 weekly backups | Phase 6 proposal; existing-system retention is not staging approval | `PROPOSED_NOT_APPROVED` | Backup/restore acceptance blocked |
-| RPO | 24 hours | Phase 5/6 proposal | `PROPOSED_NOT_APPROVED` | Operational authorization blocked |
-| RTO | 4 hours | Phase 5/6 proposal | `PROPOSED_NOT_APPROVED` | Rollback/restore authorization blocked |
-| Deployment owner | `thayninh` | Requested owner proposal | `PROPOSED_NOT_APPROVED` | Change execution/closure owner unresolved until approval |
-| DNS owner | `thayninh` | Requested owner proposal; no repository ownership evidence | `PROPOSED_NOT_APPROVED` | DNS change/verification blocked |
-| TLS owner | `thayninh` | Requested owner proposal; no repository ownership evidence | `PROPOSED_NOT_APPROVED` | Certificate issuance/renewal acceptance blocked |
-| Monitoring owner | `thayninh` | Requested owner proposal; no destination evidence | `PROPOSED_NOT_APPROVED` | Alert routing/observation acceptance blocked |
-| Incident contact | `thayninh` | Requested contact proposal | `PROPOSED_NOT_APPROVED` | Go-live/rollback escalation blocked |
-| Staging host | `103.200.25.54` | Operator-provided target; SSH identity and public-IP verification match | `DISCOVERY_CONFIRMED_NOT_APPROVED` | Explicit deployment authorization is still required |
-| Staging SSH user | `deploy` | Key-authenticated read-only session returned `deploy`; account has docker group and interactive sudo only | `DISCOVERY_CONFIRMED_NOT_APPROVED` | Privileged change procedure and owner approval remain required |
-| Staging SSH port | `22` | SSH connection and privileged listener evidence both confirm port 22 | `DISCOVERY_CONFIRMED_NOT_APPROVED` | Access verification does not authorize deployment |
-| Host resource profile | `4_GIB_NOMINAL_CONDITIONAL` | 2 CPU, 3.777 GiB usable RAM, 2.2 GiB available, 3.8 GiB swap, 34 GiB root free | `PROPOSED_NOT_APPROVED` | Require explicit capacity acceptance, resource limits and observation plan |
-| Staging proxy topology | `OPTION_A` | Existing healthy Caddy owns 80/443 and its project network also contains production web/API | `PROPOSED_NOT_APPROVED` | Caddy owner must approve a dedicated external proxy network and site block |
-| Staging app exposure | Docker-internal only; no host-published app port | External proxy network proposal isolates routing from production project network | `PROPOSED_NOT_APPROVED` | Network creation/attachment and Caddy change remain blocked |
+| UAT credential reuse | `NO` | Explicit operator decision | `OPERATOR_APPROVED_NOT_YET_VERIFIED` | Any reuse is an immediate stop condition |
+| Image delivery | `DOCKER_SAVE_SHA256_SCP_DOCKER_LOAD`; tag `ueb-core:<GIT_COMMIT_SHA>`; never `latest` | Explicit operator decision | `OPERATOR_APPROVED` | Execution requires immutable ID/checksum reconciliation |
+| Secret storage | Root- or deploy-owned files outside Git under `/opt/ueb-core/secrets/`; directory `0700`, files `0600` | Explicit operator decision | `OPERATOR_APPROVED` | Secret creation/distribution remains a controlled execution step |
+| Local backup directory | `/var/backups/ueb-core/staging` | Explicit operator decision | `OPERATOR_APPROVED` | Staging-safe backup guard still missing |
+| Backup retention | 14 daily backups and 8 weekly backups | Explicit operator decision | `OPERATOR_APPROVED` | Cleanup requires exact-target/minimum-age negative-tested guard |
+| RPO | 24 hours | Explicit operator decision | `OPERATOR_APPROVED` | Must be demonstrated by backup/restore evidence |
+| RTO | 4 hours | Explicit operator decision | `OPERATOR_APPROVED` | Must be demonstrated by rollback/restore rehearsal |
+| Deployment owner | `thayninh` | Explicit operator decision | `OPERATOR_APPROVED` | Change/observation window still required |
+| DNS owner | `thayninh` | Explicit operator decision | `OPERATOR_APPROVED` | DNS must remain matched during TLS issuance |
+| TLS owner | `thayninh` | Explicit operator decision | `OPERATOR_APPROVED` | Certificate acceptance evidence still required |
+| Monitoring owner | `thayninh` | Explicit operator decision | `OPERATOR_APPROVED` | Email destination must be filled before deployment |
+| Incident contact | `thayninh` | Explicit operator decision | `OPERATOR_APPROVED` | External contact route must be tested |
+| Staging host | `103.200.25.54` | Operator-provided target; SSH identity and public-IP verification match | `OPERATOR_APPROVED` | Mutation requires the ordered change plan |
+| Staging SSH user | `deploy` | Key-authenticated read-only session returned `deploy`; docker group and interactive sudo verified | `OPERATOR_APPROVED` | Privileged commands require interactive operator control |
+| Staging SSH port | `22` | SSH connection and privileged listener evidence both confirm port 22 | `OPERATOR_APPROVED` | No SSH configuration change approved |
+| Host resource profile | `4_GIB_NOMINAL_CONDITIONAL`; app 512m/0.75 CPU; DB 768m/0.75 CPU | Combined limit 1280 MiB; 2.2 GiB available and 3.8 GiB swap | `OPERATOR_APPROVED_CONDITIONAL` | Limits must not increase; monitoring/observation required |
+| Staging proxy topology | Reuse existing Caddy; dedicated external `ueb-core-proxy` | Existing healthy Caddy owns 80/443; Compose supports an external proxy network | `OPERATOR_APPROVED` | Add-only config, validate, reload and rollback evidence required |
+| Staging app exposure | Docker-internal `ueb-core-staging-app:3000`; no host-published app port | Compose alias matches reviewed Caddy example | `OPERATOR_APPROVED` | Runtime verification must show zero published ports |
 | Target TLS readiness | `BLOCKED_NOT_CONFIGURED` | Exact domain absent from valid Caddyfile; local and loopback SNI handshake return TLS alert internal error | `DISCOVERY_BLOCKED` | Site block, certificate issuance and TLS verification are required before staging acceptance |
-| Image registry or transfer method | `REQUIRES_OPERATOR_APPROVAL` | No registry and no remote Docker context evidence | `UNRESOLVED` | Blocks immutable image delivery/verification |
-| Off-host backup destination | `REQUIRES_OPERATOR_APPROVAL` | Repository explicitly records missing off-host evidence | `UNRESOLVED` | Blocks backup and staging acceptance |
-| Monitoring destination | `REQUIRES_OPERATOR_APPROVAL` | Only monitoring requirements/current-system checks exist | `UNRESOLVED` | Blocks alert validation and observation window |
+| Image transfer method | `DOCKER_SAVE_SHA256_SCP_DOCKER_LOAD` | Explicit operator decision | `OPERATOR_APPROVED` | Exact image ID and archive checksum must match local/remote |
+| Off-host backup destination | `/Users/thayninh/Secure/ueb-core-phase6/off-host-backups` | Explicit operator decision; outside repository and staging host | `OPERATOR_APPROVED` | Encryption/access/retrieval evidence required before acceptance |
+| Monitoring method | Docker healthcheck + host cron curl + email alert | Explicit operator decision | `METHOD_APPROVED_DESTINATION_PENDING` | Blank email destination blocks deployment |
 
 ## 4. Proposed environment summary
 
@@ -96,10 +99,16 @@ RAM_CLASS=4_GIB_NOMINAL
 MEMORY_AVAILABLE_GIB=2.2
 SWAP_TOTAL_GIB=3.8
 ROOT_DISK_FREE_GIB=34
-HOST_RESOURCE_STATUS=CONDITIONAL_REQUIRES_APPROVAL
+HOST_RESOURCE_STATUS=APPROVED_CONDITIONAL_WITH_FIXED_LIMITS
 STAGING_PROXY_OPTION=OPTION_A
-EXTERNAL_PROXY_NETWORK=DEDICATED_EXTERNAL_NETWORK_PROPOSAL
-STAGING_APP_BINDING_PROPOSAL=DOCKER_INTERNAL_ONLY_NO_HOST_PUBLISHED_PORT
+RESOURCE_PROFILE_ACCEPTED=YES_CONDITIONAL_WITH_RESOURCE_LIMITS
+STAGING_APP_MEMORY_LIMIT=512M
+STAGING_APP_CPU_LIMIT=0.75
+STAGING_DATABASE_MEMORY_LIMIT=768M
+STAGING_DATABASE_CPU_LIMIT=0.75
+COMBINED_APP_DATABASE_MEMORY_LIMIT_MIB=1280
+EXTERNAL_PROXY_NETWORK=ueb-core-proxy
+STAGING_APP_BINDING=ueb-core-staging-app:3000_DOCKER_INTERNAL_ONLY
 TARGET_TLS_STATUS=BLOCKED_TARGET_SITE_NOT_CONFIGURED
 STAGING_DEPLOYMENT_DIRECTORY=/opt/ueb-core
 STAGING_DATABASE_NAME=ueb_core_staging
@@ -110,38 +119,57 @@ STAGING_RUNTIME_NON_OWNER=YES
 STAGING_RUNTIME_NOBYPASSRLS=YES
 STAGING_DATABASE_PUBLIC_PORT=NO
 STAGING_UAT_CREDENTIAL_REUSE=NO
-LOCAL_BACKUP_DIRECTORY_PROPOSAL=/var/backups/ueb-core/staging
-BACKUP_RETENTION_PROPOSAL=14_DAILY_8_WEEKLY
-RPO_PROPOSAL=24_HOURS
-RTO_PROPOSAL=4_HOURS
-DEPLOYMENT_OWNER_PROPOSAL=thayninh
-DNS_OWNER_PROPOSAL=thayninh
-TLS_OWNER_PROPOSAL=thayninh
-MONITORING_OWNER_PROPOSAL=thayninh
-INCIDENT_CONTACT_PROPOSAL=thayninh
+IMAGE_DELIVERY_METHOD=DOCKER_SAVE_SHA256_SCP_DOCKER_LOAD
+IMAGE_TAG_FORMAT=ueb-core:<GIT_COMMIT_SHA>
+LATEST_TAG_ALLOWED=NO
+SECRET_STORAGE=ROOT_OR_DEPLOY_OWNED_FILES_OUTSIDE_REPOSITORY
+SECRET_DIRECTORY_MODE=0700
+SECRET_FILE_MODE=0600
+LOCAL_BACKUP_DIRECTORY=/var/backups/ueb-core/staging
+OFF_HOST_BACKUP_DESTINATION=/Users/thayninh/Secure/ueb-core-phase6/off-host-backups
+BACKUP_RETENTION=14_DAILY_8_WEEKLY
+RPO=24_HOURS
+RTO=4_HOURS
+MONITORING_METHOD=DOCKER_HEALTHCHECK_PLUS_HOST_CRON_CURL_AND_EMAIL_ALERT
+MONITORING_EMAIL_DESTINATION=REQUIRED_BEFORE_DEPLOYMENT
+DEPLOYMENT_OWNER=thayninh
+DNS_OWNER=thayninh
+TLS_OWNER=thayninh
+MONITORING_OWNER=thayninh
+INCIDENT_CONTACT=thayninh
+STAGING_GUARDED_TOOLING_READY=NO
 ```
 
-## 5. Unresolved operator decisions
+## 5. Approved decisions and remaining execution gates
 
 ```text
-STAGING_HOST_APPROVAL=REQUIRES_OPERATOR_APPROVAL
-STAGING_SSH_USER_APPROVAL=REQUIRES_OPERATOR_APPROVAL
-STAGING_SSH_PORT_APPROVAL=REQUIRES_OPERATOR_APPROVAL
-EXISTING_CADDY_CHANGE_APPROVAL=REQUIRES_OPERATOR_APPROVAL
-EXTERNAL_PROXY_NETWORK_APPROVAL=REQUIRES_OPERATOR_APPROVAL
-HOST_RESOURCE_ACCEPTANCE=REQUIRES_OPERATOR_APPROVAL
-TARGET_TLS_CHANGE_APPROVAL=REQUIRES_OPERATOR_APPROVAL
-IMAGE_REGISTRY_OR_TRANSFER_METHOD=REQUIRES_OPERATOR_APPROVAL
-OFF_HOST_BACKUP_DESTINATION=REQUIRES_OPERATOR_APPROVAL
-MONITORING_DESTINATION=REQUIRES_OPERATOR_APPROVAL
+STAGING_AUTHORIZATION=APPROVED
+STAGING_HOST_APPROVAL=APPROVED
+STAGING_SSH_USER_APPROVAL=APPROVED
+STAGING_SSH_PORT_APPROVAL=APPROVED
+EXISTING_CADDY_CHANGE_APPROVAL=YES_ADD_ONLY_UEB_CORE_SITE
+CADDY_RELOAD_APPROVAL=YES_AFTER_VALIDATE
+EXTERNAL_PROXY_NETWORK_APPROVAL=APPROVED
+HOST_RESOURCE_ACCEPTANCE=YES_CONDITIONAL_WITH_RESOURCE_LIMITS
+TARGET_TLS_METHOD=CADDY_AUTOMATIC_HTTPS
+IMAGE_TRANSFER_METHOD_APPROVAL=APPROVED
+OFF_HOST_BACKUP_DESTINATION_APPROVAL=APPROVED
+RPO_APPROVAL=APPROVED_24_HOURS
+RTO_APPROVAL=APPROVED_4_HOURS
+MONITORING_METHOD_APPROVAL=APPROVED
+STAGING_GUARDED_TOOLING_READY=NO
+MONITORING_EMAIL_DESTINATION=REQUIRED_BEFORE_DEPLOYMENT
+CHANGE_AND_OBSERVATION_WINDOW=REQUIRED_BEFORE_DEPLOYMENT
+ROLLBACK_IMAGE_COMPATIBILITY=REQUIRED_BEFORE_DEPLOYMENT
 ```
 
-Operator approval phải đi kèm target reference, scope, access owner, change
-window và evidence đã khử nhạy cảm. Host/user/port đã được discovery xác nhận
-nhưng vẫn chưa được authorize cho mutation. Existing production Caddy change,
-external proxy network, capacity acceptance và TLS issuance cần approval riêng.
+Operator approvals authorize the stated staging decisions, not immediate
+execution. Database/bootstrap/provisioning/backup/restore/security/fingerprint
+wrappers remain missing for staging; Phase 5 UAT guards must not be bypassed.
+The exact ordered change and rollback contract is recorded in
+`docs/phase-6/07_staging_change_and_rollback_plan.md`.
 
-## 6. Staging topology, resource and TLS proposal
+## 6. Approved staging topology, resource and TLS decision
 
 ```text
 RESOURCE_PROFILE=2_CPU_4_GIB_NOMINAL_34_GIB_ROOT_FREE
@@ -149,7 +177,7 @@ RAM_CLASS=4_GIB_NOMINAL
 MEMORY_AVAILABLE_GIB=2.2
 SWAP_TOTAL_GIB=3.8
 CURRENT_CONTAINER_MEMORY_USAGE=APPROX_610_MIB
-RESOURCE_READINESS=CONDITIONAL_REQUIRES_OPERATOR_ACCEPTANCE
+RESOURCE_READINESS=APPROVED_CONDITIONAL_WITH_FIXED_LIMITS
 EXISTING_CADDY_CONTAINER=khtc-ueb-prod-caddy-1
 CADDY_CONFIG_PATH=/opt/khtc-ueb/repo/infra/caddy/Caddyfile
 CADDY_CONFIG_VALID=YES
@@ -161,14 +189,14 @@ POSTGRES_PUBLIC_LISTEN=NO
 UFW_STATUS=ACTIVE_DEFAULT_DENY_INCOMING_ALLOW_22_80_443
 TLS_ROOT_CAUSE=TARGET_SITE_AND_CERTIFICATE_POLICY_NOT_CONFIGURED_IN_CADDY
 TLS_CERTIFICATE_STATUS=NOT_AVAILABLE_FOR_TARGET_DOMAIN
-STAGING_PROXY_OPTION=OPTION_A
-EXTERNAL_PROXY_NETWORK=DEDICATED_EXTERNAL_NETWORK_PROPOSAL
-STAGING_APP_BINDING_PROPOSAL=DOCKER_INTERNAL_ONLY_NO_HOST_PUBLISHED_PORT
+STAGING_PROXY_OPTION=OPTION_A_APPROVED
+EXTERNAL_PROXY_NETWORK=ueb-core-proxy
+STAGING_APP_BINDING=ueb-core-staging-app:3000_DOCKER_INTERNAL_ONLY
 ```
 
 Chọn `OPTION_A`: reuse existing Caddy container, thêm target site block và nối
-Caddy cùng staging app vào một dedicated external proxy network sau khi được
-phê duyệt. Không attach staging app trực tiếp vào project-owned
+Caddy cùng staging app vào dedicated external network `ueb-core-proxy` trong
+ordered change đã validate. Không attach staging app trực tiếp vào project-owned
 `khtc-ueb-prod_public`; network này đang chứa production Caddy, web và API.
 Staging app không publish port ra host, và PostgreSQL tiếp tục chỉ nằm trên
 private staging network với zero published database ports.
@@ -177,53 +205,57 @@ Không chọn `OPTION_B`: loopback của Caddy container không phải loopback 
 nên proposal này cần thêm host-gateway routing và làm tăng coupling không cần
 thiết. Không chọn `OPTION_C`: CPU, disk, swap và current usage chưa chứng minh
 bắt buộc phải có host/IP riêng, nhưng VPS 4 GiB nominal chỉ còn 2.2 GiB available
-nên capacity vẫn là conditional gate. Operator phải duyệt memory/CPU limits,
-PostgreSQL sizing và observation/rollback thresholds trước deployment.
+nên capacity được chấp nhận có điều kiện với app 512m/0.75 CPU và database
+768m/0.75 CPU. Limits không được tự tăng; observation/rollback thresholds phải
+được ghi và kiểm thử trước acceptance.
 
 TLS failure xảy ra cả qua public address và server loopback với cùng TLS alert
 internal error. DNS A record khớp, không có AAAA record, Caddy config validate
 PASS nhưng exact target domain không có. Vì vậy root cause là missing target site
-and certificate policy trong existing Caddy, không phải DNS/IPv6 routing. Mọi
-Caddyfile edit, network attachment, reload và certificate issuance vẫn bị chặn
-cho đến khi production Caddy owner, DNS/TLS owner và operator phê duyệt.
+and certificate policy trong existing Caddy, không phải DNS/IPv6 routing. Add-only
+Caddy change và reload-after-validate đã được duyệt; execution vẫn chờ change
+window, config backup, exact validation và rollback evidence.
 
-## 7. Image and secret proposals
+## 7. Approved image and secret decisions
 
 ### Image delivery
 
-Build trong approved CI/operator environment. Tag image bằng exact Git commit,
-publish/transfer qua method đã phê duyệt, record SHA-256/OCI digest và deploy
-bằng digest. Không dùng `latest`, không build trên staging host và không coi local
-Docker image là delivery evidence.
+Build local trong approved Node 24 operator environment, tag
+`ueb-core:<GIT_COMMIT_SHA>`, record immutable image ID, `docker save`, SHA-256,
+SCP qua alias và `docker load` sau remote checksum verification. Không dùng
+`latest`, không build trên staging host và không coi mutable tag là evidence.
 
 ### Secret storage
 
-Đề xuất `/opt/ueb-core/secrets/` là directory root-owned mode `0700`; mỗi secret
-file mode `0600`. Application chỉ đọc runtime/auth/audit secrets cần thiết.
+Approved `/opt/ueb-core/secrets/` là directory root- hoặc deploy-owned mode
+`0700`; mỗi secret file mode `0600`. Application chỉ đọc runtime/auth/audit
+secrets cần thiết.
 Migration owner và provisioning credentials chỉ được inject vào operator jobs,
 không mount/pass vào app container. Secret creation, distribution, backup,
-rotation và deletion cần security/infrastructure approval riêng.
+rotation và deletion vẫn là controlled operator steps.
 
-## 8. Backup and operations proposals
+## 8. Approved backup and operations decisions
 
 - Local staging backup directory: `/var/backups/ueb-core/staging`.
-- Retention: 14 daily + 8 weekly, subject to capacity/data-owner approval.
-- Off-host encrypted destination, deletion protection and retrieval test remain
-  unresolved mandatory gates.
-- RPO 24 hours and RTO 4 hours remain proposals, not commitments.
-- Monitoring destination and alert routing remain unresolved. Existing health/
-  disk/backup cron evidence belongs to another system and cannot be reused as
-  Phase 6 acceptance evidence without explicit integration approval.
+- Retention: 14 daily + 8 weekly.
+- Off-host destination:
+  `/Users/thayninh/Secure/ueb-core-phase6/off-host-backups`.
+- Approved RPO: 24 hours; approved RTO: 4 hours.
+- Monitoring method: Docker healthcheck + host cron curl + email alert.
+- Monitoring owner and incident contact: `thayninh`.
+- Email destination, install/test evidence, backup retrieval and staging-safe
+  backup/restore guards remain mandatory execution gates.
 
 ## 9. Authorization conclusion
 
 ```text
-STAGING_AUTHORIZATION=NOT_GRANTED
+STAGING_AUTHORIZATION=APPROVED
 GO_DECISION=BLOCKED
 READ_ONLY_STAGING_DIAGNOSTICS=COMPLETE
-RESOURCE_READINESS=CONDITIONAL_REQUIRES_OPERATOR_ACCEPTANCE
+RESOURCE_PROFILE_ACCEPTED=YES_CONDITIONAL_WITH_RESOURCE_LIMITS
 TLS_READINESS=BLOCKED_TARGET_SITE_NOT_CONFIGURED
-PROXY_TOPOLOGY=OPTION_A_PROPOSED_NOT_APPROVED
+PROXY_TOPOLOGY=OPTION_A_APPROVED_NOT_EXECUTED
+STAGING_GUARDED_TOOLING_READY=NO
 DATABASE_MUTATIONS=0
 SERVER_MUTATIONS=0
 SSH_CONNECTIONS=READ_ONLY_ONLY
@@ -231,9 +263,8 @@ CONTAINERS_DEPLOYED=0
 SECRETS_CREATED=0
 ```
 
-Deployment remains blocked until every `PROPOSED_NOT_APPROVED`,
-`REQUIRES_OPERATOR_APPROVAL`, `DISCOVERY_BLOCKED` and `REQUIRED_NOT_VERIFIED`
-item receives evidence-backed approval or verification. In particular, no
-existing production Caddy change, external network creation/attachment, target
-certificate issuance, staging resource allocation or deployment may begin from
-this discovery alone.
+Staging decisions are approved, but deployment remains blocked until the
+staging-safe guarded tooling gap is implemented/tested and the execution-only
+gates in Section 5 pass. No production Caddy change, external network creation,
+database/role/secret creation, certificate issuance or deployment occurred while
+updating this decision pack.
