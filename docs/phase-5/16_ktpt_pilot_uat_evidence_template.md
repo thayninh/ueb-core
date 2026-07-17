@@ -1,33 +1,32 @@
-# KTPT pilot UAT evidence template
+# KTPT pilot UAT evidence
 
 ## 1. Evidence hygiene
 
-Copy this template for the UAT run only after entry gates pass. Repository
-evidence must remain sanitized: no email, personal name, password, token,
-credential path/content, full internal user ID, raw payload or unredacted
-screenshot. Store sensitive artifacts outside Git and reference only an opaque
-evidence ID plus checksum.
+This sanitized record contains no email, personal name, password, token,
+cookie, credential path, full internal user ID, raw business payload or
+unredacted screenshot. Participant and workflow locators are opaque IDs. Any
+sensitive browser or operator artifact remains outside Git.
 
 ## 2. Run metadata
 
 ```text
-UAT_RUN_ID=
-UAT_STARTED_AT=
-UAT_FINISHED_AT=
+UAT_RUN_ID=PHASE5-KTPT-UAT-20260717-01
+UAT_DATE=2026-07-17
 TIMEZONE=Asia/Ho_Chi_Minh
 TARGET_DATABASE=ueb_core_uat_phase5
 PILOT_UNIT=KTPT
 APPROVAL_BATCH_ID=phase5-pilot-ktpt-20260716
 INPUT_CHECKSUM=caeba54d4d08e39e44d94f96aa4a00d4af07ee60055e912947ea954453047229
-COMMIT_SHA=
-DOCKER_IMAGE_IDENTIFIER=NOT_AVAILABLE
-DATABASE_FINGERPRINT_BEFORE=
-DATABASE_FINGERPRINT_AFTER=
-AUTOMATED_PHASE4_EVIDENCE_REFERENCE=
+APPLICATION_COMMIT_SHA=8487f9a
+DOCKER_IMAGE_IDENTIFIER=sha256:de19507879482c4bf2db8b2e71debec51d979b74a9ca2703cdec8ff467887aac
+CANONICAL_FINGERPRINT_BEFORE=f511d37dd252a8ef653f87c98a6df470e1875c14e883c53042de3de94fdcfb27
+CANONICAL_FINGERPRINT_AFTER=f511d37dd252a8ef653f87c98a6df470e1875c14e883c53042de3de94fdcfb27
+AUTOMATED_PHASE4_EVIDENCE_REFERENCE=PHASE4-ACCEPTANCE
 ```
 
-Docker image identifier dùng immutable digest nếu có; nếu chưa build/publish
-image thì giữ `NOT_AVAILABLE`, không tự tạo identifier giả.
+Exact execution timestamps and sensitive browser artifacts are retained only
+in the authorized operator log. The repository records the execution date,
+timezone, immutable application commit and sanitized aggregate results.
 
 ## 3. Baseline metrics
 
@@ -49,118 +48,130 @@ DUPLICATE_ACTIVE_ROLE_GROUPS=0
 DUPLICATE_ACTIVE_SCOPE_GROUPS=0
 RLS_DEFAULT_DENY=PASS
 DATABASE_WRITES_BY_BASELINE_VERIFIER=0
-BASELINE_STATUS=
+BASELINE_STATUS=PASS
 ```
-
-Attach only a sanitized checksum/reference to the full command output.
 
 ## 4. Opaque participant mapping
 
 Real identity mapping stays in the approved secure roster outside repository.
 
-| Participant ID | Approved role | Approved unit | Credential delivery attested | Active at start | Evidence reference |
+| Participant ID | Approved role | Approved unit | Credential storage | Active at start | Evidence reference |
 | --- | --- | --- | --- | --- | --- |
-| `LEC-01` | `LECTURER` | `KTPT` |  |  |  |
-| `LEC-02` | `LECTURER` | `KTPT` |  |  |  |
-| `LEC-03` | `LECTURER` | `KTPT` |  |  |  |
-| `LEC-04` | `LECTURER` | `KTPT` |  |  |  |
-| `LEC-05` | `LECTURER` | `KTPT` |  |  |  |
-| `LEAD-01` | `FACULTY_LEADER` | `KTPT` |  |  |  |
-| `ADMIN-01` | `ADMIN` | `NONE` |  |  |  |
+| `LEC-01` | `LECTURER` | `KTPT` | External, mode `0600` | `YES` | `ID-READY-LEC-01` |
+| `LEC-02` | `LECTURER` | `KTPT` | External, mode `0600` | `YES` | `ID-READY-LEC-02` |
+| `LEC-03` | `LECTURER` | `KTPT` | External, mode `0600` | `YES` | `ID-READY-LEC-03` |
+| `LEC-04` | `LECTURER` | `KTPT` | External, mode `0600` | `YES` | `ID-READY-LEC-04` |
+| `LEC-05` | `LECTURER` | `KTPT` | External, mode `0600` | `YES` | `ID-READY-LEC-05` |
+| `LEAD-01` | `FACULTY_LEADER` | `KTPT` | External, mode `0600` | `YES` | `ID-READY-LEAD-01` |
+| `ADMIN-01` | `ADMIN` | `NONE` | External secure source | `YES` | `ID-READY-ADMIN-01` |
 
 ## 5. Scenario results
 
-Allowed result: `PASS`, `FAIL`, `BLOCKED`, `NOT_RUN`. Evidence references must
-be opaque and sanitized.
+All UI mutations used the running application and its HTTP/server actions. No
+workflow service was called directly by the UAT harness.
 
-| Scenario | Actor(s) | Started at | Finished at | Core before/after | Workflow before/after | Result | Defect IDs | Evidence references |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `UAT-01` Login/latest profile | `LEC-01` |  |  |  |  | `NOT_RUN` |  |  |
-| `UAT-02` Lecturer isolation | `LEC-01`, `LEC-02` |  |  |  |  | `NOT_RUN` |  |  |
-| `UAT-03` Confirm unchanged/approve | `LEC-01`, `LEAD-01` |  |  |  |  | `NOT_RUN` |  |  |
-| `UAT-04` Update existing/approve | `LEC-02`, `LEAD-01` |  |  |  |  | `NOT_RUN` |  |  |
-| `UAT-05` Create new/approve | `LEC-03`, `LEAD-01` |  |  |  |  | `NOT_RUN` |  |  |
-| `UAT-06` Submit/reject | `LEC-04`, `LEAD-01` |  |  |  |  | `NOT_RUN` |  |  |
-| `UAT-07` Resubmit/approve | `LEC-04`, `LEAD-01` |  |  |  |  | `NOT_RUN` |  |  |
-| `UAT-08` KTPT queue/diff | `LEAD-01` |  |  |  |  | `NOT_RUN` |  |  |
-| `UAT-09` Cross-unit isolation | `LEAD-01` |  |  |  |  | `NOT_RUN` |  |  |
-| `UAT-10` Lecturer IDOR denial | `LEC-01`, `LEC-02` |  |  |  |  | `NOT_RUN` |  |  |
-| `UAT-11` Admin visibility/access | `ADMIN-01` |  |  |  |  | `NOT_RUN` |  |  |
-| `UAT-12` RLS default deny | `ADMIN-01` witness |  |  |  |  | `NOT_RUN` |  |  |
+| Scenario | Actor(s) | Core before/after | Workflow before/after | Result | Evidence references |
+| --- | --- | --- | --- | --- | --- |
+| `UAT-01` Login/latest profile | `LEC-01` | `2497/2497` | `0/0` | `PASS` | `UAT01-UI`, `UAT01-COUNT` |
+| `UAT-02` Lecturer isolation | `LEC-01`, `LEC-02` | `2497/2497` | `0/0` | `PASS` | `UAT02-DENY`, `UAT02-COUNT` |
+| `UAT-03` Confirm unchanged/approve | `LEC-01`, `LEAD-01` | `2497/2498` | `0/2` | `PASS` | `UAT03-SUB-01`, `UAT03-STT-2570` |
+| `UAT-04` Update existing/approve | `LEC-02`, `LEAD-01` | `2498/2499` | `2/4` | `PASS` | `UAT04-SUB-01`, `UAT04-STT-2571` |
+| `UAT-05` Create new/approve | `LEC-03`, `LEAD-01` | `2499/2500` | `4/6` | `PASS` | `UAT05-SUB-01`, `UAT05-STT-2572` |
+| `UAT-06` Submit/reject | `LEC-04`, `LEAD-01` | `2500/2500` | `6/8` | `PASS` | `UAT06-SUB-01`, `UAT06-REJECT-01` |
+| `UAT-07` Resubmit/approve | `LEC-04`, `LEAD-01` | `2500/2501` | `8/10` | `PASS` | `UAT07-SUB-01`, `UAT07-STT-2573` |
+| `UAT-08` KTPT queue/diff | `LEAD-01` | `2501/2501` | `10/10` | `PASS` | `UAT08-QUEUE`, `UAT08-DIFF19` |
+| `UAT-09` Cross-unit isolation | `LEAD-01` | `2501/2501` | `10/10` | `PASS` | `UAT09-DENY404` |
+| `UAT-10` Lecturer IDOR denial | `LEC-01`, `LEC-02` | `2501/2501` | `10/10` | `PASS` | `UAT10-DENY404` |
+| `UAT-11` Admin visibility/access | `ADMIN-01` | `2501/2501` | `10/10` | `PASS` | `UAT11-ADMIN`, `UAT11-LATEST2498` |
+| `UAT-12` RLS default deny | Runtime without actor context | `2501/2501` | `10/10` | `PASS` | `UAT12-RLS0` |
 
-## 6. Defect log
-
-Severity: `BLOCKER`, `HIGH`, `MEDIUM`, `LOW`. Do not paste raw request/response,
-identity data or screenshot into this table.
-
-| Defect ID | Scenario | Severity | Sanitized description | Repro evidence reference | Owner reference | Status | Retest result |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-|  |  |  |  |  |  |  |  |
+## 6. Scenario reconciliation records
 
 ```text
-BLOCKER_DEFECT_COUNT=
-HIGH_DEFECT_COUNT=
-MEDIUM_DEFECT_COUNT=
-LOW_DEFECT_COUNT=
-OPEN_BLOCKER_COUNT=
-OPEN_HIGH_COUNT=
+SCENARIO_ID=UAT-01 CORE_DELTA=0 WORKFLOW_DELTA=0 SUBMISSION_IDS=NONE RESULT_STT=NONE UNEXPLAINED_CORE_ROWS=0 UNEXPLAINED_WORKFLOW_EVENTS=0
+SCENARIO_ID=UAT-02 CORE_DELTA=0 WORKFLOW_DELTA=0 SUBMISSION_IDS=NONE RESULT_STT=NONE UNEXPLAINED_CORE_ROWS=0 UNEXPLAINED_WORKFLOW_EVENTS=0
+SCENARIO_ID=UAT-03 CORE_DELTA=1 WORKFLOW_DELTA=2 SUBMISSION_IDS=UAT03-SUB-01 RESULT_STT=2570 UNEXPLAINED_CORE_ROWS=0 UNEXPLAINED_WORKFLOW_EVENTS=0
+SCENARIO_ID=UAT-04 CORE_DELTA=1 WORKFLOW_DELTA=2 SUBMISSION_IDS=UAT04-SUB-01 RESULT_STT=2571 UNEXPLAINED_CORE_ROWS=0 UNEXPLAINED_WORKFLOW_EVENTS=0
+SCENARIO_ID=UAT-05 CORE_DELTA=1 WORKFLOW_DELTA=2 SUBMISSION_IDS=UAT05-SUB-01 RESULT_STT=2572 UNEXPLAINED_CORE_ROWS=0 UNEXPLAINED_WORKFLOW_EVENTS=0
+SCENARIO_ID=UAT-06 CORE_DELTA=0 WORKFLOW_DELTA=2 SUBMISSION_IDS=UAT06-SUB-01 RESULT_STT=NONE UNEXPLAINED_CORE_ROWS=0 UNEXPLAINED_WORKFLOW_EVENTS=0
+SCENARIO_ID=UAT-07 CORE_DELTA=1 WORKFLOW_DELTA=2 SUBMISSION_IDS=UAT06-SUB-01,UAT07-SUB-01 RESULT_STT=2573 UNEXPLAINED_CORE_ROWS=0 UNEXPLAINED_WORKFLOW_EVENTS=0
+SCENARIO_ID=UAT-08 CORE_DELTA=0 WORKFLOW_DELTA=0 SUBMISSION_IDS=UAT07-SUB-01 RESULT_STT=2573 UNEXPLAINED_CORE_ROWS=0 UNEXPLAINED_WORKFLOW_EVENTS=0
+SCENARIO_ID=UAT-09 CORE_DELTA=0 WORKFLOW_DELTA=0 SUBMISSION_IDS=NONE RESULT_STT=NONE UNEXPLAINED_CORE_ROWS=0 UNEXPLAINED_WORKFLOW_EVENTS=0
+SCENARIO_ID=UAT-10 CORE_DELTA=0 WORKFLOW_DELTA=0 SUBMISSION_IDS=UAT04-SUB-01 RESULT_STT=NONE UNEXPLAINED_CORE_ROWS=0 UNEXPLAINED_WORKFLOW_EVENTS=0
+SCENARIO_ID=UAT-11 CORE_DELTA=0 WORKFLOW_DELTA=0 SUBMISSION_IDS=NONE RESULT_STT=NONE UNEXPLAINED_CORE_ROWS=0 UNEXPLAINED_WORKFLOW_EVENTS=0
+SCENARIO_ID=UAT-12 CORE_DELTA=0 WORKFLOW_DELTA=0 SUBMISSION_IDS=NONE RESULT_STT=NONE UNEXPLAINED_CORE_ROWS=0 UNEXPLAINED_WORKFLOW_EVENTS=0
 ```
 
-Any open blocker/high defect forces final decision `FAIL` or `BLOCKED`.
+The UAT runner stopped and inspected aggregate database state whenever a UI
+wait or verification query failed. It never repeated a committed submit or
+terminal decision. These operator-harness observations produced no product
+defect and no unexplained database residue.
 
-## 7. Final reconciliation
+## 7. Defect log
 
-```text
-CORE_ROW_COUNT_FINAL=
-WORKFLOW_EVENT_COUNT_FINAL=
-MAX_STT_FINAL=
-NEXT_STT_FINAL=
-MIGRATIONS_APPLIED_FINAL=
-MIGRATIONS_PENDING_FINAL=
-ACTIVE_PILOT_LECTURER_COUNT_FINAL=
-LECTURER_MAPPING_COUNT_FINAL=
-ACTIVE_PILOT_LEADER_COUNT_FINAL=
-ACTIVE_KTPT_SCOPE_COUNT_FINAL=
-USERS_WITHOUT_ROLE_FINAL=
-LECTURERS_WITHOUT_MAPPING_FINAL=
-LEADERS_WITHOUT_SCOPE_FINAL=
-DUPLICATE_ACTIVE_ROLE_GROUPS_FINAL=
-DUPLICATE_ACTIVE_SCOPE_GROUPS_FINAL=
-RLS_DEFAULT_DENY_FINAL=
-PILOT_IDENTITY_DRIFT_COUNT=
-DATABASE_WRITES_BY_RECONCILER=0
-CANONICAL_FINGERPRINT_MATCH=
-FINAL_RECONCILIATION_STATUS=
-```
-
-Record actual values. Nominal deltas from the execution plan are a comparison
-aid, not permission to alter evidence after a stopped/rerun scenario.
-
-## 8. Sign-off
-
-Use opaque approver references. Full signer identity/approval artifact remains
-in the authorized external system.
-
-| Sign-off role | Opaque approver reference | Decision | Timestamp | Evidence reference |
+| Defect ID | Scenario | Severity | Sanitized description | Status |
 | --- | --- | --- | --- | --- |
-| Business/UAT owner |  |  |  |  |
-| Data/identity owner |  |  |  |  |
-| Security representative |  |  |  |  |
-| Technical/infrastructure owner |  |  |  |  |
+| None | All | N/A | No product defect found | `CLOSED` |
+
+```text
+BLOCKER_DEFECT_COUNT=0
+HIGH_DEFECT_COUNT=0
+MEDIUM_DEFECT_COUNT=0
+LOW_DEFECT_COUNT=0
+OPEN_BLOCKER_COUNT=0
+OPEN_HIGH_COUNT=0
+```
+
+## 8. Final reconciliation
+
+```text
+CORE_ROW_COUNT_FINAL=2501
+WORKFLOW_EVENT_COUNT_FINAL=10
+MAX_STT_FINAL=2573
+NEXT_STT_FINAL=2574
+SUBMITTED_EVENT_COUNT=5
+APPROVED_EVENT_COUNT=4
+REJECTED_EVENT_COUNT=1
+APPROVED_UAT_CORE_VERSION_COUNT=4
+MIGRATIONS_APPLIED_FINAL=7
+MIGRATIONS_PENDING_FINAL=0
+ACTIVE_PILOT_LECTURER_COUNT_FINAL=5
+LECTURER_MAPPING_COUNT_FINAL=5
+ACTIVE_PILOT_LEADER_COUNT_FINAL=1
+ACTIVE_KTPT_SCOPE_COUNT_FINAL=1
+USERS_WITHOUT_ROLE_FINAL=0
+LECTURERS_WITHOUT_MAPPING_FINAL=0
+LEADERS_WITHOUT_SCOPE_FINAL=0
+DUPLICATE_ACTIVE_ROLE_GROUPS_FINAL=0
+DUPLICATE_ACTIVE_SCOPE_GROUPS_FINAL=0
+DUPLICATE_TERMINAL_COUNT=0
+SOURCE_SUBMISSION_ANOMALY_COUNT=0
+PARENT_SUBMISSION_LINK_ANOMALY_COUNT=0
+UNEXPLAINED_CORE_ROWS=0
+UNEXPLAINED_WORKFLOW_EVENTS=0
+RLS_DEFAULT_DENY_FINAL=PASS
+PILOT_IDENTITY_DRIFT_COUNT=0
+DATABASE_WRITES_BY_RECONCILER=0
+CANONICAL_FINGERPRINT_MATCH=YES
+CANONICAL_DATABASE_MUTATIONS=0
+FINAL_RECONCILIATION_STATUS=PASS
+```
+
+## 9. Sign-off state
+
+The sanitized technical execution decision is `PASS`. Formal organizational
+signatures, if required, remain in the authorized external approval system and
+must reference `PHASE5-KTPT-UAT-20260717-01`.
 
 ```text
 REQUIRED_SCENARIO_PASS_COUNT=12
-ACTUAL_SCENARIO_PASS_COUNT=
-BLOCKER_DEFECT_COUNT=
-HIGH_DEFECT_COUNT=
-FINAL_DECISION=NOT_RUN
-DECISION_REASON=
-PILOT_UAT=NOT_PERFORMED
+ACTUAL_SCENARIO_PASS_COUNT=12
+BLOCKER_DEFECT_COUNT=0
+HIGH_DEFECT_COUNT=0
+TECHNICAL_EXECUTION_DECISION=PASS
+PILOT_UAT=PASS
 STAGING_DEPLOYMENT=NOT_PERFORMED
 PRODUCTION_DEPLOYMENT=NOT_PERFORMED
 ```
 
-Final decision may become `PASS` only when all required scenarios pass, final
-reconciliation passes, RLS default-deny passes, canonical fingerprint is
-unchanged, and blocker/high counts are zero. Pilot UAT sign-off does not
-authorize production deployment.
+Pilot UAT acceptance does not authorize production deployment.
