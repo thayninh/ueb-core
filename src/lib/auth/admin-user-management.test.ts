@@ -106,6 +106,44 @@ describe("admin user management service", () => {
     expect(transaction.unitScopeAssignment.update).not.toHaveBeenCalled();
   });
 
+  it("can revoke a batch scope after its organization unit becomes inactive", async () => {
+    const { prisma, transaction } = databaseMock();
+    transaction.roleAssignment.findFirst.mockResolvedValue({
+      id: "admin-role",
+    });
+    transaction.accessProfile.findUnique.mockResolvedValue({
+      status: AccessProfileStatus.ACTIVE,
+      lecturerUid: null,
+    });
+    transaction.unitScopeAssignment.findFirst.mockResolvedValue({
+      id: "scope-id",
+    });
+    transaction.roleAssignment.count.mockResolvedValue(0);
+    transaction.unitScopeAssignment.count.mockResolvedValue(1);
+    transaction.unitScopeAssignment.update.mockResolvedValue({});
+    transaction.authAuditEvent.create.mockResolvedValue({});
+
+    await expect(
+      setUserUnitScope(
+        {
+          actorUserId,
+          targetUserId,
+          organizationUnitId,
+          enabled: false,
+        },
+        prisma,
+      ),
+    ).resolves.toBeUndefined();
+    expect(transaction.organizationUnit.findFirst).not.toHaveBeenCalled();
+    expect(transaction.unitScopeAssignment.update).toHaveBeenCalledWith({
+      where: { id: "scope-id" },
+      data: expect.objectContaining({
+        revokedBy: actorUserId,
+        revokedAt: expect.any(Date),
+      }),
+    });
+  });
+
   it("revokes sessions and audits only the aggregate count", async () => {
     const { prisma, transaction } = databaseMock();
     transaction.roleAssignment.findFirst.mockResolvedValue({

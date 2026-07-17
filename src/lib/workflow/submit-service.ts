@@ -48,6 +48,8 @@ import type {
   SubmissionType,
 } from "./types";
 
+const SERIALIZABLE_SUBMIT_MAX_ATTEMPTS = 3;
+
 export interface SubmittedRowDto {
   readonly submissionId: string;
   readonly submissionType: SubmissionType;
@@ -120,40 +122,61 @@ function parseInput<Output>(
 async function submit(request: ParsedInput): Promise<SubmittedRowDto> {
   const principal = await requireLecturerIdentity();
 
-  return withWorkflowTransaction(principal, async (transaction) => {
-    await lockSubmission(transaction, request.input.submissionId);
-
-    const existing = await findSubmittedEvent(
-      transaction,
-      request.input.submissionId,
-    );
-    if (existing) {
-      assertIdempotentRetry(existing, request, principal);
-      return toDto(existing);
-    }
-
-    const parent = await validateRejectedParent(
-      transaction,
-      request.input.parentSubmissionId ?? null,
-      request.input.submissionId,
-      principal,
-    );
-
-    const recordUid = resolveRecordUid(request, parent);
-    await lockRecord(transaction, recordUid);
-
-    if (request.submissionType === "CREATE_NEW") {
-      return insertCreateNew(
-        transaction,
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await withWorkflowTransaction(
         principal,
-        request.input,
-        recordUid,
-        parent,
-      );
-    }
+        async (transaction) => {
+          await lockSubmission(transaction, request.input.submissionId);
 
-    return insertExisting(transaction, principal, request, recordUid, parent);
-  });
+          const existing = await findSubmittedEvent(
+            transaction,
+            request.input.submissionId,
+          );
+          if (existing) {
+            assertIdempotentRetry(existing, request, principal);
+            return toDto(existing);
+          }
+
+          const parent = await validateRejectedParent(
+            transaction,
+            request.input.parentSubmissionId ?? null,
+            request.input.submissionId,
+            principal,
+          );
+
+          const recordUid = resolveRecordUid(request, parent);
+          await lockRecord(transaction, recordUid);
+
+          if (request.submissionType === "CREATE_NEW") {
+            return insertCreateNew(
+              transaction,
+              principal,
+              request.input,
+              recordUid,
+              parent,
+            );
+          }
+
+          return insertExisting(
+            transaction,
+            principal,
+            request,
+            recordUid,
+            parent,
+          );
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
+    } catch (error) {
+      const canRetry =
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2034" &&
+        attempt < SERIALIZABLE_SUBMIT_MAX_ATTEMPTS;
+
+      if (!canRetry) throw error;
+    }
+  }
 }
 
 function resolveRecordUid(

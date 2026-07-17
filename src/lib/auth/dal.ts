@@ -2,14 +2,12 @@ import "server-only";
 
 import { cache } from "react";
 
-import {
-  AccessProfileStatus,
-  Prisma,
-  type PrismaClient,
-} from "@/generated/prisma/client";
+import { AccessProfileStatus } from "@/generated/prisma/client";
 import { getActiveSession } from "@/lib/auth/session";
 import type { Principal } from "@/lib/auth/principal";
 import { getPrismaClient } from "@/lib/server/prisma";
+
+export { withCoreDataRlsContext } from "@/lib/auth/rls-context";
 
 export const getCurrentPrincipal = cache(
   async (): Promise<Principal | null> => {
@@ -59,32 +57,3 @@ export const getCurrentPrincipal = cache(
     });
   },
 );
-
-type CoreDataTransaction = Omit<
-  PrismaClient,
-  "$connect" | "$disconnect" | "$on" | "$transaction" | "$extends"
->;
-
-/**
- * Installs the PostgreSQL RLS identity only for the lifetime of one transaction.
- * Never replace this with a session-global SET on a pooled connection.
- */
-export async function withCoreDataRlsContext<T>(
-  principal: Pick<Principal, "userId">,
-  query: (transaction: CoreDataTransaction) => Promise<T>,
-  options: Readonly<{
-    isolationLevel?: Prisma.TransactionIsolationLevel;
-  }> = {},
-): Promise<T> {
-  return getPrismaClient().$transaction(
-    async (transaction) => {
-      await transaction.$queryRaw(
-        Prisma.sql`SELECT set_config('app.current_user_id', ${principal.userId}, true)`,
-      );
-      return query(transaction);
-    },
-    options.isolationLevel
-      ? { isolationLevel: options.isolationLevel }
-      : undefined,
-  );
-}

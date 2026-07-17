@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   unitFindMany: vi.fn(),
   unitFindFirst: vi.fn(),
   queryRaw: vi.fn(),
+  executeRaw: vi.fn(),
   transaction: vi.fn(),
 }));
 
@@ -43,6 +44,7 @@ describe("role-scoped core data DAL", () => {
     mocks.transaction.mockImplementation(
       async (
         callback: (transaction: {
+          $executeRaw: typeof mocks.executeRaw;
           $queryRaw: typeof mocks.queryRaw;
           organizationUnit: {
             findMany: typeof mocks.unitFindMany;
@@ -51,6 +53,7 @@ describe("role-scoped core data DAL", () => {
         }) => Promise<unknown>,
       ) =>
         callback({
+          $executeRaw: mocks.executeRaw,
           $queryRaw: mocks.queryRaw,
           organizationUnit: {
             findMany: mocks.unitFindMany,
@@ -110,6 +113,7 @@ describe("role-scoped core data DAL", () => {
     await getAdminData();
 
     expect(mocks.requireAdmin).toHaveBeenCalledOnce();
+    expect(mocks.executeRaw).toHaveBeenCalledOnce();
     expect(mocks.queryRaw).toHaveBeenCalledTimes(2);
     expect(rawQueryText(1)).toContain('WHERE TRUE');
   });

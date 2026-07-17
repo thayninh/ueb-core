@@ -16,6 +16,12 @@ import { withDatabaseName } from "../../scripts/phase-3/lib/test-database";
 
 const RUNTIME_ROLE = process.env.APP_DATABASE_USER ?? "";
 const ROLE_IDENTIFIER = `"${RUNTIME_ROLE}"`;
+const RLS_HELPER_TABLES = [
+  "access_profile",
+  "role_assignment",
+  "organization_unit",
+  "unit_scope_assignment",
+] as const;
 const integrationEnabled =
   process.env.PHASE4_RUNTIME_PERMISSION_INTEGRATION === "1";
 const isolatedDescribe = integrationEnabled
@@ -44,6 +50,13 @@ interface PermissionSnapshot {
   readonly workflow_truncate: boolean;
   readonly workflow_references: boolean;
   readonly workflow_trigger: boolean;
+  readonly helper_select: boolean;
+  readonly helper_insert: boolean;
+  readonly helper_update: boolean;
+  readonly helper_delete: boolean;
+  readonly helper_truncate: boolean;
+  readonly helper_references: boolean;
+  readonly helper_trigger: boolean;
   readonly sequence_usage: boolean;
   readonly sequence_select: boolean;
   readonly sequence_update: boolean;
@@ -88,6 +101,10 @@ isolatedDescribe(
           workflow_select: true,
           workflow_insert: true,
           sequence_usage: false,
+          helper_select: false,
+        });
+        await expect(readNoContextVisibility(owner)).rejects.toMatchObject({
+          code: "42501",
         });
 
         const first = await runReconciliationCommand(urls.migrationUrl);
@@ -108,6 +125,10 @@ isolatedDescribe(
           WORKFLOW_UPDATE: "NO",
           WORKFLOW_DELETE: "NO",
           WORKFLOW_TRUNCATE: "NO",
+          RLS_HELPER_TABLES:
+            "access_profile,role_assignment,organization_unit,unit_scope_assignment",
+          RLS_HELPER_SELECT: "YES",
+          RLS_HELPER_WRITE: "NO",
           SEQUENCE_NAME: "public.ueb_core_data_stt_seq",
           SEQUENCE_USAGE: "YES",
           SEQUENCE_SELECT: "NO",
@@ -129,6 +150,13 @@ isolatedDescribe(
           workflow_truncate: false,
           workflow_references: false,
           workflow_trigger: false,
+          helper_select: true,
+          helper_insert: false,
+          helper_update: false,
+          helper_delete: false,
+          helper_truncate: false,
+          helper_references: false,
+          helper_trigger: false,
           sequence_usage: true,
           sequence_select: false,
           sequence_update: false,
@@ -268,9 +296,6 @@ async function grantBaseRuntimeAccess(owner: ClientBase): Promise<void> {
   await owner.query(
     `GRANT SELECT, INSERT ON TABLE public.workflow_event TO ${ROLE_IDENTIFIER}`,
   );
-  await owner.query(
-    `GRANT SELECT ON TABLE public.access_profile, public.role_assignment, public.organization_unit, public.unit_scope_assignment TO ${ROLE_IDENTIFIER}`,
-  );
 }
 
 async function activelyBlockPhase4Writes(owner: ClientBase): Promise<void> {
@@ -316,6 +341,34 @@ async function readPermissions(owner: ClientBase): Promise<PermissionSnapshot> {
         has_table_privilege($1, 'public.workflow_event', 'TRUNCATE') AS workflow_truncate,
         has_table_privilege($1, 'public.workflow_event', 'REFERENCES') AS workflow_references,
         has_table_privilege($1, 'public.workflow_event', 'TRIGGER') AS workflow_trigger,
+        (
+          SELECT bool_and(has_table_privilege($1, format('public.%I', helper.table_name), 'SELECT'))
+          FROM unnest($2::text[]) AS helper(table_name)
+        ) AS helper_select,
+        (
+          SELECT bool_or(has_table_privilege($1, format('public.%I', helper.table_name), 'INSERT'))
+          FROM unnest($2::text[]) AS helper(table_name)
+        ) AS helper_insert,
+        (
+          SELECT bool_or(has_table_privilege($1, format('public.%I', helper.table_name), 'UPDATE'))
+          FROM unnest($2::text[]) AS helper(table_name)
+        ) AS helper_update,
+        (
+          SELECT bool_or(has_table_privilege($1, format('public.%I', helper.table_name), 'DELETE'))
+          FROM unnest($2::text[]) AS helper(table_name)
+        ) AS helper_delete,
+        (
+          SELECT bool_or(has_table_privilege($1, format('public.%I', helper.table_name), 'TRUNCATE'))
+          FROM unnest($2::text[]) AS helper(table_name)
+        ) AS helper_truncate,
+        (
+          SELECT bool_or(has_table_privilege($1, format('public.%I', helper.table_name), 'REFERENCES'))
+          FROM unnest($2::text[]) AS helper(table_name)
+        ) AS helper_references,
+        (
+          SELECT bool_or(has_table_privilege($1, format('public.%I', helper.table_name), 'TRIGGER'))
+          FROM unnest($2::text[]) AS helper(table_name)
+        ) AS helper_trigger,
         has_sequence_privilege($1, 'public.ueb_core_data_stt_seq', 'USAGE') AS sequence_usage,
         has_sequence_privilege($1, 'public.ueb_core_data_stt_seq', 'SELECT') AS sequence_select,
         has_sequence_privilege($1, 'public.ueb_core_data_stt_seq', 'UPDATE') AS sequence_update,
@@ -333,7 +386,7 @@ async function readPermissions(owner: ClientBase): Promise<PermissionSnapshot> {
         AND workflow.oid = 'public.workflow_event'::regclass
         AND sequence.oid = 'public.ueb_core_data_stt_seq'::regclass
     `,
-    [RUNTIME_ROLE],
+    [RUNTIME_ROLE, [...RLS_HELPER_TABLES]],
   );
   const row = result.rows[0];
   if (!row) throw new Error("Could not inspect isolated runtime privileges.");

@@ -232,6 +232,8 @@ export interface Phase4WorkflowPolicy {
   };
   readonly concurrency: {
     readonly transactionIsolation: "SERIALIZABLE";
+    readonly idempotencyKey: "SERVER_ACTION_VALIDATED_SUBMISSION_ID";
+    readonly lockOrder: readonly ["SUBMISSION_ID", "RECORD_UID"];
     readonly advisoryLockKey: "RECORD_UID";
     readonly advisoryLockLifetime: "TRANSACTION";
   };
@@ -332,6 +334,8 @@ export const PHASE_4_WORKFLOW_POLICY = {
   },
   concurrency: {
     transactionIsolation: "SERIALIZABLE",
+    idempotencyKey: "SERVER_ACTION_VALIDATED_SUBMISSION_ID",
+    lockOrder: ["SUBMISSION_ID", "RECORD_UID"],
     advisoryLockKey: "RECORD_UID",
     advisoryLockLifetime: "TRANSACTION",
   },

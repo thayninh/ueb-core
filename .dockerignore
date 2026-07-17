@@ -16,6 +16,7 @@ test-results
 docs
 data
 infra/audit
+infra/backup
 
 .DS_Store
 npm-debug.log*

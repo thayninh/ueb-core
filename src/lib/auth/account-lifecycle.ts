@@ -6,12 +6,17 @@ import {
   Prisma,
   type PrismaClient,
 } from "@/generated/prisma/client";
-import { appendAuthAuditEvent } from "@/lib/auth/audit";
+import {
+  appendAuthAuditEvent,
+  withPhase5ProvisioningAuditContext,
+  type Phase5ProvisioningAuditContext,
+} from "@/lib/auth/audit";
 import { getPrismaClient } from "@/lib/server/prisma";
 
 export interface DisableUserInput {
   readonly actorUserId: string;
   readonly targetUserId: string;
+  readonly phase5AuditContext?: Phase5ProvisioningAuditContext;
 }
 
 export interface DisableUserResult {
@@ -67,11 +72,14 @@ export async function disableUserAndRevokeSessions(
           outcome: "SUCCESS",
           actorUserId: input.actorUserId,
           targetUserId: input.targetUserId,
-          metadata: {
-            previousStatus: targetProfile.status,
-            revocationType: "DISABLE_ACCOUNT",
-            revokedSessionCount: revokedSessions.count,
-          },
+          metadata: withPhase5ProvisioningAuditContext(
+            {
+              previousStatus: targetProfile.status,
+              revocationType: "DISABLE_ACCOUNT",
+              revokedSessionCount: revokedSessions.count,
+            },
+            input.phase5AuditContext,
+          ),
         });
       }
 

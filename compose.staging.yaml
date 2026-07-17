@@ -1,0 +1,88 @@
+name: ueb-core-staging
+
+services:
+  db:
+    image: postgres:18.4-bookworm
+    ports: !reset []
+    expose:
+      - "5432"
+    networks:
+      - database
+    restart: unless-stopped
+    cpus: "${STAGING_DB_CPU_LIMIT:-2.0}"
+    mem_limit: "${STAGING_DB_MEMORY_LIMIT:-2g}"
+    pids_limit: 256
+    logging:
+      driver: json-file
+      options:
+        max-size: "${STAGING_LOG_MAX_SIZE:-10m}"
+        max-file: "${STAGING_LOG_MAX_FILES:-5}"
+    security_opt:
+      - no-new-privileges:true
+
+  app:
+    profiles: !reset []
+    build: !reset null
+    image: "${UEB_CORE_IMAGE:-ueb-core:phase-5-staging-candidate}"
+    user: node
+    ports: !reset []
+    expose:
+      - "3000"
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: "${DATABASE_URL:?DATABASE_URL is required}"
+      BETTER_AUTH_URL: "${BETTER_AUTH_URL:?BETTER_AUTH_URL is required}"
+      BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required}"
+      AUTH_TRUSTED_ORIGINS: "${AUTH_TRUSTED_ORIGINS:?AUTH_TRUSTED_ORIGINS is required}"
+      AUDIT_HMAC_SECRET: "${AUDIT_HMAC_SECRET:?AUDIT_HMAC_SECRET is required}"
+    networks:
+      database: {}
+      proxy:
+        aliases:
+          - ueb-core-staging-app
+    depends_on:
+      db:
+        condition: service_healthy
+        restart: true
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /app/.next/cache:rw,noexec,nosuid,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    cpus: "${STAGING_APP_CPU_LIMIT:-1.0}"
+    mem_limit: "${STAGING_APP_MEMORY_LIMIT:-768m}"
+    pids_limit: 128
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:3000/api/ready').then((response) => {
+          if (!response.ok) process.exit(1) }).catch(() => process.exit(1))
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "${STAGING_LOG_MAX_SIZE:-10m}"
+        max-file: "${STAGING_LOG_MAX_FILES:-5}"
+
+networks:
+  database:
+    name: ueb-core-staging-database
+    internal: true
+  proxy:
+    name: "${CADDY_NETWORK_NAME:-ueb-core-staging-proxy}"
+    external: true
+
+volumes:
+  ueb_core_pgdata:
+    name: "${STAGING_DB_VOLUME_NAME:-ueb-core-staging-pgdata}"

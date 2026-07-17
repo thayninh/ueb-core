@@ -10,6 +10,7 @@ data/input/*
 .env
 .env.*
 !.env.example
+!.env.staging.example
 *.pem
 *.key
 *.p12
@@ -18,6 +19,9 @@ data/input/*
 # Logs và kết quả kiểm kê máy chủ
 infra/audit/*
 !infra/audit/.gitkeep
+
+# Backup artifacts
+/infra/backup/
 
 # Node.js
 node_modules/

@@ -44,71 +44,75 @@ export async function rejectSubmission(
     BusinessRole.ADMIN,
   ]);
 
-  return withWorkflowTransaction(principal, async (transaction) => {
-    await lockSubmission(transaction, parsed.data.submissionId);
+  return withWorkflowTransaction(
+    principal,
+    async (transaction) => {
+      await lockSubmission(transaction, parsed.data.submissionId);
 
-    const initialRows = await findSubmissionEvents(
-      transaction,
-      parsed.data.submissionId,
-    );
-    if (initialRows.length === 0) {
-      throw new WorkflowError("WORKFLOW_SUBMISSION_NOT_FOUND");
-    }
-    const initial = resolveStoredSubmissionEvents(initialRows);
-    await lockRecord(transaction, initial.recordUid);
+      const initialRows = await findSubmissionEvents(
+        transaction,
+        parsed.data.submissionId,
+      );
+      if (initialRows.length === 0) {
+        throw new WorkflowError("WORKFLOW_SUBMISSION_NOT_FOUND");
+      }
+      const initial = resolveStoredSubmissionEvents(initialRows);
+      await lockRecord(transaction, initial.recordUid);
 
-    const rows = await findSubmissionEvents(
-      transaction,
-      parsed.data.submissionId,
-    );
-    if (rows.length === 0) {
-      throw new WorkflowError("WORKFLOW_SUBMISSION_NOT_FOUND");
-    }
-    const resolved = resolveStoredSubmissionEvents(rows);
-    assertSubmissionCanBeRejected(resolved);
-    await assertCurrentDecisionScope(
-      transaction,
-      principal,
-      resolved.approvalUnit,
-    );
+      const rows = await findSubmissionEvents(
+        transaction,
+        parsed.data.submissionId,
+      );
+      if (rows.length === 0) {
+        throw new WorkflowError("WORKFLOW_SUBMISSION_NOT_FOUND");
+      }
+      const resolved = resolveStoredSubmissionEvents(rows);
+      assertSubmissionCanBeRejected(resolved);
+      await assertCurrentDecisionScope(
+        transaction,
+        principal,
+        resolved.approvalUnit,
+      );
 
-    const event = await transaction.workflowEvent.create({
-      data: {
-        eventType: WorkflowEventType.REJECTED,
-        submissionId: resolved.submissionId,
-        parentSubmissionId: null,
-        submissionType: resolved.submissionType,
-        recordUid: resolved.recordUid,
-        lecturerUid: resolved.lecturerUid,
-        approvalUnit: resolved.approvalUnit,
-        baseStt: resolved.submittedEvent.baseStt,
-        baseVersionNo: resolved.submittedEvent.baseVersionNo,
-        payload: Prisma.DbNull,
-        payloadChecksum: null,
-        actorUserId: principal.userId,
-        reason: parsed.data.reason,
-        resultStt: null,
-        resultVersionNo: null,
-      },
-      select: {
-        submissionId: true,
-        submissionType: true,
-        recordUid: true,
-        reason: true,
-        createdAt: true,
-      },
-    });
-    if (!event.submissionType || !event.recordUid || !event.reason) {
-      throw new WorkflowError("WORKFLOW_INVALID_STATE");
-    }
+      const event = await transaction.workflowEvent.create({
+        data: {
+          eventType: WorkflowEventType.REJECTED,
+          submissionId: resolved.submissionId,
+          parentSubmissionId: null,
+          submissionType: resolved.submissionType,
+          recordUid: resolved.recordUid,
+          lecturerUid: resolved.lecturerUid,
+          approvalUnit: resolved.approvalUnit,
+          baseStt: resolved.submittedEvent.baseStt,
+          baseVersionNo: resolved.submittedEvent.baseVersionNo,
+          payload: Prisma.DbNull,
+          payloadChecksum: null,
+          actorUserId: principal.userId,
+          reason: parsed.data.reason,
+          resultStt: null,
+          resultVersionNo: null,
+        },
+        select: {
+          submissionId: true,
+          submissionType: true,
+          recordUid: true,
+          reason: true,
+          createdAt: true,
+        },
+      });
+      if (!event.submissionType || !event.recordUid || !event.reason) {
+        throw new WorkflowError("WORKFLOW_INVALID_STATE");
+      }
 
-    return {
-      submissionId: event.submissionId,
-      submissionType: event.submissionType,
-      recordUid: event.recordUid,
-      state: "REJECTED",
-      reason: event.reason,
-      rejectedAt: event.createdAt,
-    };
-  });
+      return {
+        submissionId: event.submissionId,
+        submissionType: event.submissionType,
+        recordUid: event.recordUid,
+        state: "REJECTED",
+        reason: event.reason,
+        rejectedAt: event.createdAt,
+      };
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+  );
 }

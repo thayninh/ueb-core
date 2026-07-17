@@ -12,6 +12,8 @@ import {
   appendAuthAuditEvent,
   hashAuditIdentifier,
   readAuditHmacSecret,
+  withPhase5ProvisioningAuditContext,
+  type Phase5ProvisioningAuditContext,
 } from "@/lib/auth/audit";
 import {
   assertLecturerEmailMapping,
@@ -24,6 +26,7 @@ import { getPrismaClient } from "@/lib/server/prisma";
 export interface ProvisionUserOptions {
   readonly auditHmacSecret?: string;
   readonly bootstrapInitialAdmin?: boolean;
+  readonly phase5AuditContext?: Phase5ProvisioningAuditContext;
   readonly prisma?: PrismaClient;
 }
 
@@ -66,11 +69,36 @@ export async function provisionUser(
         select: { id: true },
       });
       if (existingUser) {
-        return assertExistingProvisioningIsCompatible(
+        if (options.bootstrapInitialAdmin !== true) {
+          await assertControlledActor(transaction, validated.actorUserId);
+        }
+        const result = await assertExistingProvisioningIsCompatible(
           transaction,
           existingUser.id,
           validated,
         );
+        if (options.phase5AuditContext) {
+          const priorEvidence = await transaction.authAuditEvent.findFirst({
+            where: phase5AuditWhere(
+              existingUser.id,
+              options.phase5AuditContext,
+            ),
+            select: { id: true },
+          });
+          if (!priorEvidence) {
+            await appendAuthAuditEvent(transaction, {
+              eventType: "PROVISIONING_BATCH_RECONCILED",
+              outcome: "SUCCESS",
+              actorUserId: validated.actorUserId,
+              targetUserId: existingUser.id,
+              metadata: withPhase5ProvisioningAuditContext(
+                { provisioningStatus: "EXISTING" },
+                options.phase5AuditContext,
+              ),
+            });
+          }
+        }
+        return result;
       }
 
       const targetUserId = randomUUID();
@@ -129,16 +157,22 @@ export async function provisionUser(
         actorUserId,
         targetUserId,
         identifierHash: hashAuditIdentifier(validated.email, auditHmacSecret),
-        metadata: {
-          creationType: bootstrap ? "LOCAL_BOOTSTRAP" : "ADMIN_CONTROLLED",
-        },
+        metadata: withPhase5ProvisioningAuditContext(
+          {
+            creationType: bootstrap ? "LOCAL_BOOTSTRAP" : "ADMIN_CONTROLLED",
+          },
+          options.phase5AuditContext,
+        ),
       });
       await appendAuthAuditEvent(transaction, {
         eventType: "PASSWORD_SET_BY_ADMIN",
         outcome: "SUCCESS",
         actorUserId,
         targetUserId,
-        metadata: { passwordType: "TEMPORARY_CREDENTIAL" },
+        metadata: withPhase5ProvisioningAuditContext(
+          { passwordType: "TEMPORARY_CREDENTIAL" },
+          options.phase5AuditContext,
+        ),
       });
       if (validated.lecturerUid) {
         await appendAuthAuditEvent(transaction, {
@@ -146,7 +180,10 @@ export async function provisionUser(
           outcome: "SUCCESS",
           actorUserId,
           targetUserId,
-          metadata: { lecturerUid: validated.lecturerUid },
+          metadata: withPhase5ProvisioningAuditContext(
+            { lecturerUid: validated.lecturerUid },
+            options.phase5AuditContext,
+          ),
         });
       }
       for (const role of validated.roles) {
@@ -155,7 +192,10 @@ export async function provisionUser(
           outcome: "SUCCESS",
           actorUserId,
           targetUserId,
-          metadata: { role },
+          metadata: withPhase5ProvisioningAuditContext(
+            { role },
+            options.phase5AuditContext,
+          ),
         });
       }
       for (const organizationUnitId of validated.unitIds) {
@@ -164,7 +204,10 @@ export async function provisionUser(
           outcome: "SUCCESS",
           actorUserId,
           targetUserId,
-          metadata: { organizationUnitId },
+          metadata: withPhase5ProvisioningAuditContext(
+            { organizationUnitId },
+            options.phase5AuditContext,
+          ),
         });
       }
 
@@ -172,6 +215,46 @@ export async function provisionUser(
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
   );
+}
+
+async function assertControlledActor(
+  transaction: Prisma.TransactionClient,
+  actorUserId: string | undefined,
+): Promise<void> {
+  if (!actorUserId) {
+    throw new Error("Controlled provisioning requires an actorUserId.");
+  }
+  const activeAdminRole = await transaction.roleAssignment.findFirst({
+    where: {
+      userId: actorUserId,
+      role: BusinessRole.ADMIN,
+      revokedAt: null,
+      user: { accessProfile: { status: AccessProfileStatus.ACTIVE } },
+    },
+    select: { id: true },
+  });
+  if (!activeAdminRole) {
+    throw new Error("Controlled provisioning requires an active ADMIN actor.");
+  }
+}
+
+function phase5AuditWhere(
+  targetUserId: string,
+  context: Phase5ProvisioningAuditContext,
+) {
+  return {
+    targetUserId,
+    metadata: {
+      path: ["phase5ApprovalBatchId"],
+      equals: context.approvalBatchId,
+    },
+    AND: {
+      metadata: {
+        path: ["phase5InputChecksum"],
+        equals: context.inputChecksum,
+      },
+    },
+  } satisfies Prisma.AuthAuditEventWhereInput;
 }
 
 async function resolveActorUserId(
@@ -203,20 +286,7 @@ async function resolveActorUserId(
   if (!input.actorUserId) {
     throw new Error("Controlled provisioning requires an actorUserId.");
   }
-  const activeAdminRole = await transaction.roleAssignment.findFirst({
-    where: {
-      userId: input.actorUserId,
-      role: BusinessRole.ADMIN,
-      revokedAt: null,
-      user: {
-        accessProfile: { status: AccessProfileStatus.ACTIVE },
-      },
-    },
-    select: { id: true },
-  });
-  if (!activeAdminRole) {
-    throw new Error("Controlled provisioning requires an active ADMIN actor.");
-  }
+  await assertControlledActor(transaction, input.actorUserId);
   return input.actorUserId;
 }
 

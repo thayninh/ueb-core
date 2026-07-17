@@ -190,4 +190,20 @@ describe("Phase 4 runtime permission operational script contract", () => {
       '"phase4:grant-runtime-permissions": "tsx scripts/phase-4/grant-workflow-runtime-permissions.ts"',
     );
   });
+
+  it("21. grants SELECT only on every table referenced by RLS helpers", () => {
+    for (const tableName of [
+      "access_profile",
+      "role_assignment",
+      "organization_unit",
+      "unit_scope_assignment",
+    ]) {
+      expect(source).toContain(`"${tableName}"`);
+    }
+    expect(source).toContain(
+      "REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE",
+    );
+    expect(source).toContain("GRANT SELECT ON TABLE");
+    expect(source).toContain("matchesSelectOnly");
+  });
 });

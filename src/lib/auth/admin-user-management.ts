@@ -8,14 +8,17 @@ import {
 } from "@/generated/prisma/client";
 import {
   appendAuthAuditEvent,
+  withPhase5ProvisioningAuditContext,
   type AuthAuditEventType,
   type AuthAuditMetadata,
+  type Phase5ProvisioningAuditContext,
 } from "@/lib/auth/audit";
 import { getPrismaClient } from "@/lib/server/prisma";
 
 export interface AdminTargetInput {
   readonly actorUserId: string;
   readonly targetUserId: string;
+  readonly phase5AuditContext?: Phase5ProvisioningAuditContext;
 }
 
 export async function activateUser(
@@ -36,6 +39,7 @@ export async function activateUser(
       actorUserId: input.actorUserId,
       targetUserId: input.targetUserId,
       metadata: { previousStatus: profile.status },
+      phase5AuditContext: input.phase5AuditContext,
     });
   });
 }
@@ -100,6 +104,7 @@ export async function setUserRole(
       actorUserId: input.actorUserId,
       targetUserId: input.targetUserId,
       metadata: { role: input.role },
+      phase5AuditContext: input.phase5AuditContext,
     });
   });
 }
@@ -114,11 +119,13 @@ export async function setUserUnitScope(
   await prisma.$transaction(async (transaction) => {
     await assertActiveAdmin(transaction, input.actorUserId);
     await requireTargetProfile(transaction, input.targetUserId);
-    const unit = await transaction.organizationUnit.findFirst({
-      where: { id: input.organizationUnitId, isActive: true },
-      select: { id: true },
-    });
-    if (!unit) throw new Error("Active organization unit was not found.");
+    if (input.enabled) {
+      const unit = await transaction.organizationUnit.findFirst({
+        where: { id: input.organizationUnitId, isActive: true },
+        select: { id: true },
+      });
+      if (!unit) throw new Error("Active organization unit was not found.");
+    }
 
     const activeAssignment = await transaction.unitScopeAssignment.findFirst({
       where: {
@@ -167,6 +174,7 @@ export async function setUserUnitScope(
       actorUserId: input.actorUserId,
       targetUserId: input.targetUserId,
       metadata: { organizationUnitId: input.organizationUnitId },
+      phase5AuditContext: input.phase5AuditContext,
     });
   });
 }
@@ -232,6 +240,7 @@ export async function setLecturerMapping(
       metadata: {
         lecturerUid: input.lecturerUid ?? profile.lecturerUid,
       },
+      phase5AuditContext: input.phase5AuditContext,
     });
   });
 }
@@ -254,6 +263,7 @@ export async function revokeUserSessions(
         revocationType: "ADMIN_REQUEST",
         revokedSessionCount: revoked.count,
       },
+      phase5AuditContext: input.phase5AuditContext,
     });
     return revoked.count;
   });
@@ -294,7 +304,16 @@ async function appendAudit(
     actorUserId: string;
     targetUserId: string;
     metadata: AuthAuditMetadata;
+    phase5AuditContext?: Phase5ProvisioningAuditContext;
   },
 ): Promise<void> {
-  await appendAuthAuditEvent(transaction, { ...event, outcome: "SUCCESS" });
+  const { phase5AuditContext, ...auditEvent } = event;
+  await appendAuthAuditEvent(transaction, {
+    ...auditEvent,
+    outcome: "SUCCESS",
+    metadata: withPhase5ProvisioningAuditContext(
+      auditEvent.metadata,
+      phase5AuditContext,
+    ),
+  });
 }
