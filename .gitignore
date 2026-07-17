@@ -10,6 +10,7 @@ data/input/*
 .env
 .env.*
 !.env.example
+!.env.staging.example
 *.pem
 *.key
 *.p12

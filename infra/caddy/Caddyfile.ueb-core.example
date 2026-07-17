@@ -1,0 +1,29 @@
+ueb-core.cargis.vn {
+	encode zstd gzip
+
+	request_body {
+		max_size 10MB
+	}
+
+	@probes path /api/health /api/ready
+	header @probes Cache-Control "no-store, max-age=0"
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+
+	reverse_proxy ueb-core-staging-app:3000 {
+		header_up Host {host}
+		header_up X-Real-IP {remote_host}
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
