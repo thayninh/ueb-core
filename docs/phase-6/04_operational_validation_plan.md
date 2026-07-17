@@ -26,7 +26,7 @@ Severity/response proposal cần được phê duyệt:
 ## 3. Monitoring validation matrix
 
 Approved method is Docker healthcheck plus host cron probes and email alert.
-`MONITORING_EMAIL_TO` must be filled and verified with a redacted test alert
+`STAGING_MONITORING_EMAIL` must be filled and verified with a redacted test alert
 before deployment; a blank recipient is a hard stop.
 
 | Signal | Planned validation | Pass condition |
@@ -132,7 +132,7 @@ RPO_APPROVED=24_HOURS
 RTO_APPROVED=4_HOURS
 APP_MEMORY_LIMIT=512M
 DATABASE_MEMORY_LIMIT=768M
-STAGING_GUARDED_BACKUP_RESTORE=NOT_IMPLEMENTED
+STAGING_GUARDED_BACKUP_RESTORE=IMPLEMENTED_NOT_EXECUTED
 ```
 
 Minimal probes must cover Docker app/DB health and restart count,

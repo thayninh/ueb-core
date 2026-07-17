@@ -101,7 +101,7 @@ jobs produce checksum/catalog/retrieval/restore evidence.
 ## 8. Operational validation
 
 Approved monitoring method is Docker healthcheck + host cron curl + email alert;
-owner/incident contact is `thayninh`. `MONITORING_EMAIL_TO` must be filled and a
+owner/incident contact is `thayninh`. `STAGING_MONITORING_EMAIL` must be filled and a
 redacted test alert must pass before any deployment.
 
 - [ ] Health/readiness/DB/TLS alerts `PASS`.
@@ -140,7 +140,7 @@ STAGING_AUTHORIZATION=APPROVED
 STAGING_DEPLOYMENT=NOT_PERFORMED
 DOMAIN=ueb-core.cargis.vn
 RESOURCE_PROFILE_ACCEPTED=YES_CONDITIONAL_WITH_RESOURCE_LIMITS
-STAGING_GUARDED_TOOLING_READY=NO
+STAGING_GUARDED_TOOLING_READY=YES_STATIC_NOT_EXECUTED
 EXTERNAL_PROXY_NETWORK=ueb-core-proxy
 TARGET_TLS_CONFIGURATION=PENDING_EXECUTION
 MONITORING_EMAIL_DESTINATION=PENDING

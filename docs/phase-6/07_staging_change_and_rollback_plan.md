@@ -12,14 +12,15 @@ RESOURCE_PROFILE_ACCEPTED=YES_CONDITIONAL_WITH_RESOURCE_LIMITS
 STAGING_DEPLOYMENT=NOT_PERFORMED
 SERVER_MUTATIONS=0
 DATABASE_MUTATIONS=0
-STAGING_GUARDED_TOOLING_READY=NO
-EXECUTION_HARD_GATE=BLOCKED
+STAGING_GUARDED_TOOLING_READY=YES_STATIC_NOT_EXECUTED
+EXECUTION_HARD_GATE=BLOCKED_PENDING_OPERATOR_INPUTS_AND_REHEARSAL
 ```
 
-Execution chỉ được mở sau khi staging-safe database/bootstrap/backup/restore/
-fingerprint/security tools có exact host/database guards, negative tests và một
-approved Node 24 operator image/job chạy trên private database network. Không
-dùng raw SQL hoặc Phase 5 UAT commands để vượt gap.
+Phase 6 wrappers hiện có exact host/database/role guards và negative tests.
+Execution chỉ được mở khi commit được phê duyệt, Node 24 operator job chạy trên
+private database network, monitoring/change-window/rollback inputs PASS và
+command order trong `08_staging_guarded_tooling_runbook.md` được tuân thủ. Không
+dùng raw SQL hoặc Phase 5 UAT commands.
 
 ## 2. Approved topology and resource contract
 
@@ -65,6 +66,10 @@ export STAGING_APP_MEMORY_LIMIT=512m
 export STAGING_APP_CPU_LIMIT=0.75
 export STAGING_DB_MEMORY_LIMIT=768m
 export STAGING_DB_CPU_LIMIT=0.75
+export STAGING_MONITORING_EMAIL=<RESTRICTED_OPERATOR_VALUE>
+export STAGING_CHANGE_WINDOW_START=<APPROVED_ISO_TIMESTAMP_WITH_OFFSET>
+export STAGING_CHANGE_WINDOW_END=<APPROVED_ISO_TIMESTAMP_WITH_OFFSET>
+export STAGING_TIMEZONE=Asia/Ho_Chi_Minh
 
 test -n "$CHANGE_REF"
 test -z "$(git status --short)"
@@ -190,10 +195,10 @@ từ `POSTGRES_USER`/`POSTGRES_DB`. Trước khi start DB, guard phải chứng 
 volume chưa tồn tại và không có existing staging target. Nếu target/volume tồn
 tại, chuyển sang pre-deploy backup path; không reinitialize hoặc overwrite.
 
-Hiện repository chưa có staging-safe wrapper chứng minh các điều kiện này, nên
-step này `BLOCKED`. Không dùng `createdb`, `psql` raw SQL hoặc UAT bootstrap tool.
-Sau khi future guard trả exact `TARGET_ABSENT=YES`, `VOLUME_ABSENT=YES` và
-`BOOTSTRAP_AUTHORIZED=YES`, approved execution command là:
+`phase6:bootstrap-staging-database` hiện từ chối existing/ambiguous target và chỉ
+chấp nhận exact target với explicit confirmation. Không dùng `createdb`, `psql`
+raw SQL hoặc UAT bootstrap tool. Compose DB start dưới đây vẫn là future
+authorized infrastructure step trước khi operator job kết nối private endpoint:
 
 ```bash
 cd /opt/ueb-core
@@ -207,29 +212,15 @@ docker compose \
 PostgreSQL entrypoint then creates only the approved owner/database on the new
 dedicated volume; this command must not run for an existing or ambiguous target.
 
-### 6.2 Ordered operator jobs after guard implementation
+### 6.2 Ordered guarded operator jobs
 
-1. Guarded DB/owner bootstrap xác minh host, database, volume marker và role.
-2. Approved Node 24 operator job trên `ueb-core-staging-database` chạy đúng 7
-   migrations bằng `ueb_core_staging_owner`:
-
-   ```bash
-   MIGRATION_DATABASE_URL="<SECURE_OWNER_URL_IN_MEMORY>" \
-     pnpm exec prisma migrate deploy
-   ```
-
-3. Staging-guarded wrapper tạo/reconcile `ueb_core_staging_app` bằng existing
-   runtime primitives, với exact host/database confirmation.
-4. Staging-guarded runtime ACL wrapper chạy với:
-
-   ```text
-   --confirm-runtime-grants
-   --expected-database=ueb_core_staging
-   ```
-
-5. Staging-guarded provisioning wrapper tạo
-   `ueb_core_staging_provisioner`, reconcile exact ACL và verify.
-6. Read-only staging security verifier yêu cầu:
+1. Deployment/rollback preflight PASS từ immutable local artifact.
+2. Nếu database đã tồn tại, guarded backup/verify/off-host evidence PASS.
+3. Nếu database chưa tồn tại, guarded bootstrap tự chạy đúng 7 migrations.
+4. Guarded role bootstrap tạo/reconcile `ueb_core_staging_app` và
+   `ueb_core_staging_provisioner` qua distinct authorized role-admin URL.
+5. Guarded runtime/provisioning ACL reconciliation PASS.
+6. Read-only security verifier và metadata-only fingerprint PASS:
 
    ```text
    MIGRATION_COUNT=7
@@ -247,9 +238,8 @@ dedicated volume; this command must not run for an existing or ambiguous target.
    RLS_DEFAULT_DENY=PASS
    ```
 
-Current `phase5:*` provisioning/backup/restore/fingerprint/verify commands reject
-staging because they require local/UAT targets and role names. Raw SQL is not an
-approved substitute.
+Exact commands/confirmations nằm trong runbook 08. `phase5:*` commands tiếp tục
+reject staging; raw SQL không phải substitute được phê duyệt.
 
 ## 7. Backup and off-host copy
 
@@ -271,7 +261,7 @@ RPO=24_HOURS
 RTO=4_HOURS
 ```
 
-Sau khi staging-safe backup wrapper PASS:
+Sau khi `phase6:backup-staging` và `phase6:verify-staging-backup` PASS:
 
 ```bash
 ssh -o BatchMode=yes ueb-core-staging \
@@ -360,7 +350,7 @@ count, zero public app/DB ports, resource limits and RLS default deny.
 ## 10. Minimal monitoring contract
 
 Monitoring method is Docker healthcheck plus host cron curl and email alert. The
-operator must fill `MONITORING_EMAIL_TO` in restricted host configuration before
+operator must fill `STAGING_MONITORING_EMAIL` in restricted host configuration before
 deployment; a blank destination is a stop condition.
 
 Các command dưới đây chạy trong restricted host monitoring script từ
@@ -369,8 +359,8 @@ Các command dưới đây chạy trong restricted host monitoring script từ
 ```bash
 cd /opt/ueb-core
 export STAGING_ENV_FILE=/opt/ueb-core/secrets/staging.env
-export MONITORING_EMAIL_TO=<OPERATOR_MUST_FILL>
-test -n "$MONITORING_EMAIL_TO"
+export STAGING_MONITORING_EMAIL=<OPERATOR_MUST_FILL>
+test -n "$STAGING_MONITORING_EMAIL"
 
 APP_ID="$(docker compose \
   --env-file "$STAGING_ENV_FILE" \
@@ -419,11 +409,11 @@ separate reviewed change and redacted test alert.
 ## 12. Remaining blockers
 
 ```text
-STAGING_GUARDED_DATABASE_BOOTSTRAP=NOT_IMPLEMENTED
+STAGING_GUARDED_DATABASE_BOOTSTRAP=IMPLEMENTED_NOT_EXECUTED
 STAGING_OPERATOR_IMAGE_OR_JOB=NOT_IMPLEMENTED
-STAGING_PROVISIONING_GUARD=NOT_IMPLEMENTED
-STAGING_BACKUP_RESTORE_GUARD=NOT_IMPLEMENTED
-STAGING_SECURITY_FINGERPRINT_GUARD=NOT_IMPLEMENTED
+STAGING_PROVISIONING_GUARD=IMPLEMENTED_NOT_EXECUTED
+STAGING_BACKUP_RESTORE_GUARD=IMPLEMENTED_NOT_EXECUTED
+STAGING_SECURITY_FINGERPRINT_GUARD=IMPLEMENTED_NOT_EXECUTED
 MONITORING_EMAIL_DESTINATION=REQUIRED_BEFORE_DEPLOYMENT
 CHANGE_AND_OBSERVATION_WINDOW=REQUIRED_BEFORE_DEPLOYMENT
 ROLLBACK_IMAGE_COMPATIBILITY=REQUIRED_BEFORE_DEPLOYMENT
