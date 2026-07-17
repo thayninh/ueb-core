@@ -293,6 +293,20 @@ describe.skipIf(!integrationEnabled)(
       expect(page.totalRows).toBe(1);
       expect(page.rows[0]?.recordUid).toBe(ids.recordA1);
     });
+
+    it("26. denies the all-rows admin query to a lecturer", async () => {
+      auth.principal = lecturerAPrincipal();
+      await expect(latest.getLatestCoreRowsForAdmin()).rejects.toThrow(
+        "FORBIDDEN",
+      );
+    });
+
+    it("27. denies the all-rows admin query to a non-admin leader", async () => {
+      auth.principal = leaderAPrincipal();
+      await expect(latest.getLatestCoreRowsForAdmin()).rejects.toThrow(
+        "FORBIDDEN",
+      );
+    });
   },
 );
 

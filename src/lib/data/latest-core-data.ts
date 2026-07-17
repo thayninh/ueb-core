@@ -161,13 +161,16 @@ export async function getLatestCoreRowsForAdmin(
 ): Promise<LatestCoreRowsPage> {
   const principal = await requireAdmin();
 
-  return withCoreDataRlsContext(principal, (transaction) =>
-    queryLatestRowsPage(
-      transaction,
-      Prisma.sql`TRUE`,
-      normalizeSearch(input.search),
-      normalizePage(input.page),
-    ),
+  return withCoreDataRlsContext(
+    principal,
+    (transaction) =>
+      queryLatestRowsPage(
+        transaction,
+        Prisma.sql`TRUE`,
+        normalizeSearch(input.search),
+        normalizePage(input.page),
+      ),
+    { readOnly: true },
   );
 }
 
@@ -214,8 +217,10 @@ export async function getAllLatestCoreRowsForAdmin(): Promise<
   readonly LatestCoreRowDto[]
 > {
   const principal = await requireAdmin();
-  return withCoreDataRlsContext(principal, (transaction) =>
-    queryLatestRows(transaction, Prisma.sql`TRUE`),
+  return withCoreDataRlsContext(
+    principal,
+    (transaction) => queryLatestRows(transaction, Prisma.sql`TRUE`),
+    { readOnly: true },
   );
 }
 

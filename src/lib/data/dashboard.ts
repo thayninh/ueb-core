@@ -79,6 +79,12 @@ function allowedFeatures(roles: readonly BusinessRole[]) {
   }
   if (roles.includes(BusinessRole.ADMIN)) {
     features.push({
+      href: "/admin/data",
+      label: "Dữ liệu hiện hành",
+      description:
+        "Tra cứu toàn bộ phiên bản đã phê duyệt mới nhất ở chế độ chỉ đọc.",
+    });
+    features.push({
       href: "/admin/users",
       label: "Quản trị tài khoản",
       description: "Quản lý tài khoản, vai trò, ánh xạ và session.",
