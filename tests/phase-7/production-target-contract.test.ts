@@ -22,12 +22,14 @@ let evidenceDirectory: string;
 let backupEvidence: string;
 let offHostEvidence: string;
 let rollbackEvidence: string;
+let emailAlertEvidence: string;
 
 beforeEach(async () => {
   evidenceDirectory = await mkdtemp(join(tmpdir(), "ueb-core-phase7-prod-"));
   backupEvidence = join(evidenceDirectory, "backup.txt");
   offHostEvidence = join(evidenceDirectory, "off-host.txt");
   rollbackEvidence = join(evidenceDirectory, "rollback.txt");
+  emailAlertEvidence = join(evidenceDirectory, "email-alert.txt");
   await writeEvidence(
     backupEvidence,
     "BACKUP_STATUS=PASS\nBACKUP_CHECKSUM_STATUS=PASS\nRESTORE_REHEARSAL_STATUS=PASS\n",
@@ -37,6 +39,7 @@ beforeEach(async () => {
     rollbackEvidence,
     `ROLLBACK_IMAGE_EXISTS=YES\nROLLBACK_VERIFY=PASS\nROLLBACK_IMAGE_SHA=${PRODUCTION_TARGET_CONTRACT.rollbackImageSha}\n`,
   );
+  await writeEvidence(emailAlertEvidence, validEmailEvidence());
 });
 
 afterEach(async () => {
@@ -135,24 +138,85 @@ describe("Phase 7 production target guards", () => {
     ).not.toThrow();
   });
 
-  it("passes local planned-empty preflight without database mutation", async () => {
+  it("validates email evidence while planned-empty preflight remains blocked", async () => {
     const command = parseProductionTargetCommand(
       "PREFLIGHT",
       baseArguments("PREFLIGHT"),
     );
     const result = await runPlan(command);
 
-    expect(result.report).toContain("PLAN_STATUS=PASS");
-    expect(result.report).toContain("PRODUCTION_PREFLIGHT=PASS");
+    expect(result.report).toContain("PLAN_STATUS=BLOCKED_EXPECTED");
+    expect(result.report).toContain("PRODUCTION_PREFLIGHT=BLOCKED_EXPECTED");
     expect(result.report).toContain("EMPTY_TARGET_SUPPORT=PASS");
     expect(result.report).toContain("ROLE_SEPARATION=PASS");
     expect(result.report).toContain("DATABASE_CONNECTIONS=0");
     expect(result.report).toContain("DATABASE_MUTATIONS=0");
+    expect(result.report).toContain("EMAIL_EVIDENCE_VALIDATION=PASS");
+    expect(result.report).toContain("EMAIL_ALERT_GATE=PASS");
+    expect(result.report).toContain("SECRET_LEAKAGE=0");
     expect(result.report).toContain("HARD_GATE=BLOCKED");
     expect(result.report).toContain(
-      "BLOCKING_REASON=EMAIL_ALERT_TRANSPORT_NOT_APPROVED",
+      "BLOCKING_REASON=GO_LIVE_NOT_AUTHORIZED;PRODUCTION_DATABASE_NOT_CREATED",
     );
     expect(result.exitCode).toBe(2);
+  });
+
+  it.each([
+    [
+      "failed",
+      () => validEmailEvidence().replace("EMAIL_TEST=PASS", "EMAIL_TEST=FAIL"),
+    ],
+    [
+      "blocked",
+      () =>
+        validEmailEvidence().replace(
+          "EMAIL_ALERT_GATE=PASS",
+          "EMAIL_ALERT_GATE=BLOCKED",
+        ),
+    ],
+    [
+      "stale",
+      () =>
+        validEmailEvidence().replace(
+          "2026-07-18T04:00:00Z",
+          "2026-07-16T04:00:00Z",
+        ),
+    ],
+  ])("blocks %s email evidence", async (_label, content) => {
+    await writeEvidence(emailAlertEvidence, content());
+    const result = await runPlan(
+      parseProductionTargetCommand("PREFLIGHT", baseArguments("PREFLIGHT")),
+    );
+
+    expect(result.report).toContain("EMAIL_EVIDENCE_VALIDATION=BLOCKED");
+    expect(result.report).toContain("EMAIL_ALERT_GATE=BLOCKED");
+    expect(result.report).toContain("EMAIL_ALERT_EVIDENCE_INVALID");
+    expect(result.exitCode).toBe(2);
+  });
+
+  it("blocks missing email evidence", async () => {
+    await rm(emailAlertEvidence);
+    const result = await runPlan(
+      parseProductionTargetCommand("PREFLIGHT", baseArguments("PREFLIGHT")),
+    );
+
+    expect(result.report).toContain("EMAIL_EVIDENCE_VALIDATION=BLOCKED");
+    expect(result.report).toContain("EMAIL_ALERT_EVIDENCE_INVALID");
+  });
+
+  it("rejects leaked email credentials without echoing them", async () => {
+    const leakedSecret = "do-not-print-this-secret";
+    await writeEvidence(
+      emailAlertEvidence,
+      `${validEmailEvidence()}GMAIL_APP_PASSWORD=${leakedSecret}\n`,
+    );
+    const result = await runPlan(
+      parseProductionTargetCommand("PREFLIGHT", baseArguments("PREFLIGHT")),
+    );
+
+    expect(result.report).toContain("EMAIL_EVIDENCE_VALIDATION=BLOCKED");
+    expect(result.report).toContain("SECRET_LEAKAGE=0");
+    expect(result.report).not.toContain(leakedSecret);
   });
 
   it("requires the rollback image source commit and matching evidence", async () => {
@@ -227,6 +291,7 @@ function baseArguments(mode: ProductionTargetMode): string[] {
     `--backup-evidence=${backupEvidence}`,
     `--off-host-backup-evidence=${offHostEvidence}`,
     `--rollback-evidence=${rollbackEvidence}`,
+    `--email-alert-evidence=${emailAlertEvidence}`,
     confirmation[mode],
   ];
 }
@@ -255,4 +320,19 @@ function replaceArgument(
 async function writeEvidence(path: string, content: string): Promise<void> {
   await writeFile(path, content, { mode: 0o600 });
   await chmod(path, 0o600);
+}
+
+function validEmailEvidence(): string {
+  return [
+    "EVIDENCE_TIMESTAMP_UTC=2026-07-18T04:00:00Z",
+    "EMAIL_ALERT_TRANSPORT=GMAIL_SMTP",
+    "SMTP_AUTH=PASS",
+    "EMAIL_TEST=PASS",
+    "EMAIL_ALERT_GATE=PASS",
+    "SENDER_CONFIRMED=YES",
+    "RECIPIENT_CONFIRMED=YES",
+    "MESSAGE_CONTENT=NON_SENSITIVE",
+    "CREDENTIAL_LOGGED=NO",
+    "",
+  ].join("\n");
 }

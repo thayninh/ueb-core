@@ -35,7 +35,7 @@ as database execution.
 | Rollback release source | `971c42027873f7de3140f815b06c2dddcfb61ba6` | Git commit exists; immutable image evidence still required |
 | RPO | `24h` | approved for planning |
 | RTO | `4h` | approved for planning |
-| Email alert transport | `BLOCK_GO_LIVE_UNTIL_APPROVED_TRANSPORT_IS_CONFIGURED_AND_TESTED` | hard blocker |
+| Email alert transport | Gmail SMTP with a redacted delivery test | validated from restricted evidence; never from a credential file |
 
 Role names are distinct. Credential values must also be separately generated,
 stored and distributed; sharing a password between these roles is forbidden.
@@ -63,7 +63,7 @@ the authoritative roster manifest.
 
 ## 4. Required evidence outside Git
 
-Every command requires three absolute evidence paths outside the repository.
+Every command requires four absolute evidence paths outside the repository.
 Each file must be regular, non-symlinked, at most 1 MiB and mode `0600`.
 
 The backup evidence must contain exact lines:
@@ -88,6 +88,25 @@ ROLLBACK_VERIFY=PASS
 ROLLBACK_IMAGE_SHA=971c42027873f7de3140f815b06c2dddcfb61ba6
 ```
 
+The redacted email evidence must contain:
+
+```text
+EVIDENCE_TIMESTAMP_UTC=<ISO-8601 UTC timestamp no older than 24 hours>
+EMAIL_ALERT_TRANSPORT=GMAIL_SMTP
+SMTP_AUTH=PASS
+EMAIL_TEST=PASS
+EMAIL_ALERT_GATE=PASS
+SENDER_CONFIRMED=YES
+RECIPIENT_CONFIRMED=YES
+MESSAGE_CONTENT=NON_SENSITIVE
+CREDENTIAL_LOGGED=NO
+```
+
+The validator rejects missing, stale, future-dated, malformed or non-`0600`
+email evidence. It also rejects password fields and credential-bearing URLs.
+Only the redacted result is read; Gmail App Password values are never accepted
+or emitted by this local-only command.
+
 Evidence content is necessary but not production authorization. The actual
 rollback image ID/digest, architecture and registry/transfer evidence must be
 verified in the change window before any mutation.
@@ -102,6 +121,7 @@ AUTHORIZED_GIT_SHA="$(git rev-parse HEAD)"
 PRODUCTION_BACKUP_EVIDENCE="/absolute/secure/path/production-backup-evidence.txt"
 OFF_HOST_BACKUP_EVIDENCE="/absolute/secure/path/off-host-backup-evidence.txt"
 ROLLBACK_IMAGE_EVIDENCE="/absolute/secure/path/rollback-image-evidence.txt"
+EMAIL_ALERT_EVIDENCE="/absolute/secure/path/email-alert-evidence.txt"
 
 production_plan_args=(
   --target-database=ueb_core_prod
@@ -121,6 +141,7 @@ production_plan_args=(
   --backup-evidence="$PRODUCTION_BACKUP_EVIDENCE"
   --off-host-backup-evidence="$OFF_HOST_BACKUP_EVIDENCE"
   --rollback-evidence="$ROLLBACK_IMAGE_EVIDENCE"
+  --email-alert-evidence="$EMAIL_ALERT_EVIDENCE"
 )
 ```
 
@@ -206,7 +227,7 @@ never automatic.
 ```text
 PRODUCTION_TARGET_CONTRACT=DEFINED
 LOCAL_PLAN_TESTABILITY=REQUIRED
-EMAIL_ALERT_TRANSPORT_GATE=BLOCKED
+EMAIL_ALERT_GATE=VALIDATED_FROM_REDACTED_EVIDENCE
 PRODUCTION_AUTHORIZATION_REFERENCE=REQUIRED_BEFORE_EXECUTION
 BACKUP_EVIDENCE=REQUIRED_BEFORE_EXECUTION
 OFF_HOST_BACKUP_EVIDENCE=REQUIRED_BEFORE_EXECUTION

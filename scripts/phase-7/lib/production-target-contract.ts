@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 
 export const PRODUCTION_TARGET_CONTRACT = {
-  contractVersion: 1,
+  contractVersion: 2,
   contractBaseGitSha: "b5662c696cde365c701cf22811108ba5b5550037",
   domainStrategy: "PROMOTE_CURRENT_DOMAIN_AND_MOVE_STAGING",
   productionDomain: "ueb-core.cargis.vn",
@@ -19,8 +19,8 @@ export const PRODUCTION_TARGET_CONTRACT = {
   rollbackImageSha: "971c42027873f7de3140f815b06c2dddcfb61ba6",
   rpo: "24h",
   rto: "4h",
-  emailAlertTransportDecision:
-    "BLOCK_GO_LIVE_UNTIL_APPROVED_TRANSPORT_IS_CONFIGURED_AND_TESTED",
+  goLiveAuthorization: "NOT_PROVIDED",
+  emailAlertEvidenceMaxAgeHours: 24,
   rosterManifestSha:
     "c622297ee3a0b31c6265b01973fa4589d8be949e9e720d9e04d6cd59be85f8b4",
   canonicalChecksum:
@@ -57,6 +57,7 @@ export interface ProductionTargetCommand {
   readonly backupEvidence: string;
   readonly offHostBackupEvidence: string;
   readonly rollbackEvidence: string;
+  readonly emailAlertEvidence: string;
 }
 
 export interface ProductionTargetPlanResult {
@@ -95,6 +96,7 @@ const VALUE_PREFIXES = [
   "--backup-evidence=",
   "--off-host-backup-evidence=",
   "--rollback-evidence=",
+  "--email-alert-evidence=",
 ] as const;
 
 const DATABASE_IDENTIFIER = /^[a-z_][a-z0-9_]{0,62}$/u;
@@ -176,6 +178,9 @@ export function parseProductionTargetCommand(
       value("--off-host-backup-evidence="),
     ),
     rollbackEvidence: assertExternalEvidencePath(value("--rollback-evidence=")),
+    emailAlertEvidence: assertExternalEvidencePath(
+      value("--email-alert-evidence="),
+    ),
   };
   assertProductionTargetContract(command);
   return command;
@@ -254,30 +259,35 @@ export async function runProductionTargetPlan(input: {
   readonly rollbackCommitExists?: (sha: string) => Promise<boolean>;
 }): Promise<ProductionTargetPlanResult> {
   assertNoDatabaseCredentials(input.environment ?? process.env);
-  parseProductionChangeWindow(input.command.changeWindow, input.now);
-  const [gitState, backup, offHost, rollback, rollbackCommitExists] =
-    await Promise.all([
-      (input.gitState ?? readGitState)(),
-      readEvidence(input.command.backupEvidence, [
-        "BACKUP_STATUS=PASS",
-        "BACKUP_CHECKSUM_STATUS=PASS",
-        "RESTORE_REHEARSAL_STATUS=PASS",
-      ]),
-      readEvidence(input.command.offHostBackupEvidence, [
-        "OFF_HOST_BACKUP_STATUS=PASS",
-      ]),
-      readEvidence(input.command.rollbackEvidence, [
-        "ROLLBACK_IMAGE_EXISTS=YES",
-        "ROLLBACK_VERIFY=PASS",
-        `ROLLBACK_IMAGE_SHA=${input.command.rollbackImageSha}`,
-      ]),
-      (input.rollbackCommitExists ?? gitCommitExists)(
-        input.command.rollbackImageSha,
-      ),
-    ]);
-  void backup;
-  void offHost;
-  void rollback;
+  const now = input.now ?? new Date();
+  parseProductionChangeWindow(input.command.changeWindow, now);
+  const [
+    gitState,
+    backup,
+    offHost,
+    rollback,
+    emailAlert,
+    rollbackCommitExists,
+  ] = await Promise.all([
+    (input.gitState ?? readGitState)(),
+    inspectEvidence(input.command.backupEvidence, [
+      "BACKUP_STATUS=PASS",
+      "BACKUP_CHECKSUM_STATUS=PASS",
+      "RESTORE_REHEARSAL_STATUS=PASS",
+    ]),
+    inspectEvidence(input.command.offHostBackupEvidence, [
+      "OFF_HOST_BACKUP_STATUS=PASS",
+    ]),
+    inspectEvidence(input.command.rollbackEvidence, [
+      "ROLLBACK_IMAGE_EXISTS=YES",
+      "ROLLBACK_VERIFY=PASS",
+      `ROLLBACK_IMAGE_SHA=${input.command.rollbackImageSha}`,
+    ]),
+    inspectEmailAlertEvidence(input.command.emailAlertEvidence, now),
+    (input.rollbackCommitExists ?? gitCommitExists)(
+      input.command.rollbackImageSha,
+    ),
+  ]);
   if (
     gitState.head !== input.command.expectedGitSha ||
     !gitState.workingTreeClean
@@ -288,18 +298,23 @@ export async function runProductionTargetPlan(input: {
     throw new SafeProductionTargetError("ROLLBACK_IMAGE_NOT_FOUND");
   }
   const operationalBlockers = [
-    ...(PRODUCTION_TARGET_CONTRACT.emailAlertTransportDecision.startsWith(
-      "BLOCK_",
-    )
-      ? ["EMAIL_ALERT_TRANSPORT_NOT_APPROVED"]
+    ...(PRODUCTION_TARGET_CONTRACT.goLiveAuthorization === "NOT_PROVIDED"
+      ? ["GO_LIVE_NOT_AUTHORIZED"]
       : []),
+    ...(input.command.targetStateMode === "PLANNED_EMPTY_TARGET"
+      ? ["PRODUCTION_DATABASE_NOT_CREATED"]
+      : []),
+    ...(!backup || !offHost ? ["PRODUCTION_BACKUP_EVIDENCE_UNAVAILABLE"] : []),
+    ...(!rollback ? ["ROLLBACK_EVIDENCE_INVALID"] : []),
+    ...(!emailAlert ? ["EMAIL_ALERT_EVIDENCE_INVALID"] : []),
   ];
   const modeLines = planLines(input.command.mode);
+  const blocked = operationalBlockers.length > 0;
   return {
     report: [
       `MODE=${input.command.mode}`,
-      "PLAN_STATUS=PASS",
-      "PRODUCTION_PREFLIGHT=PASS",
+      `PLAN_STATUS=${blocked ? "BLOCKED_EXPECTED" : "PASS"}`,
+      `PRODUCTION_PREFLIGHT=${blocked ? "BLOCKED_EXPECTED" : "PASS"}`,
       `TARGET_DATABASE=${input.command.targetDatabase}`,
       "TARGET_STATE_MODE=PLANNED_EMPTY_TARGET",
       "EMPTY_TARGET_SUPPORT=PASS",
@@ -312,21 +327,24 @@ export async function runProductionTargetPlan(input: {
       `EXPECTED_CANONICAL_ROW_COUNT=${PRODUCTION_TARGET_CONTRACT.expectedCanonicalRowCount}`,
       `EXPECTED_MIGRATION_COUNT=${PRODUCTION_TARGET_CONTRACT.expectedMigrationCount}`,
       `ROSTER_BLOCK_COUNT=${input.command.expectedBlockCount}`,
-      "BACKUP_GATE=PASS",
-      "OFF_HOST_BACKUP_GATE=PASS",
-      "ROLLBACK_GATE=PASS",
+      `BACKUP_GATE=${backup ? "PASS" : "BLOCKED"}`,
+      `OFF_HOST_BACKUP_GATE=${offHost ? "PASS" : "BLOCKED"}`,
+      `ROLLBACK_GATE=${rollback ? "PASS" : "BLOCKED"}`,
       "DOMAIN_CUTOVER_PLAN=PASS",
-      "EMAIL_ALERT_TRANSPORT_GATE=BLOCKED",
+      `EMAIL_EVIDENCE_VALIDATION=${emailAlert ? "PASS" : "BLOCKED"}`,
+      `EMAIL_ALERT_GATE=${emailAlert ? "PASS" : "BLOCKED"}`,
+      `EMAIL_ALERT_TRANSPORT_GATE=${emailAlert ? "PASS" : "BLOCKED"}`,
+      "SECRET_LEAKAGE=0",
       ...modeLines,
       `OPERATIONAL_BLOCK_COUNT=${operationalBlockers.length}`,
-      `HARD_GATE=${operationalBlockers.length === 0 ? "PASS" : "BLOCKED"}`,
-      `BLOCKING_REASON=${operationalBlockers.join(",") || "NONE"}`,
+      `HARD_GATE=${blocked ? "BLOCKED" : "PASS"}`,
+      `BLOCKING_REASON=${operationalBlockers.join(";") || "NONE"}`,
       "DATABASE_CONNECTIONS=0",
       "DATABASE_MUTATIONS=0",
       "PRODUCTION_DEPLOYMENT=NOT_PERFORMED",
       "PRODUCTION_PROVISIONING=NOT_PERFORMED",
     ].join("\n"),
-    exitCode: operationalBlockers.length === 0 ? 0 : 2,
+    exitCode: blocked ? 2 : 0,
   };
 }
 
@@ -418,10 +436,10 @@ function assertExternalEvidencePath(path: string): string {
   return absolute;
 }
 
-async function readEvidence(
+async function inspectEvidence(
   path: string,
   requiredLines: readonly string[],
-): Promise<string> {
+): Promise<boolean> {
   const metadata = await lstat(path).catch(() => undefined);
   if (
     !metadata?.isFile() ||
@@ -429,13 +447,60 @@ async function readEvidence(
     (metadata.mode & 0o777) !== 0o600 ||
     metadata.size > 1024 * 1024
   ) {
-    throw new SafeProductionTargetError("EVIDENCE_FILE_INVALID");
+    return false;
   }
   const content = await readFile(path, "utf8");
-  if (requiredLines.some((line) => !content.split(/\r?\n/u).includes(line))) {
-    throw new SafeProductionTargetError("EVIDENCE_GATE_FAILED");
+  const lines = content.split(/\r?\n/u);
+  return requiredLines.every((line) => lines.includes(line));
+}
+
+async function inspectEmailAlertEvidence(
+  path: string,
+  now: Date,
+): Promise<boolean> {
+  const metadata = await lstat(path).catch(() => undefined);
+  if (
+    !metadata?.isFile() ||
+    metadata.isSymbolicLink() ||
+    (metadata.mode & 0o777) !== 0o600 ||
+    metadata.size > 1024 * 1024
+  ) {
+    return false;
   }
-  return content;
+  const content = await readFile(path, "utf8");
+  if (
+    /(?:APP_PASSWORD|SMTP_PASSWORD|GMAIL_APP_PASSWORD|DATABASE_URL)\s*=/iu.test(
+      content,
+    ) ||
+    /(?:postgres(?:ql)?|smtps?):\/\/[^\s@]+:[^\s@]+@/iu.test(content)
+  ) {
+    return false;
+  }
+  const lines = content.split(/\r?\n/u);
+  const requiredLines = [
+    "EMAIL_ALERT_TRANSPORT=GMAIL_SMTP",
+    "SMTP_AUTH=PASS",
+    "EMAIL_TEST=PASS",
+    "EMAIL_ALERT_GATE=PASS",
+    "SENDER_CONFIRMED=YES",
+    "RECIPIENT_CONFIRMED=YES",
+    "MESSAGE_CONTENT=NON_SENSITIVE",
+    "CREDENTIAL_LOGGED=NO",
+  ];
+  if (requiredLines.some((line) => !lines.includes(line))) return false;
+  const timestampLine = lines.find((line) =>
+    line.startsWith("EVIDENCE_TIMESTAMP_UTC="),
+  );
+  const timestamp = new Date(
+    timestampLine?.slice("EVIDENCE_TIMESTAMP_UTC=".length) ?? "",
+  );
+  const age = now.getTime() - timestamp.getTime();
+  return (
+    !Number.isNaN(timestamp.getTime()) &&
+    age >= -5 * 60 * 1000 &&
+    age <=
+      PRODUCTION_TARGET_CONTRACT.emailAlertEvidenceMaxAgeHours * 60 * 60 * 1000
+  );
 }
 
 async function readGitState(): Promise<{
