@@ -1,0 +1,81 @@
+x-phase6-operator: &phase6-operator
+  image: "${UEB_CORE_OPERATOR_IMAGE:?UEB_CORE_OPERATOR_IMAGE is required}"
+  profiles:
+    - operator
+  user: operator
+  working_dir: /operator
+  networks:
+    - database
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=64m
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  init: true
+  restart: "no"
+  pids_limit: 128
+  entrypoint: []
+
+x-phase6-common-environment: &phase6-common-environment
+  STAGING_TARGET_HOST: "${STAGING_TARGET_HOST:?STAGING_TARGET_HOST is required}"
+  STAGING_DATABASE_HOST: "${STAGING_DATABASE_HOST:?STAGING_DATABASE_HOST is required}"
+  STAGING_DATABASE_PORT: "${STAGING_DATABASE_PORT:?STAGING_DATABASE_PORT is required}"
+  STAGING_EXPECTED_DATABASE: "${STAGING_EXPECTED_DATABASE:?STAGING_EXPECTED_DATABASE is required}"
+  STAGING_MIGRATION_OWNER_ROLE: "${STAGING_MIGRATION_OWNER_ROLE:?STAGING_MIGRATION_OWNER_ROLE is required}"
+  APP_DATABASE_USER: "${APP_DATABASE_USER:?APP_DATABASE_USER is required}"
+  PHASE6_PROVISIONING_USER: "${PHASE6_PROVISIONING_USER:?PHASE6_PROVISIONING_USER is required}"
+  MIGRATION_DATABASE_URL: "${MIGRATION_DATABASE_URL:?MIGRATION_DATABASE_URL is required}"
+
+x-phase6-owner-environment: &phase6-owner-environment
+  <<: *phase6-common-environment
+  STAGING_AUTHORIZED_BOOTSTRAP_ROLE: "${STAGING_AUTHORIZED_BOOTSTRAP_ROLE:?STAGING_AUTHORIZED_BOOTSTRAP_ROLE is required}"
+  STAGING_BOOTSTRAP_DATABASE_URL: "${STAGING_BOOTSTRAP_DATABASE_URL:?STAGING_BOOTSTRAP_DATABASE_URL is required}"
+  STAGING_ROLE_ADMIN_DATABASE_URL: "${STAGING_ROLE_ADMIN_DATABASE_URL:?STAGING_ROLE_ADMIN_DATABASE_URL is required}"
+  STAGING_MIGRATION_OWNER_PASSWORD: "${STAGING_MIGRATION_OWNER_PASSWORD:?STAGING_MIGRATION_OWNER_PASSWORD is required}"
+  STAGING_RUNTIME_PASSWORD: "${STAGING_RUNTIME_PASSWORD:?STAGING_RUNTIME_PASSWORD is required}"
+  STAGING_PROVISIONING_PASSWORD: "${STAGING_PROVISIONING_PASSWORD:?STAGING_PROVISIONING_PASSWORD is required}"
+
+services:
+  db:
+    environment:
+      STAGING_BOOTSTRAP_PASSWORD: "${STAGING_BOOTSTRAP_PASSWORD:?STAGING_BOOTSTRAP_PASSWORD is required}"
+    volumes:
+      - ./infra/postgres/999-phase6-create-bootstrap-role.sh:/docker-entrypoint-initdb.d/999-phase6-create-bootstrap-role.sh:ro
+
+  operator-owner:
+    <<: *phase6-operator
+    environment:
+      <<: *phase6-owner-environment
+    volumes:
+      - ${STAGING_BACKUP_DIRECTORY:-/var/backups/ueb-core/staging}:${STAGING_BACKUP_DIRECTORY:-/var/backups/ueb-core/staging}
+    command:
+      - pnpm
+      - phase6:fingerprint-staging
+      - --
+      - --expected-database=ueb_core_staging
+
+  operator-runtime:
+    <<: *phase6-operator
+    environment:
+      <<: *phase6-common-environment
+      DATABASE_URL: "${DATABASE_URL:?DATABASE_URL is required}"
+    command:
+      - pnpm
+      - phase6:grant-staging-runtime-permissions
+      - --
+      - --expected-database=ueb_core_staging
+      - --confirm-staging-runtime-grants
+
+  operator-provisioner:
+    <<: *phase6-operator
+    environment:
+      <<: *phase6-common-environment
+      DATABASE_URL: "${PHASE6_PROVISIONING_DATABASE_URL:?PHASE6_PROVISIONING_DATABASE_URL is required}"
+    command:
+      - pnpm
+      - phase6:grant-staging-provisioning-permissions
+      - --
+      - --expected-database=ueb_core_staging
+      - --confirm-staging-provisioning-grants

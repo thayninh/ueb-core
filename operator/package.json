@@ -1,0 +1,44 @@
+{
+  "name": "@ueb-core/phase6-operator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "phase6:bootstrap-staging-database": "tsx scripts/phase-6/staging-operations.ts bootstrap-database",
+    "phase6:bootstrap-staging-runtime-role": "tsx scripts/phase-6/staging-operations.ts bootstrap-runtime-role",
+    "phase6:bootstrap-staging-provisioning-role": "tsx scripts/phase-6/staging-operations.ts bootstrap-provisioning-role",
+    "phase6:grant-staging-runtime-permissions": "tsx scripts/phase-6/staging-operations.ts grant-runtime-permissions",
+    "phase6:grant-staging-provisioning-permissions": "tsx scripts/phase-6/staging-operations.ts grant-provisioning-permissions",
+    "phase6:verify-staging-security": "tsx scripts/phase-6/staging-operations.ts verify-security",
+    "phase6:fingerprint-staging": "tsx scripts/phase-6/staging-operations.ts fingerprint",
+    "phase6:backup-staging": "tsx scripts/phase-6/staging-operations.ts backup",
+    "phase6:verify-staging-backup": "tsx scripts/phase-6/staging-operations.ts verify-backup",
+    "phase6:cleanup-staging-backups": "tsx scripts/phase-6/staging-operations.ts cleanup-backups",
+    "phase6:restore-staging-rehearsal": "tsx scripts/phase-6/staging-operations.ts restore-rehearsal",
+    "phase6:verify-staging-restore": "tsx scripts/phase-6/staging-operations.ts verify-restore",
+    "phase6:cleanup-staging-restore": "tsx scripts/phase-6/staging-operations.ts cleanup-restore",
+    "phase6:clear-stale-staging-restore-lock": "tsx scripts/phase-6/staging-operations.ts clear-stale-restore-lock",
+    "phase6:staging-deployment-preflight": "tsx scripts/phase-6/staging-operations.ts deployment-preflight",
+    "phase6:verify-rollback-image": "tsx scripts/phase-6/staging-operations.ts verify-rollback-image",
+    "phase6:generate-staging-secrets": "tsx scripts/phase-6/staging-secrets.ts generate",
+    "phase6:validate-staging-secrets": "tsx scripts/phase-6/staging-secrets.ts validate",
+    "phase6:operator-local-execution-test": "tsx scripts/phase-6/operator-local-execution-test.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^7.8.0",
+    "dotenv": "^17.4.2",
+    "pg": "^8.22.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/pg": "^8.20.0",
+    "prisma": "^7.8.0",
+    "tsx": "^4.23.1",
+    "typescript": "^5"
+  },
+  "packageManager": "pnpm@11.13.0+sha512.88d94724d8f2e6c186744a5584c6e59ecac869ec7ba15e9cb4cd628e8dc7066820b2481d8ee3b51ea8da323a7378068aa58c556a3720d32b7c20a051d088363a"
+}

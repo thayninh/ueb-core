@@ -1,0 +1,185 @@
+# Phase 6 staging acceptance checklist
+
+## 1. Decision rule
+
+Phase 6 chỉ `PASS` khi toàn bộ mandatory items dưới đây có redacted evidence,
+không có blocker/high defect và external approvers ký staging-only acceptance.
+Checklist không authorize production hoặc thay thế change authorization.
+
+## 2. Authorization and scope
+
+- [ ] `AUTH-01` đến `AUTH-14` đều `PASS` với external references.
+- [ ] Environment ghi rõ `STAGING`; domain là `ueb-core.cargis.vn`.
+- [ ] Change/observation windows và rollback owner được phê duyệt.
+- [ ] Production deployment, SSO và provisioning ghi `OUT_OF_SCOPE`.
+- [ ] UAT database/credential/volume/session không được reuse.
+- [ ] `ueb_core_uat_phase5` chưa cleanup trước Phase 6 plan approval.
+- [ ] Không mass-provision real users; staging smoke roster nhỏ và approved.
+
+## 3. Artifact and environment
+
+Approved planning contract (execution evidence remains unchecked):
+
+```text
+STAGING_AUTHORIZATION=APPROVED
+STAGING_HOST=103.200.25.54
+STAGING_DATABASE=ueb_core_staging
+STAGING_DEPLOYMENT_DIRECTORY=/opt/ueb-core
+PROXY_ARCHITECTURE=REUSE_EXISTING_CADDY_CONTAINER
+EXTERNAL_PROXY_NETWORK=ueb-core-proxy
+STAGING_APP_UPSTREAM=ueb-core-staging-app:3000
+IMAGE_DELIVERY_METHOD=DOCKER_SAVE_SHA256_SCP_DOCKER_LOAD
+APP_MEMORY_LIMIT=512M
+APP_CPU_LIMIT=0.75
+DATABASE_MEMORY_LIMIT=768M
+DATABASE_CPU_LIMIT=0.75
+DATABASE_PUBLIC_PORT=NO
+UAT_CREDENTIAL_REUSE=NO
+```
+
+- [ ] Source commit và immutable image digest khớp approval.
+- [ ] App và operator image dùng cùng exact Git SHA; cả hai archive checksum `PASS`.
+- [ ] Operator image chạy non-root, không expose port, không chứa secret/backup/credential.
+- [ ] Operator Compose job one-off, read-only, private database network, không mount Docker socket.
+- [ ] Rollback image có schema compatibility review.
+- [ ] App chạy non-root, read-only filesystem, bounded tmpfs, dropped capabilities.
+- [ ] CPU/memory/PID limits, restart policy và log rotation hoạt động.
+- [ ] PostgreSQL/app không publish host port; private networks đúng contract.
+- [ ] Caddy TLS/hostname/forwarded/security headers/request limit `PASS`.
+- [ ] App environment chỉ có runtime allowlist; owner/provisioning keys vắng mặt.
+- [ ] Secret store/access/rotation evidence `PASS`; tracked secrets bằng 0.
+- [ ] Guarded generator/validator xác minh directory `0700`, files `0600`, no symlink/overwrite/UAT reference.
+- [ ] App chỉ nhận runtime file; owner và provisioner URLs không có trong app environment.
+- [ ] `operator-provisioner` map dedicated provisioner secret thành service-scoped `DATABASE_URL`; missing/owner/runtime/wrong-database inputs fail trước ACL mutation.
+- [ ] `operator-owner` không nhận provisioner URL; provisioning command không fallback giữa owner/runtime/provisioner credentials.
+
+## 4. Database safety and roles
+
+- [ ] Staging database/volume là dedicated target, không phải UAT/canonical.
+- [ ] Migration owner, app runtime và provisioning role là ba identities khác nhau.
+- [ ] PostgreSQL 18 bootstrap chứng minh temporary `SET ROLE` trước `CREATE DATABASE`, exact database owner sau create, và zero bootstrap `SET`/`INHERIT` capability trước migrations.
+- [ ] Failure-path regression chứng minh temporary owner capability được revoke; cleanup không xác minh được phải hard-fail với residue rõ ràng.
+- [ ] Runtime và provisioning non-owner, non-superuser, `NOBYPASSRLS`.
+- [ ] Exact runtime/provisioning ACL reconciliation `PASS`.
+- [ ] Applied migrations không modified; failed/pending migration bằng 0.
+- [ ] Migration, ACL reconciliation và app start chạy bằng các operator steps riêng.
+- [ ] App không dùng owner hoặc provisioning connection.
+- [ ] RLS no-context core/workflow visibility bằng 0 và writes bằng 0.
+
+## 5. Backup and restore
+
+Approved policy is `/var/backups/ueb-core/staging`, off-host copy to
+`/Users/thayninh/Secure/ueb-core-phase6/off-host-backups`, retention 14 daily +
+8 weekly, RPO 24 hours and RTO 4 hours. Checkboxes remain open until guarded
+jobs produce checksum/catalog/retrieval/restore evidence.
+
+- [ ] Pre-deploy custom-format backup `PASS`.
+- [ ] SHA-256 sidecar và in-memory catalog verification `PASS`.
+- [ ] Encrypted off-host copy và retrieval `PASS`.
+- [ ] Retention, freshness alert, deletion guard và owner được phê duyệt.
+- [ ] Guarded restore vào new isolated target `PASS`.
+- [ ] PostgreSQL 18 restore evidence chứng minh temporary owner `SET ROLE` trước create, exact owner sau create, revoke membership và `SET ROLE=NO` trước `pg_restore`.
+- [ ] Restore verifies migrations, counts, latest rows, sequence metadata, ACL/RLS.
+- [ ] Source staging fingerprint bất biến trước/sau restore và source/target fingerprint metadata match.
+- [ ] Restore không overwrite active staging và không target UAT/canonical.
+- [ ] Create/revoke/restore failure giữ target/lock để điều tra, không auto-drop và báo capability residue.
+- [ ] Stale-lock recovery chỉ clear exact lock khi target absent, không có active restore process và có explicit confirmation.
+- [ ] Operator package/image expose exact `phase6:clear-stale-staging-restore-lock`; missing `--confirm-clear-stale-restore-lock` fail trước mutation.
+- [ ] PostgreSQL 18 cleanup verify exact restore owner/lock, zero active restore process và zero target connection trước mutation.
+- [ ] Cleanup evidence chứng minh temporary owner `SET ROLE` trước Drop, `RESET ROLE`, revoke membership, `SET ROLE=NO`, target absent rồi mới clear lock.
+- [ ] Cleanup không dùng forced session termination; active connection fail-safe và giữ target/lock.
+- [ ] Drop failure revoke membership và giữ target/lock; revoke failure sau Drop giữ lock, hard-fail và báo capability residue.
+- [ ] Restore/cleanup commands có negative guard tests.
+
+## 6. Deployment and smoke validation
+
+- [ ] Artifact/configuration preflight `PASS`.
+- [ ] Migration owner job `PASS`.
+- [ ] Runtime bootstrap/ACL job `PASS`.
+- [ ] Application runtime-only start `PASS`.
+- [ ] `/api/health` qua TLS trả 200.
+- [ ] `/api/ready` qua TLS trả 200 và không cache.
+- [ ] TLS certificate/hostname/security headers `PASS`.
+- [ ] Anonymous protected routes safe-deny/redirect.
+- [ ] Admin latest-data/users/audit smoke `PASS`, không mutation controls.
+- [ ] Lecturer/leader scope isolation và IDOR `PASS`.
+- [ ] Pure admin không submit thay lecturer.
+- [ ] No unexplained core/workflow/fingerprint delta.
+
+## 7. Rollback and resilience
+
+- [ ] Application image rollback rehearsal `PASS`.
+- [ ] Forward-fix decision path được phê duyệt.
+- [ ] New-target restore decision rehearsal `PASS`.
+- [ ] Không reverse/delete applied migration.
+- [ ] Không `UPDATE`/`DELETE`/`TRUNCATE` core/workflow để cleanup.
+- [ ] App/DB failure containment và evidence preservation `PASS`.
+- [ ] Không blind retry khi transaction/residue chưa rõ.
+
+## 8. Operational validation
+
+Approved monitoring method is Docker healthcheck + host cron curl + email alert;
+owner/incident contact is `thayninh`. `STAGING_MONITORING_EMAIL` must be filled and a
+redacted test alert must pass before any deployment.
+
+- [ ] Health/readiness/DB/TLS alerts `PASS`.
+- [ ] Auth/audit/provisioning failure alerts dùng fake/redacted data `PASS`.
+- [ ] Disk/CPU/memory/restart-loop alerts `PASS`.
+- [ ] Logging redaction, access và rotation `PASS`.
+- [ ] Credential rotation và staging session revoke rehearsals `PASS`.
+- [ ] Incident severity/routing/support roster được phê duyệt.
+- [ ] RPO/RTO, backup schedule, off-host retention, restore cadence được phê duyệt.
+- [ ] Observation window ổn định; blocker/high defect bằng 0.
+
+## 9. Evidence and repository hygiene
+
+- [ ] Evidence chỉ có aggregate counts/digests/opaque references/PASS-FAIL.
+- [ ] Tracked secret, credential, backup, dump, raw catalog, PII và private key bằng 0.
+- [ ] Migration diff bằng 0; working tree/commit inventory rõ ràng.
+- [ ] Canonical and staging fingerprints được reconcile; canonical mutation bằng 0.
+- [ ] Explicit statement: no production deployment was performed.
+
+## 10. Final sign-off
+
+| Role | External approval reference | Decision |
+| --- | --- | --- |
+| Application owner |  | `PENDING` |
+| Infrastructure owner |  | `PENDING` |
+| Database owner |  | `PENDING` |
+| Security owner |  | `PENDING` |
+| Business smoke-scope owner |  | `PENDING` |
+
+## 11. Machine-readable acceptance template
+
+```text
+PHASE6_STATUS=PENDING
+PHASE6_SCOPE=STAGING_ONLY
+STAGING_AUTHORIZATION=APPROVED
+STAGING_DEPLOYMENT=NOT_PERFORMED
+DOMAIN=ueb-core.cargis.vn
+RESOURCE_PROFILE_ACCEPTED=YES_CONDITIONAL_WITH_RESOURCE_LIMITS
+STAGING_GUARDED_TOOLING_READY=YES_OPERATOR_IMAGE_AND_SPLIT_SECRETS_NOT_EXECUTED
+EXTERNAL_PROXY_NETWORK=ueb-core-proxy
+TARGET_TLS_CONFIGURATION=PENDING_EXECUTION
+MONITORING_EMAIL_DESTINATION=PENDING
+PRE_DEPLOY_BACKUP=PENDING
+BACKUP_RESTORE_REHEARSAL=PENDING
+MIGRATION_DEPLOY=PENDING
+RUNTIME_ACL=PENDING
+HEALTH=PENDING
+READINESS=PENDING
+TLS=PENDING
+RLS_DEFAULT_DENY=PENDING
+SMOKE_TESTS=PENDING
+ROLLBACK_REHEARSAL=PENDING
+OPERATIONAL_VALIDATION=PENDING
+UAT_DATABASE_REUSE=NO
+UAT_CREDENTIAL_REUSE=NO
+MASS_PROVISIONING=NO
+UAT_CLEANUP=DEFERRED
+PRODUCTION_SSO=OUT_OF_SCOPE
+PRODUCTION_PROVISIONING=OUT_OF_SCOPE
+PRODUCTION_DEPLOYMENT=NO
+BLOCKER_DEFECT_COUNT=0
+HIGH_DEFECT_COUNT=0
+```
