@@ -18,7 +18,10 @@ import {
   PHASE7_SECURE_INPUT_NAMES,
   PRODUCTION_UNIT_CODES,
 } from "../../scripts/phase-7/lib/production-identity";
-import { runProductionRosterWorkflow } from "../../scripts/phase-7/production-roster-workflow";
+import {
+  blockedReport,
+  runProductionRosterWorkflow,
+} from "../../scripts/phase-7/production-roster-workflow";
 
 const expected: ExpectedLecturerExceptionInventory = {
   canonicalSourceSha256: "a".repeat(64),
@@ -85,9 +88,10 @@ describe("Phase 7 split operator inputs", () => {
       secrets: parseSecretsFile(createSecretsTemplate()),
     });
 
-    expect(result.conflictCodes).toContain(
+    expect(result.blockerCodes).toContain(
       "LECTURER_EMAIL_EXCEPTION_PENDING_VERIFICATION",
     );
+    expect(result.conflictCodes).toEqual([]);
     expect(result.missingInputs).not.toContain(
       "lecturer-exceptions.json.emailExceptions.canonical-rows:3:email.decision",
     );
@@ -104,6 +108,7 @@ describe("Phase 7 split operator inputs", () => {
     });
 
     expect(result.conflictCodes).toEqual([]);
+    expect(result.blockerCodes).toEqual([]);
     expect(result.missingInputs).toEqual(
       expect.arrayContaining([
         "lecturer-exceptions.json.emailExceptions.canonical-rows:3:email.decision",
@@ -167,6 +172,7 @@ describe("Phase 7 split operator inputs", () => {
     });
 
     expect(result.missingInputs).toEqual([]);
+    expect(result.blockerCodes).toEqual([]);
     expect(result.conflictCodes).toEqual([]);
     expect(result.manifest?.facultyLeaders).toHaveLength(6);
     expect(
@@ -191,6 +197,7 @@ describe("Phase 7 split operator inputs", () => {
       secrets,
     });
     expect(plannedEmptyResult.missingInputs).toEqual([]);
+    expect(plannedEmptyResult.blockerCodes).toEqual([]);
     expect(plannedEmptyResult.conflictCodes).toEqual([]);
     expect(plannedEmptyResult.state).toMatchObject({
       targetMode: "PLANNED_EMPTY_TARGET",
@@ -198,6 +205,63 @@ describe("Phase 7 split operator inputs", () => {
       canonicalCoreRowCount: null,
       identities: [],
     });
+  });
+
+  it("accepts an authorized VNU replacement without a pending blocker", () => {
+    const lecturerExceptions = createLecturerExceptionTemplate(expected);
+    lecturerExceptions.emailExceptions[0] = {
+      ...lecturerExceptions.emailExceptions[0]!,
+      decision: "REPLACE_WITH_AUTHORIZED_VNU_EMAIL",
+      authorizedVnuEmail: "verified@vnu.edu.vn",
+      justification: "Verified against the authoritative personnel directory",
+    };
+    const result = validateOperatorInputs({
+      expected,
+      lecturerExceptions,
+      facultyLeaders: createFacultyLeaderTemplate(),
+      testIdentities: createTestIdentityTemplate(),
+      targetState: createTargetStateTemplate(),
+      secrets: parseSecretsFile(createSecretsTemplate()),
+    });
+
+    expect(result.blockerCodes).toEqual([]);
+    expect(result.conflictCodes).toEqual([]);
+  });
+
+  it("reports pending verification as a blocker without counting a conflict", () => {
+    for (const mode of ["DRY_RUN", "RECONCILE"] as const) {
+      const result = blockedReport(
+        mode,
+        [],
+        ["LECTURER_EMAIL_EXCEPTION_PENDING_VERIFICATION"],
+        [],
+      );
+
+      expect(result.exitCode).toBe(2);
+      expect(result.report).toContain("STATUS=BLOCKED");
+      expect(result.report).toContain("BLOCK_COUNT=1");
+      expect(result.report).toContain("CONFLICT_COUNT=0");
+      expect(result.report).toContain(
+        "BLOCKING_REASON=LECTURER_EMAIL_EXCEPTION_PENDING_VERIFICATION",
+      );
+      expect(result.report).toContain("DATABASE_MUTATIONS=0");
+    }
+  });
+
+  it("continues to count a true input conflict as a conflict", () => {
+    const result = blockedReport(
+      "VALIDATE",
+      [],
+      [],
+      ["LECTURER_EXCEPTION_CHECKSUM_MISMATCH"],
+    );
+
+    expect(result.exitCode).toBe(2);
+    expect(result.report).toContain("BLOCK_COUNT=1");
+    expect(result.report).toContain("CONFLICT_COUNT=1");
+    expect(result.report).toContain(
+      "CONFLICT_1=LECTURER_EXCEPTION_CHECKSUM_MISMATCH",
+    );
   });
 
   it("fails closed before reading files when the secure directory is missing", async () => {

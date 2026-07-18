@@ -196,6 +196,7 @@ export interface ExpectedLecturerExceptionInventory {
 
 export interface OperatorInputValidationResult {
   readonly missingInputs: readonly string[];
+  readonly blockerCodes: readonly string[];
   readonly conflictCodes: readonly string[];
   readonly resolutions?: CanonicalPersonnelResolutionOptions;
   readonly manifest?: ProductionIdentityManifest;
@@ -375,6 +376,7 @@ export function validateOperatorInputs(input: {
   readonly secrets: Readonly<Record<string, string>>;
 }): OperatorInputValidationResult {
   const missing = new Set<string>();
+  const blockers = new Set<string>();
   const conflicts = new Set<string>();
   const approvedNonVnu = new Set<string>();
   const replacements = new Map<string, string>();
@@ -391,6 +393,7 @@ export function validateOperatorInputs(input: {
     expected: input.expected.nonVnu,
     actual: input.lecturerExceptions.emailExceptions,
     missing,
+    blockers,
     conflicts,
     approvedNonVnu,
     replacements,
@@ -468,9 +471,10 @@ export function validateOperatorInputs(input: {
     }
   }
 
-  if (missing.size > 0 || conflicts.size > 0) {
+  if (missing.size > 0 || blockers.size > 0 || conflicts.size > 0) {
     return {
       missingInputs: [...missing].sort(),
+      blockerCodes: [...blockers].sort(),
       conflictCodes: [...conflicts].sort(),
     };
   }
@@ -522,11 +526,13 @@ export function validateOperatorInputs(input: {
   if (!manifest.success || !state.success) {
     return {
       missingInputs: [],
+      blockerCodes: [],
       conflictCodes: [...conflicts].sort(),
     };
   }
   return {
     missingInputs: [],
+    blockerCodes: [],
     conflictCodes: [],
     resolutions: {
       approvedNonVnuLecturerUids: approvedNonVnu,
@@ -544,6 +550,7 @@ function validateEmailExceptions(input: {
   readonly expected: ExpectedLecturerExceptionInventory["nonVnu"];
   readonly actual: LecturerExceptionFile["emailExceptions"];
   readonly missing: Set<string>;
+  readonly blockers: Set<string>;
   readonly conflicts: Set<string>;
   readonly approvedNonVnu: Set<string>;
   readonly replacements: Map<string, string>;
@@ -578,7 +585,7 @@ function validateEmailExceptions(input: {
     } else if (record.decision === "EXCLUDE_WITH_JUSTIFICATION") {
       input.exclusions.add(record.lecturerUid);
     } else if (record.decision === "KEEP_BLOCKED_PENDING_VERIFICATION") {
-      input.conflicts.add("LECTURER_EMAIL_EXCEPTION_PENDING_VERIFICATION");
+      input.blockers.add("LECTURER_EMAIL_EXCEPTION_PENDING_VERIFICATION");
     } else {
       if (
         !record.authorizedVnuEmail ||

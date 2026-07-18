@@ -40,7 +40,7 @@ export async function runProductionRosterWorkflow(input: {
   readonly secureDirectory: string | undefined;
 }): Promise<ProductionRosterWorkflowResult> {
   if (!input.secureDirectory) {
-    return blockedReport(input.mode, ["PHASE7_SECURE_DIRECTORY"], []);
+    return blockedReport(input.mode, ["PHASE7_SECURE_DIRECTORY"], [], []);
   }
   try {
     const secureDirectory = await assertSecureDirectory(input.secureDirectory);
@@ -101,6 +101,7 @@ export async function runProductionRosterWorkflow(input: {
     });
     if (
       validated.missingInputs.length > 0 ||
+      validated.blockerCodes.length > 0 ||
       validated.conflictCodes.length > 0 ||
       !validated.resolutions ||
       !validated.manifest ||
@@ -110,6 +111,7 @@ export async function runProductionRosterWorkflow(input: {
       return blockedReport(
         input.mode,
         validated.missingInputs,
+        validated.blockerCodes,
         validated.conflictCodes,
         {
           emailExceptionCount: expected.nonVnu.length,
@@ -274,9 +276,10 @@ function parseInput<T>(
   return parsed.data;
 }
 
-function blockedReport(
+export function blockedReport(
   mode: ProductionRosterWorkflowMode,
   missingInputs: readonly string[],
+  blockerCodes: readonly string[],
   conflictCodes: readonly string[],
   counts: {
     readonly emailExceptionCount?: number;
@@ -286,7 +289,10 @@ function blockedReport(
     readonly targetStateMode?: "EXISTING_TARGET" | "PLANNED_EMPTY_TARGET";
   } = {},
 ): ProductionRosterWorkflowResult {
-  const blockCount = missingInputs.length + conflictCodes.length;
+  const blockCount =
+    missingInputs.length + blockerCodes.length + conflictCodes.length;
+  const blockingReason =
+    blockerCodes[0] ?? missingInputs[0] ?? conflictCodes[0] ?? "UNKNOWN";
   return {
     report: [
       `MODE=${mode}`,
@@ -300,9 +306,11 @@ function blockedReport(
       "NOOP_COUNT=0",
       `BLOCK_COUNT=${Math.max(1, blockCount)}`,
       `CONFLICT_COUNT=${conflictCodes.length}`,
+      `BLOCKING_REASON=${blockingReason}`,
       ...missingInputs.map(
         (name, index) => `MISSING_INPUT_${index + 1}=${name}`,
       ),
+      ...blockerCodes.map((code, index) => `BLOCKER_${index + 1}=${code}`),
       ...conflictCodes.map((code, index) => `CONFLICT_${index + 1}=${code}`),
       "SECRET_LEAKAGE=0",
       "DATABASE_CONNECTIONS=0",
