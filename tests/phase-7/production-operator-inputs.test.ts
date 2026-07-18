@@ -56,6 +56,7 @@ describe("Phase 7 split operator inputs", () => {
     expect(tests.leader.roles).toEqual(["FACULTY_LEADER"]);
     expect(tests.leader.unitScopes).toEqual(["KTPT"]);
     expect(state.snapshotStatus).toBe("OPERATOR_INPUT_REQUIRED");
+    expect(state.targetMode).toBe("EXISTING_TARGET");
     expect(parseSecretsFile(createSecretsTemplate())).toEqual(
       Object.fromEntries(
         [
@@ -65,6 +66,30 @@ describe("Phase 7 split operator inputs", () => {
           ),
         ].map((name) => [name, ""]),
       ),
+    );
+  });
+
+  it("records pending verification as an explicit fail-closed decision", () => {
+    const lecturerExceptions = createLecturerExceptionTemplate(expected);
+    lecturerExceptions.emailExceptions[0] = {
+      ...lecturerExceptions.emailExceptions[0]!,
+      decision: "KEEP_BLOCKED_PENDING_VERIFICATION",
+      justification: "Pending authoritative personnel-directory verification",
+    };
+    const result = validateOperatorInputs({
+      expected,
+      lecturerExceptions,
+      facultyLeaders: createFacultyLeaderTemplate(),
+      testIdentities: createTestIdentityTemplate(),
+      targetState: createTargetStateTemplate(),
+      secrets: parseSecretsFile(createSecretsTemplate()),
+    });
+
+    expect(result.conflictCodes).toContain(
+      "LECTURER_EMAIL_EXCEPTION_PENDING_VERIFICATION",
+    );
+    expect(result.missingInputs).not.toContain(
+      "lecturer-exceptions.json.emailExceptions.canonical-rows:3:email.decision",
     );
   });
 
@@ -150,6 +175,29 @@ describe("Phase 7 split operator inputs", () => {
       ),
     ).toBe(true);
     expect(result.state?.canonicalCoreRowCount).toBe(2_497);
+
+    const plannedEmptyResult = validateOperatorInputs({
+      expected,
+      lecturerExceptions,
+      facultyLeaders,
+      testIdentities,
+      targetState: {
+        ...targetState,
+        targetMode: "PLANNED_EMPTY_TARGET",
+        targetFingerprint: null,
+        canonicalCoreRowCount: null,
+        identities: [],
+      },
+      secrets,
+    });
+    expect(plannedEmptyResult.missingInputs).toEqual([]);
+    expect(plannedEmptyResult.conflictCodes).toEqual([]);
+    expect(plannedEmptyResult.state).toMatchObject({
+      targetMode: "PLANNED_EMPTY_TARGET",
+      targetFingerprint: null,
+      canonicalCoreRowCount: null,
+      identities: [],
+    });
   });
 
   it("fails closed before reading files when the secure directory is missing", async () => {

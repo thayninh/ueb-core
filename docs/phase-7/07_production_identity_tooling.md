@@ -21,15 +21,19 @@ ROSTER_OUTPUT=FORBIDDEN
 CREDENTIAL_OUTPUT=FORBIDDEN
 ```
 
-`DRY_RUN` compares the deterministic desired roster with an externally
-captured read-only target snapshot and classifies each identity as planned
-create, unchanged or conflicting. `RECONCILE` requires every desired identity
+`DRY_RUN` compares the deterministic desired roster with either an externally
+captured read-only target snapshot or an explicitly approved
+`PLANNED_EMPTY_TARGET` contract and classifies each identity as planned create,
+unchanged or conflicting. `RECONCILE` requires every desired identity
 to exist with exact state and at least one provisioning audit event. An
 unexpected target identity is a blocker in both modes.
 
-The target snapshot must be produced by a separately approved read-only
-production inspection. These commands are not authorization to connect to or
-mutate production.
+An `EXISTING_TARGET` snapshot must be produced by a separately approved
+read-only production inspection. A `PLANNED_EMPTY_TARGET` is local-only,
+requires a null fingerprint, null core-row count and empty identities, and
+cannot pass reconciliation until replaced by an observed existing-target
+snapshot. These commands are not authorization to connect to or mutate
+production.
 
 ## 2. Secure input locations and modes
 
@@ -99,8 +103,11 @@ The secure state JSON is strict and contains:
 - `snapshotVersion: 1`;
 - `transactionMode: "READ_ONLY"`;
 - `targetEnvironment: "PRODUCTION"`;
-- a sanitized SHA-256 `targetFingerprint`;
-- `canonicalCoreRowCount`;
+- `targetMode: "EXISTING_TARGET" | "PLANNED_EMPTY_TARGET"`;
+- for `EXISTING_TARGET`, a sanitized SHA-256 `targetFingerprint` and observed
+  `canonicalCoreRowCount`;
+- for `PLANNED_EMPTY_TARGET`, `targetFingerprint: null`,
+  `canonicalCoreRowCount: null` and `identities: []`;
 - all target identities with email/name, access status, nullable lecturer UID,
   forced-change flag, active role set, active unit-code set and aggregate
   provisioning-audit count; and

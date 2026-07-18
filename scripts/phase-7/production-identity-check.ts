@@ -120,6 +120,7 @@ export async function runProductionIdentityCheck(input: {
         roster,
         comparison,
         issues,
+        targetMode: state.targetMode,
         targetFingerprint: state.targetFingerprint,
       }),
       exitCode: blockerCount === 0 ? 0 : 2,
@@ -273,7 +274,8 @@ function formatCheckReport(input: {
   readonly roster: ReturnType<typeof buildProductionRoster>;
   readonly comparison: ReturnType<typeof compareProductionIdentityState>;
   readonly issues: readonly ProductionIdentityIssue[];
-  readonly targetFingerprint: string;
+  readonly targetMode: ProductionIdentityState["targetMode"];
+  readonly targetFingerprint: string | null;
 }): string {
   const blockerCount = input.issues
     .filter(({ severity }) => severity === "BLOCKER")
@@ -284,7 +286,8 @@ function formatCheckReport(input: {
   return [
     `MODE=${input.mode}`,
     `STATUS=${blockerCount === 0 ? "PASS" : "BLOCKED"}`,
-    `TARGET_FINGERPRINT=${input.targetFingerprint}`,
+    `TARGET_STATE_MODE=${input.targetMode}`,
+    `TARGET_FINGERPRINT=${input.targetFingerprint ?? "NOT_APPLICABLE"}`,
     `CANONICAL_SOURCE_SHA256=${input.canonicalAudit.summary.sourceChecksum}`,
     `CANONICAL_SOURCE_ROW_COUNT=${input.canonicalAudit.summary.sourceRowCount}`,
     `CANONICAL_SOURCE_COLUMN_COUNT=${input.canonicalAudit.summary.sourceColumnCount}`,

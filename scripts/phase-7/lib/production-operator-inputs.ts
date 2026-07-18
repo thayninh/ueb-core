@@ -42,6 +42,7 @@ export const lecturerExceptionFileSchema = z
               "APPROVE_EXCEPTION",
               "REPLACE_WITH_AUTHORIZED_VNU_EMAIL",
               "EXCLUDE_WITH_JUSTIFICATION",
+              "KEEP_BLOCKED_PENDING_VERIFICATION",
             ])
             .nullable(),
           authorizedVnuEmail: nullableText,
@@ -127,6 +128,9 @@ export const targetStateDraftSchema = z
     snapshotStatus: z.enum(["OPERATOR_INPUT_REQUIRED", "READY"]),
     transactionMode: z.literal("READ_ONLY"),
     targetEnvironment: z.literal("PRODUCTION"),
+    targetMode: z
+      .enum(["EXISTING_TARGET", "PLANNED_EMPTY_TARGET"])
+      .default("EXISTING_TARGET"),
     targetFingerprint: z
       .string()
       .regex(/^[a-f0-9]{64}$/u)
@@ -148,7 +152,31 @@ export const targetStateDraftSchema = z
         .strict(),
     ),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    if (value.targetMode !== "PLANNED_EMPTY_TARGET") return;
+    if (value.targetFingerprint !== null) {
+      context.addIssue({
+        code: "custom",
+        path: ["targetFingerprint"],
+        message: "PLANNED_EMPTY_TARGET_FINGERPRINT_FORBIDDEN",
+      });
+    }
+    if (value.canonicalCoreRowCount !== null) {
+      context.addIssue({
+        code: "custom",
+        path: ["canonicalCoreRowCount"],
+        message: "PLANNED_EMPTY_TARGET_CORE_COUNT_FORBIDDEN",
+      });
+    }
+    if (value.identities.length !== 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["identities"],
+        message: "PLANNED_EMPTY_TARGET_IDENTITIES_FORBIDDEN",
+      });
+    }
+  });
 
 export type TargetStateDraft = z.infer<typeof targetStateDraftSchema>;
 
@@ -306,6 +334,7 @@ export function createTargetStateTemplate(): TargetStateDraft {
     snapshotStatus: "OPERATOR_INPUT_REQUIRED",
     transactionMode: "READ_ONLY",
     targetEnvironment: "PRODUCTION",
+    targetMode: "EXISTING_TARGET",
     targetFingerprint: null,
     canonicalCoreRowCount: null,
     identities: [],
@@ -418,11 +447,13 @@ export function validateOperatorInputs(input: {
   if (input.targetState.snapshotStatus !== "READY") {
     missing.add("production-target-state.json.snapshotStatus");
   }
-  if (!input.targetState.targetFingerprint) {
-    missing.add("production-target-state.json.targetFingerprint");
-  }
-  if (input.targetState.canonicalCoreRowCount === null) {
-    missing.add("production-target-state.json.canonicalCoreRowCount");
+  if (input.targetState.targetMode === "EXISTING_TARGET") {
+    if (!input.targetState.targetFingerprint) {
+      missing.add("production-target-state.json.targetFingerprint");
+    }
+    if (input.targetState.canonicalCoreRowCount === null) {
+      missing.add("production-target-state.json.canonicalCoreRowCount");
+    }
   }
 
   const requiredSecrets = [
@@ -481,6 +512,7 @@ export function validateOperatorInputs(input: {
     snapshotVersion: input.targetState.snapshotVersion,
     transactionMode: input.targetState.transactionMode,
     targetEnvironment: input.targetState.targetEnvironment,
+    targetMode: input.targetState.targetMode,
     targetFingerprint: input.targetState.targetFingerprint,
     canonicalCoreRowCount: input.targetState.canonicalCoreRowCount,
     identities: input.targetState.identities,
@@ -545,6 +577,8 @@ function validateEmailExceptions(input: {
       input.approvedNonVnu.add(record.lecturerUid);
     } else if (record.decision === "EXCLUDE_WITH_JUSTIFICATION") {
       input.exclusions.add(record.lecturerUid);
+    } else if (record.decision === "KEEP_BLOCKED_PENDING_VERIFICATION") {
+      input.conflicts.add("LECTURER_EMAIL_EXCEPTION_PENDING_VERIFICATION");
     } else {
       if (
         !record.authorizedVnuEmail ||

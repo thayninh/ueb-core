@@ -195,6 +195,42 @@ describe("Phase 7 production identity reconciliation", () => {
     expect(comparison.issues).toEqual([]);
   });
 
+  it("supports a planned empty target without a fake fingerprint and blocks reconciliation", () => {
+    const roster = buildProductionRoster({
+      canonicalAudit: canonicalAudit(),
+      manifest: manifest(),
+      environment: secureEnvironment(),
+    });
+    const plannedState: ProductionIdentityState = {
+      snapshotVersion: 1,
+      transactionMode: "READ_ONLY",
+      targetEnvironment: "PRODUCTION",
+      targetMode: "PLANNED_EMPTY_TARGET",
+      targetFingerprint: null,
+      canonicalCoreRowCount: null,
+      identities: [],
+    };
+
+    const dryRun = compareProductionIdentityState({
+      roster,
+      state: plannedState,
+      mode: "DRY_RUN",
+    });
+    expect(dryRun.createPlannedCount).toBe(9);
+    expect(dryRun.issues).toEqual([]);
+
+    const reconciliation = compareProductionIdentityState({
+      roster,
+      state: plannedState,
+      mode: "RECONCILE",
+    });
+    expect(reconciliation.issues).toContainEqual(
+      expect.objectContaining({
+        code: "PLANNED_EMPTY_TARGET_RECONCILIATION_UNAVAILABLE",
+      }),
+    );
+  });
+
   it("requires exact mapping, role, scope, forced-change flag and audit evidence", () => {
     const roster = buildProductionRoster({
       canonicalAudit: canonicalAudit(),
@@ -341,6 +377,7 @@ function state(
     snapshotVersion: 1,
     transactionMode: "READ_ONLY",
     targetEnvironment: "PRODUCTION",
+    targetMode: "EXISTING_TARGET",
     targetFingerprint: "b".repeat(64),
     canonicalCoreRowCount: 2_497,
     identities,

@@ -75,6 +75,7 @@ export type ProductionIdentityIssueCode =
   | "STATE_CORE_ROW_COUNT_MISMATCH"
   | "STATE_DUPLICATE_EMAIL"
   | "STATE_DUPLICATE_LECTURER_UID"
+  | "PLANNED_EMPTY_TARGET_RECONCILIATION_UNAVAILABLE"
   | "IDENTITY_STATE_MISMATCH"
   | "UNEXPECTED_TARGET_IDENTITY"
   | "PROVISIONING_AUDIT_EVIDENCE_MISSING";
@@ -225,16 +226,47 @@ const stateIdentitySchema = z
   })
   .strict();
 
-export const productionIdentityStateSchema = z
+const existingProductionIdentityStateSchema = z
   .object({
     snapshotVersion: z.literal(1),
     transactionMode: z.literal("READ_ONLY"),
     targetEnvironment: z.literal("PRODUCTION"),
+    targetMode: z.literal("EXISTING_TARGET"),
     targetFingerprint: z.string().regex(/^[a-f0-9]{64}$/u),
     canonicalCoreRowCount: z.number().int().nonnegative(),
     identities: z.array(stateIdentitySchema),
   })
   .strict();
+
+const plannedEmptyProductionIdentityStateSchema = z
+  .object({
+    snapshotVersion: z.literal(1),
+    transactionMode: z.literal("READ_ONLY"),
+    targetEnvironment: z.literal("PRODUCTION"),
+    targetMode: z.literal("PLANNED_EMPTY_TARGET"),
+    targetFingerprint: z.null(),
+    canonicalCoreRowCount: z.null(),
+    identities: z.array(stateIdentitySchema).length(0),
+  })
+  .strict();
+
+export const productionIdentityStateSchema = z.preprocess(
+  (value) => {
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      !Array.isArray(value) &&
+      !("targetMode" in value)
+    ) {
+      return { ...value, targetMode: "EXISTING_TARGET" };
+    }
+    return value;
+  },
+  z.discriminatedUnion("targetMode", [
+    existingProductionIdentityStateSchema,
+    plannedEmptyProductionIdentityStateSchema,
+  ]),
+);
 
 export type ProductionIdentityState = z.infer<
   typeof productionIdentityStateSchema
@@ -622,8 +654,19 @@ export function compareProductionIdentityState(input: {
   readonly mode: "DRY_RUN" | "RECONCILE";
 }): ProductionIdentityComparison {
   const issues: ProductionIdentityIssue[] = [];
-  if (input.state.canonicalCoreRowCount !== 2_497) {
+  if (
+    input.state.targetMode === "EXISTING_TARGET" &&
+    input.state.canonicalCoreRowCount !== 2_497
+  ) {
     issues.push(issue("STATE_CORE_ROW_COUNT_MISMATCH", "BLOCKER"));
+  }
+  if (
+    input.state.targetMode === "PLANNED_EMPTY_TARGET" &&
+    input.mode === "RECONCILE"
+  ) {
+    issues.push(
+      issue("PLANNED_EMPTY_TARGET_RECONCILIATION_UNAVAILABLE", "BLOCKER"),
+    );
   }
   const stateByEmail = new Map<
     string,

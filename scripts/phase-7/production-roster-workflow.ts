@@ -123,6 +123,7 @@ export async function runProductionRosterWorkflow(input: {
               testIdentities.lecturer.lecturerUid,
             testIdentities.leader.displayName,
           ].filter(Boolean).length,
+          targetStateMode: targetState.targetMode,
         },
       );
     }
@@ -155,6 +156,7 @@ export async function runProductionRosterWorkflow(input: {
       report: [
         `MODE=${input.mode}`,
         `STATUS=${blockerCount === 0 ? "PASS" : "BLOCKED"}`,
+        `TARGET_STATE_MODE=${validated.state.targetMode}`,
         `MANIFEST_SHA256=${roster.rosterSha256}`,
         `LECTURER_EXCEPTION_COUNT=${expected.nonVnu.length}`,
         `AMBIGUITY_GROUP_COUNT=${expected.ambiguousNames.length}`,
@@ -281,6 +283,7 @@ function blockedReport(
     readonly ambiguityCount?: number;
     readonly leaderRecordCount?: number;
     readonly testIdentityCount?: number;
+    readonly targetStateMode?: "EXISTING_TARGET" | "PLANNED_EMPTY_TARGET";
   } = {},
 ): ProductionRosterWorkflowResult {
   const blockCount = missingInputs.length + conflictCodes.length;
@@ -292,6 +295,7 @@ function blockedReport(
       `AMBIGUITY_GROUP_COUNT=${counts.ambiguityCount ?? 0}`,
       `LEADER_RECORD_COUNT=${counts.leaderRecordCount ?? 0}`,
       `TEST_IDENTITY_COUNT=${counts.testIdentityCount ?? 0}`,
+      `TARGET_STATE_MODE=${counts.targetStateMode ?? "UNKNOWN"}`,
       "CREATE_COUNT=0",
       "NOOP_COUNT=0",
       `BLOCK_COUNT=${Math.max(1, blockCount)}`,

@@ -34,12 +34,15 @@ the operator; these values never enter tracked reports.
 The non-VNU identity requires exactly one decision:
 
 - `APPROVE_EXCEPTION`;
-- `REPLACE_WITH_AUTHORIZED_VNU_EMAIL`; or
-- `EXCLUDE_WITH_JUSTIFICATION`.
+- `REPLACE_WITH_AUTHORIZED_VNU_EMAIL`;
+- `EXCLUDE_WITH_JUSTIFICATION`; or
+- `KEEP_BLOCKED_PENDING_VERIFICATION`.
 
 Every decision requires a justification. Replacement additionally requires an
 explicit syntactically valid `@vnu.edu.vn` email. The tool never rewrites the
-source or derives a replacement.
+source or derives a replacement. `KEEP_BLOCKED_PENDING_VERIFICATION` records
+the operator decision but remains an explicit conflict until authoritative
+verification produces another approved decision.
 
 Each ambiguous-name record requires `selectedDisplayName` matching one of that
 record's canonical variants. Matching is by the generated lecturer UID and
@@ -75,9 +78,13 @@ identity record contains only:
 - explicit test-identity marker.
 
 Password hashes, credentials, tokens, sessions, database URLs and internal
-database user IDs are not schema fields. The snapshot must declare
+database user IDs are not schema fields. `EXISTING_TARGET` requires
 `snapshotStatus: "READY"`, `transactionMode: "READ_ONLY"`, the sanitized target
-fingerprint and exact canonical core-row count before any workflow can pass.
+fingerprint and observed canonical core-row count. `PLANNED_EMPTY_TARGET` is a
+local-only planning contract: it requires `snapshotStatus: "READY"`, a null
+fingerprint, null core-row count and empty identities. It may support a future
+dry-run create plan but cannot pass reconciliation before an observed target
+snapshot exists.
 
 ## 5. Commands and hard stops
 
@@ -114,20 +121,21 @@ PRODUCTION_PROVISIONING=NOT_PERFORMED
 
 ## 6. Current aggregate readiness
 
-The secure templates were initialized with one email-exception decision and
-five display-name decisions outstanding. Six leader slots and two fixed test
-records exist but contain no invented operator identity data. The target-state
-file remains an input-required template and all seven credential variables are
-empty.
+The operator has explicitly kept the one email exception blocked pending
+authoritative verification, while five display-name decisions remain
+outstanding. All six leader records and both fixed test records now contain the
+approved non-secret identity fields. The target state is an approved local-only
+`PLANNED_EMPTY_TARGET`; all seven credential variables remain empty.
 
 ```text
-LECTURER_EMAIL_EXCEPTION=INPUT_REQUIRED
+LECTURER_EMAIL_EXCEPTION=BLOCKED_PENDING_VERIFICATION
 DISPLAY_NAME_AMBIGUITY_GROUPS=5_INPUT_REQUIRED
 LEADER_TEMPLATE_SLOTS=6
-LEADER_COMPLETE_RECORDS=0
+LEADER_COMPLETE_RECORDS=6
 TEST_TEMPLATE_RECORDS=2
-TEST_COMPLETE_RECORDS=0
-TARGET_STATE_SNAPSHOT=INPUT_REQUIRED
+TEST_COMPLETE_RECORDS=2
+TARGET_STATE_MODE=PLANNED_EMPTY_TARGET
+TARGET_STATE_SNAPSHOT=READY_LOCAL_ONLY
 SECURE_VARIABLES_PRESENT=0_OF_7
 ROSTER_VALIDATION=BLOCKED
 DRY_RUN=BLOCKED
