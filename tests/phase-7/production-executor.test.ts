@@ -1,9 +1,11 @@
 // @vitest-environment node
 
 import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -19,6 +21,7 @@ import {
 } from "../../scripts/phase-7/lib/production-executor";
 
 const gitSha = "a".repeat(40);
+const execFileAsync = promisify(execFile);
 let directory: string;
 let emailEvidence: string;
 let rollbackEvidence: string;
@@ -211,6 +214,42 @@ describe("Phase 7 executable production guards", () => {
     });
     expect(result.report).toContain("PRODUCTION_EXECUTOR=PASS");
     expect(result.report).not.toMatch(/PASSWORD|TOKEN|postgres(?:ql)?:\/\//iu);
+  });
+
+  it("does not eagerly load dotenv-backed mutation modules for preflight", async () => {
+    const dotenvPath = join(directory, ".env");
+    await restrictedWrite(
+      dotenvPath,
+      "MIGRATION_DATABASE_URL=postgresql://must-not-load\n",
+    );
+    const excludedDatabaseVariables = new Set([
+      "DATABASE_URL",
+      "MIGRATION_DATABASE_URL",
+      "PHASE7_PROVISIONING_DATABASE_URL",
+      "PRODUCTION_BOOTSTRAP_DATABASE_URL",
+    ]);
+    const cleanEnvironment: NodeJS.ProcessEnv = {
+      ...Object.fromEntries(
+        Object.entries(process.env).filter(
+          ([key]) => !excludedDatabaseVariables.has(key),
+        ),
+      ),
+      NODE_ENV: process.env.NODE_ENV ?? "test",
+    };
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      [
+        "--import",
+        "tsx",
+        "--eval",
+        'await import("./scripts/phase-7/lib/production-executor.ts"); process.stdout.write(process.env.MIGRATION_DATABASE_URL ? "LOADED" : "CLEAN")',
+      ],
+      {
+        cwd: process.cwd(),
+        env: { ...cleanEnvironment, DOTENV_CONFIG_PATH: dotenvPath },
+      },
+    );
+    expect(stdout).toBe("CLEAN");
   });
 });
 

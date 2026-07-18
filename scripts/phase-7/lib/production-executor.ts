@@ -15,13 +15,10 @@ import { promisify } from "node:util";
 
 import { Client, type ClientBase } from "pg";
 
-import { grantAuthRuntimePermissions } from "../../phase-3/grant-auth-runtime-permissions";
-import { reconcileWorkflowRuntimePermissions } from "../../phase-4/grant-workflow-runtime-permissions";
 import {
   APP_RUNTIME_MANAGED_IDENTITY_TABLES,
   PROVISIONING_TABLE_PRIVILEGES,
 } from "../../phase-5/lib/provisioning-role";
-import { runControlledImport } from "../../phase-2/import-source";
 import { prepareSourceFile } from "../../phase-2/lib/row-parser";
 import { loadSourceContract } from "../../phase-2/lib/source-contract";
 
@@ -541,6 +538,7 @@ async function bootstrapProduction(
   process.env.PHASE2_AUDIT_ROOT = command.canonicalAuditDirectory;
   process.env.MIGRATION_DATABASE_URL = connections.owner;
   try {
+    const { runControlledImport } = await import("../../phase-2/import-source");
     const imported = await runControlledImport(
       command.canonicalSource!,
       command.canonicalChecksum,
@@ -559,6 +557,13 @@ async function bootstrapProduction(
       delete process.env.MIGRATION_DATABASE_URL;
     else process.env.MIGRATION_DATABASE_URL = previousMigrationUrl;
   }
+  const [
+    { grantAuthRuntimePermissions },
+    { reconcileWorkflowRuntimePermissions },
+  ] = await Promise.all([
+    import("../../phase-3/grant-auth-runtime-permissions"),
+    import("../../phase-4/grant-workflow-runtime-permissions"),
+  ]);
   await grantAuthRuntimePermissions({
     MIGRATION_DATABASE_URL: connections.owner,
     DATABASE_URL: connections.runtime,
