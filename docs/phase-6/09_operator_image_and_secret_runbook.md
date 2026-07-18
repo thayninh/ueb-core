@@ -156,6 +156,15 @@ provisioner ACLs, verify RLS/security, fingerprint, backup/checksum/off-host
 evidence, restore rehearsal and explicit cleanup. Operator root filesystem stays
 read-only with `/tmp` tmpfs; backup output is the only writable bind mount.
 
+Restore database creation trên PostgreSQL 18 chạy bằng restricted role-admin và
+guarded temporary `SET ROLE` helper; operator image không dùng superuser và
+không giữ owner membership. Owner verification và revoke verification phải PASS
+trước `pg_restore`. Failure giữ target/lock để investigation, không auto-drop.
+Nếu target absent nhưng lock còn lại, chỉ chạy
+`phase6:clear-stale-staging-restore-lock` với exact target/backup/confirmation;
+command phải chứng minh không có target hoặc active restore process trước khi
+xóa lock. Source staging fingerprint trước/sau phải bất biến.
+
 ## 5. Hard stops
 
 Stop on any Git/image/checksum mismatch, secret validation failure, UAT

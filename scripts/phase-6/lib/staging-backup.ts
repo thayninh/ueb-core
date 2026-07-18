@@ -12,9 +12,12 @@ import { basename, dirname, join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { createHash } from "node:crypto";
 
-import { Client } from "pg";
+import { Client, type ClientBase } from "pg";
 
-import { fingerprintStaging } from "./staging-database";
+import {
+  fingerprintStaging,
+  withTemporaryOwnerSetRole,
+} from "./staging-database";
 import {
   assertExternalArtifactPath,
   assertSha256,
@@ -210,6 +213,12 @@ export async function restoreStagingRehearsal(input: {
 }): Promise<{
   readonly sourceFingerprint: string;
   readonly restoredFingerprint: string;
+  readonly sourceFingerprintUnchanged: true;
+  readonly sourceRestoreFingerprintMatch: true;
+  readonly databaseOwner: typeof STAGING_OWNER_ROLE;
+  readonly restoreBootstrapCanSetOwnerRoleBeforeCreate: true;
+  readonly temporaryMembershipRevoked: true;
+  readonly restoreBootstrapCanSetOwnerRoleAfter: false;
 }> {
   assertStagingRestoreDatabase(input.targetDatabase);
   const source = parseStagingConnection({
@@ -219,18 +228,15 @@ export async function restoreStagingRehearsal(input: {
     environment: input.environment,
   });
   await verifyStagingBackup({ backupPath: input.backupPath });
-  await writeFile(
-    `${input.backupPath}.restore-lock`,
-    `${input.targetDatabase}\n`,
-    {
-      flag: "wx",
-      mode: 0o600,
-    },
-  );
+  const sourceFingerprintBefore = await fingerprintStaging({
+    environment: input.environment,
+  });
   const maintenance = await connectDatabaseAdmin(
     input.environment,
     "ueb-core-phase6-restore-create",
   );
+  let ownership:
+    Awaited<ReturnType<typeof createStagingRestoreDatabase>> | undefined;
   try {
     const exists = (
       await maintenance.query<{ exists: boolean }>(
@@ -243,11 +249,26 @@ export async function restoreStagingRehearsal(input: {
         "Restore target already exists; no cleanup was attempted.",
       );
     }
-    await maintenance.query(
-      `CREATE DATABASE ${quoteIdentifier(input.targetDatabase)} OWNER ${quoteIdentifier(STAGING_OWNER_ROLE)}`,
+    await writeFile(
+      `${input.backupPath}.restore-lock`,
+      `${input.targetDatabase}\n`,
+      {
+        flag: "wx",
+        mode: 0o600,
+      },
     );
+    ownership = await createStagingRestoreDatabase({
+      client: maintenance,
+      bootstrapRole: input.environment.STAGING_AUTHORIZED_BOOTSTRAP_ROLE!,
+      targetDatabase: input.targetDatabase,
+    });
   } finally {
     await maintenance.end().catch(() => undefined);
+  }
+  if (!ownership) {
+    throw new SafePhase6StagingError(
+      "Restore ownership evidence is unavailable; restore was not started.",
+    );
   }
   const restoreUrl = withDatabaseName(source.url, input.targetDatabase);
   const child = spawnPostgresTool(
@@ -260,6 +281,7 @@ export async function restoreStagingRehearsal(input: {
       input.backupPath,
     ],
     restoreUrl,
+    `ueb-core-phase6-restore-apply:${input.targetDatabase}`,
   );
   child.stdout.resume();
   child.stderr.resume();
@@ -268,9 +290,15 @@ export async function restoreStagingRehearsal(input: {
       "Restore failed; disposable database and restore lock were preserved.",
     );
   });
-  const sourceFingerprint = await fingerprintStaging({
+  const sourceFingerprintAfter = await fingerprintStaging({
     environment: input.environment,
   });
+  assertFingerprintParity(sourceFingerprintBefore, sourceFingerprintAfter);
+  if (sourceFingerprintBefore.sha256 !== sourceFingerprintAfter.sha256) {
+    throw new SafePhase6StagingError(
+      "Source staging fingerprint changed during restore rehearsal.",
+    );
+  }
   const restoreEnvironment = {
     ...input.environment,
     MIGRATION_DATABASE_URL: restoreUrl,
@@ -281,11 +309,134 @@ export async function restoreStagingRehearsal(input: {
     databaseUrl: restoreUrl,
     expectedDatabase: input.targetDatabase,
   });
-  assertFingerprintParity(sourceFingerprint, restoredFingerprint);
+  assertFingerprintParity(sourceFingerprintAfter, restoredFingerprint);
   return {
-    sourceFingerprint: sourceFingerprint.sha256,
+    sourceFingerprint: sourceFingerprintAfter.sha256,
     restoredFingerprint: restoredFingerprint.sha256,
+    sourceFingerprintUnchanged: true,
+    sourceRestoreFingerprintMatch: true,
+    databaseOwner: ownership.databaseOwner,
+    restoreBootstrapCanSetOwnerRoleBeforeCreate:
+      ownership.restoreBootstrapCanSetOwnerRoleBeforeCreate,
+    temporaryMembershipRevoked: ownership.temporaryMembershipRevoked,
+    restoreBootstrapCanSetOwnerRoleAfter:
+      ownership.restoreBootstrapCanSetOwnerRoleAfter,
   };
+}
+
+export async function createStagingRestoreDatabase(input: {
+  readonly client: ClientBase;
+  readonly bootstrapRole: string;
+  readonly targetDatabase: string;
+}): Promise<{
+  readonly databaseOwner: typeof STAGING_OWNER_ROLE;
+  readonly restoreBootstrapCanSetOwnerRoleBeforeCreate: true;
+  readonly temporaryMembershipRevoked: true;
+  readonly restoreBootstrapCanSetOwnerRoleAfter: false;
+}> {
+  assertStagingRestoreDatabase(input.targetDatabase);
+  const membership = await withTemporaryOwnerSetRole({
+    client: input.client,
+    bootstrapRole: input.bootstrapRole,
+    ownerRole: STAGING_OWNER_ROLE,
+    operation: async () => {
+      await input.client.query(
+        `CREATE DATABASE ${quoteIdentifier(input.targetDatabase)} OWNER ${quoteIdentifier(STAGING_OWNER_ROLE)}`,
+      );
+    },
+  });
+  const databaseOwner = (
+    await input.client.query<{ owner: string }>(
+      `SELECT pg_get_userbyid(datdba) AS owner
+       FROM pg_database WHERE datname = $1`,
+      [input.targetDatabase],
+    )
+  ).rows[0]?.owner;
+  if (databaseOwner !== STAGING_OWNER_ROLE) {
+    throw new SafePhase6StagingError(
+      "Restore target is not owned by the exact staging owner role.",
+    );
+  }
+  return {
+    databaseOwner,
+    restoreBootstrapCanSetOwnerRoleBeforeCreate:
+      membership.canSetBeforeOperation,
+    temporaryMembershipRevoked: membership.membershipRevoked,
+    restoreBootstrapCanSetOwnerRoleAfter: membership.canSetAfterOperation,
+  };
+}
+
+export async function clearStaleStagingRestoreLock(input: {
+  readonly environment: Readonly<Record<string, string | undefined>>;
+  readonly targetDatabase: string;
+  readonly backupPath: string;
+}): Promise<void> {
+  const maintenance = await connectDatabaseAdmin(
+    input.environment,
+    "ueb-core-phase6-restore-lock-recovery",
+  );
+  try {
+    await clearStaleStagingRestoreLockWithClient({
+      client: maintenance,
+      targetDatabase: input.targetDatabase,
+      backupPath: input.backupPath,
+    });
+  } finally {
+    await maintenance.end().catch(() => undefined);
+  }
+}
+
+export async function clearStaleStagingRestoreLockWithClient(input: {
+  readonly client: ClientBase;
+  readonly targetDatabase: string;
+  readonly backupPath: string;
+}): Promise<void> {
+  assertStagingRestoreDatabase(input.targetDatabase);
+  const backupPath = assertExternalArtifactPath(input.backupPath, ".dump");
+  const lockPath = `${backupPath}.restore-lock`;
+  const [backupArtifact, lockArtifact] = await Promise.all([
+    stat(backupPath).catch(() => undefined),
+    stat(lockPath).catch(() => undefined),
+  ]);
+  if (
+    !backupArtifact?.isFile() ||
+    !lockArtifact?.isFile() ||
+    (lockArtifact.mode & 0o777) !== 0o600
+  ) {
+    throw new SafePhase6StagingError(
+      "Stale restore lock or its backup artifact is missing or unsafe.",
+    );
+  }
+  const lockedTarget = await readFile(lockPath, "utf8").then(
+    (value) => value.trim(),
+    () => undefined,
+  );
+  if (lockedTarget !== input.targetDatabase) {
+    throw new SafePhase6StagingError(
+      "Stale restore lock does not match the exact disposable target.",
+    );
+  }
+  const state = (
+    await input.client.query<{
+      target_exists: boolean;
+      active_restore: boolean;
+    }>(
+      `SELECT
+         EXISTS (SELECT 1 FROM pg_database WHERE datname = $1) AS target_exists,
+         EXISTS (
+           SELECT 1 FROM pg_stat_activity
+           WHERE pid <> pg_backend_pid()
+             AND (datname = $1 OR application_name = 'ueb-core-phase6-restore-create')
+         ) AS active_restore`,
+      [input.targetDatabase],
+    )
+  ).rows[0];
+  if (!state || state.target_exists || state.active_restore) {
+    throw new SafePhase6StagingError(
+      "Stale restore lock cannot be cleared while target or restore activity exists.",
+    );
+  }
+  await rm(lockPath);
 }
 
 export async function cleanupStagingRestore(input: {
@@ -363,19 +514,21 @@ async function connectDatabaseAdmin(
       current_user: string;
       rolsuper: boolean;
       rolcreatedb: boolean;
+      rolcreaterole: boolean;
     }>(
-      `SELECT current_user, rolsuper, rolcreatedb
+      `SELECT current_user, rolsuper, rolcreatedb, rolcreaterole
        FROM pg_roles WHERE rolname = current_user`,
     )
   ).rows[0];
   if (
     attributes?.current_user !== authorizedRole ||
     attributes.rolsuper ||
-    !attributes.rolcreatedb
+    !attributes.rolcreatedb ||
+    !attributes.rolcreaterole
   ) {
     await client.end().catch(() => undefined);
     throw new SafePhase6StagingError(
-      "Authorized database admin must be non-superuser with CREATEDB.",
+      "Authorized database admin must be non-superuser with CREATEDB and CREATEROLE.",
     );
   }
   return client;
@@ -385,6 +538,7 @@ function spawnPostgresTool(
   command: string,
   args: readonly string[],
   databaseUrl: string,
+  applicationName?: string,
 ) {
   const url = new URL(databaseUrl);
   return spawn(command, [...args], {
@@ -396,6 +550,7 @@ function spawnPostgresTool(
       PGUSER: decodeURIComponent(url.username),
       PGPASSWORD: decodeURIComponent(url.password),
       PGDATABASE: decodeURIComponent(url.pathname.slice(1)),
+      ...(applicationName ? { PGAPPNAME: applicationName } : {}),
     },
   });
 }

@@ -72,6 +72,11 @@ export interface CleanupRestoreCommand {
   readonly backupPath: string;
 }
 
+export interface ClearStaleRestoreLockCommand {
+  readonly targetDatabase: string;
+  readonly backupPath: string;
+}
+
 export interface CleanupBackupsCommand {
   readonly backupDirectory: typeof STAGING_BACKUP_DIRECTORY;
 }
@@ -382,6 +387,34 @@ export function parseCleanupRestoreCommand(
   ) {
     throw new SafePhase6StagingError(
       "Restore cleanup requires a disposable target and confirmation.",
+    );
+  }
+  assertStagingRestoreDatabase(targets[0]!);
+  return {
+    targetDatabase: targets[0]!,
+    backupPath: assertExternalArtifactPath(backups[0]!, ".dump"),
+  };
+}
+
+export function parseClearStaleRestoreLockCommand(
+  arguments_: readonly string[],
+): ClearStaleRestoreLockCommand {
+  const args = normalizeArguments(arguments_);
+  const confirmation = "--confirm-clear-stale-restore-lock";
+  assertExactArguments(
+    args,
+    [confirmation],
+    ["--target-database=", "--backup="],
+  );
+  const targets = valuesFor(args, "--target-database=");
+  const backups = valuesFor(args, "--backup=");
+  if (
+    !args.includes(confirmation) ||
+    targets.length !== 1 ||
+    backups.length !== 1
+  ) {
+    throw new SafePhase6StagingError(
+      "Stale restore-lock cleanup requires an exact disposable target and explicit confirmation.",
     );
   }
   assertStagingRestoreDatabase(targets[0]!);

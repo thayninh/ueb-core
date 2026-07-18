@@ -2,9 +2,16 @@
 
 import "dotenv/config";
 
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import {
+  clearStaleStagingRestoreLockWithClient,
+  createStagingRestoreDatabase,
+} from "../../scripts/phase-6/lib/staging-backup";
 import {
   bootstrapStagingDatabase,
   ensureRestrictedStagingOwnerRole,
@@ -18,6 +25,7 @@ import {
 
 const DATABASE = "ueb_core_staging_test_ownership_18";
 const WRONG_OWNER_DATABASE = "ueb_core_staging_test_wrong_owner_18";
+const RESTORE_DATABASE = "ueb_core_staging_restore_ownership_18";
 const BOOTSTRAP = "ueb_core_phase6_ownership_bootstrap_18";
 const BOOTSTRAP_PASSWORD = "phase6-bootstrap-pg18-integration-credential";
 const OWNER_PASSWORD = "phase6-owner-pg18-integration-credential";
@@ -130,6 +138,62 @@ isolatedDescribe("PostgreSQL 18 staging database ownership", () => {
     }
   }, 120_000);
 
+  it("creates a restore target with the exact owner and revokes temporary SET", async () => {
+    const bootstrap = await connectBootstrap();
+    try {
+      const report = await createStagingRestoreDatabase({
+        client: bootstrap,
+        bootstrapRole: BOOTSTRAP,
+        targetDatabase: RESTORE_DATABASE,
+      });
+      expect(report).toEqual({
+        databaseOwner: STAGING_OWNER_ROLE,
+        restoreBootstrapCanSetOwnerRoleBeforeCreate: true,
+        temporaryMembershipRevoked: true,
+        restoreBootstrapCanSetOwnerRoleAfter: false,
+      });
+      await expect(canBootstrapSetOwner(bootstrap)).resolves.toBe(false);
+      await expect(
+        createStagingRestoreDatabase({
+          client: bootstrap,
+          bootstrapRole: BOOTSTRAP,
+          targetDatabase: RESTORE_DATABASE,
+        }),
+      ).rejects.toBeDefined();
+      await expect(canBootstrapSetOwner(bootstrap)).resolves.toBe(false);
+    } finally {
+      await bootstrap.end();
+    }
+  });
+
+  it("clears only an exact stale lock for an absent target", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "ueb-core-restore-lock-"));
+    const backupPath = join(directory, "staging.dump");
+    const lockPath = `${backupPath}.restore-lock`;
+    try {
+      await writeFile(backupPath, "test-only", { mode: 0o600 });
+      await writeFile(lockPath, `${RESTORE_DATABASE}\n`, { mode: 0o600 });
+      await expect(
+        clearStaleStagingRestoreLockWithClient({
+          client: admin,
+          targetDatabase: RESTORE_DATABASE,
+          backupPath,
+        }),
+      ).rejects.toThrow("target or restore activity exists");
+      await admin.query(`DROP DATABASE "${RESTORE_DATABASE}"`);
+      await clearStaleStagingRestoreLockWithClient({
+        client: admin,
+        targetDatabase: RESTORE_DATABASE,
+        backupPath,
+      });
+      await expect(readFile(lockPath, "utf8")).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("fails safely when an existing target has the wrong owner", async () => {
     await admin.query(
       `CREATE DATABASE "${WRONG_OWNER_DATABASE}" OWNER "${BOOTSTRAP}"`,
@@ -222,7 +286,7 @@ function roleUrl(database: string, role: string, password: string): string {
 }
 
 async function cleanup(): Promise<void> {
-  for (const database of [DATABASE, WRONG_OWNER_DATABASE]) {
+  for (const database of [DATABASE, WRONG_OWNER_DATABASE, RESTORE_DATABASE]) {
     await admin.query(
       `SELECT pg_terminate_backend(pid) FROM pg_stat_activity
        WHERE pid <> pg_backend_pid() AND datname = $1`,

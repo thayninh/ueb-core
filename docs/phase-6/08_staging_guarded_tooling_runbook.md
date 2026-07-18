@@ -219,6 +219,16 @@ trên, theo Section 4.
 Restore target phải là new `ueb_core_staging_restore_<safe_suffix>`. Failure giữ
 target/lock để điều tra; tooling không tự cleanup.
 
+Trên PostgreSQL 18, restore create dùng cùng guarded helper với database
+bootstrap: restricted bootstrap role phải có `CREATEDB` + `CREATEROLE`, helper
+reconcile về zero owner access, cấp đúng membership tạm thời `ADMIN FALSE,
+INHERIT FALSE, SET TRUE`, verify `SET ROLE`, chạy `CREATE DATABASE ... OWNER
+ueb_core_staging_owner`, rồi revoke và verify zero `SET`/`INHERIT` residue.
+Database owner được verify trước `pg_restore`. Nếu create hoặc revoke fail thì
+`pg_restore` không chạy; nếu `pg_restore` fail thì target và lock được giữ để
+điều tra và không có auto-drop. Fingerprint source được lấy trước/sau restore và
+phải bất biến; source/target fingerprint metadata phải match.
+
 ```bash
 pnpm phase6:restore-staging-rehearsal -- \
   --source-database=ueb_core_staging \
@@ -238,6 +248,22 @@ pnpm phase6:cleanup-staging-restore -- \
   --backup="$STAGING_BACKUP_PATH" \
   --confirm-drop-staging-restore
 ```
+
+Nếu previous fail-safe attempt để lại lock nhưng target đã absent, không xóa
+file thủ công. Guarded recovery dưới đây chỉ PASS khi lock chứa exact disposable
+target, target không tồn tại và không có active restore process; confirmation là
+bắt buộc. Nếu target tồn tại hoặc state không rõ, command hard-fail và giữ lock:
+
+```bash
+pnpm phase6:clear-stale-staging-restore-lock -- \
+  --target-database="$STAGING_RESTORE_DATABASE" \
+  --backup="$STAGING_BACKUP_PATH" \
+  --confirm-clear-stale-restore-lock
+```
+
+Restore PASS vẫn giữ target/lock cho verify. Chỉ explicit guarded cleanup được
+drop target và giải phóng lock. Backup retention không được xóa artifact đang có
+restore lock.
 
 ## 8. Retention cleanup
 

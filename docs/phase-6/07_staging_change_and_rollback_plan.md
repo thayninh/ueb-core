@@ -252,6 +252,14 @@ Nếu cleanup capability không thể chứng minh, migrations không được c
 deployment dừng để xử lý residue. Target existing/sai owner không được tự sửa;
 rollback không drop target hoặc đổi owner ngoài một authorization riêng.
 
+Restore rehearsal trên PostgreSQL 18 tái sử dụng exact temporary `SET ROLE`
+helper này. Ownership và zero capability residue phải PASS trước `pg_restore`.
+Source staging fingerprint được so sánh trước/sau và không được thay đổi;
+restored target phải match source metadata. Create/revoke/restore failure giữ
+restore target (nếu đã tạo) và lock, không auto-drop. Stale lock chỉ được clear
+bằng guarded command có confirmation sau khi xác minh target absent và không có
+active restore process; target present hoặc state không rõ là hard stop.
+
 ### 6.2 Ordered guarded operator jobs
 
 1. Deployment/rollback preflight PASS từ immutable local artifact.
@@ -321,6 +329,9 @@ pg_restore --list "$(basename "$BACKUP_PATH")" >/dev/null
 
 Retention job phải có exact directory prefix, minimum-age, dry-run và bảo vệ
 latest verified backup. Không chạy cleanup cho đến khi negative tests PASS.
+Restore lock còn hiệu lực cũng chặn retention. Target và lock chỉ được cleanup
+bởi exact guarded restore-cleanup command; absent-target stale lock dùng riêng
+`phase6:clear-stale-staging-restore-lock` và không thay thế incident review.
 
 ## 8. Caddy add-only change
 

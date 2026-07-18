@@ -159,6 +159,24 @@ isolatedDescribe("Phase 6 ACL and RLS on an isolated local database", () => {
       );
     }
   });
+
+  it("treats an administrative SET FALSE and INHERIT FALSE row as no capability", async () => {
+    await maintenance!.query(
+      `GRANT "${STAGING_OWNER_ROLE}" TO "${ROLE_ADMIN}" WITH ADMIN TRUE, INHERIT FALSE, SET FALSE`,
+    );
+    try {
+      await expect(
+        verifyStagingSecurity({
+          environment: stagingEnvironment(),
+          allowTest: true,
+        }),
+      ).resolves.toMatchObject({ securityVerify: "PASS" });
+    } finally {
+      await maintenance!.query(
+        `REVOKE "${STAGING_OWNER_ROLE}" FROM "${ROLE_ADMIN}"`,
+      );
+    }
+  });
 });
 
 function stagingEnvironment(): Record<string, string> {

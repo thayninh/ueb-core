@@ -1,12 +1,13 @@
 import { randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
 
 import { Client } from "pg";
 
+import { createStagingRestoreDatabase } from "./lib/staging-backup";
 import {
   bootstrapStagingDatabase,
   bootstrapStagingRole,
@@ -22,6 +23,7 @@ import {
   STAGING_OWNER_ROLE,
   STAGING_PROVISIONING_ROLE,
   STAGING_RUNTIME_ROLE,
+  STAGING_VPS_HOST,
   withDatabaseName,
 } from "./lib/staging-contracts";
 
@@ -36,7 +38,7 @@ async function main(): Promise<void> {
   const sourceUrl = readIsolatedAdminUrl(process.env);
   const suffix = randomBytes(6).toString("hex");
   const database = `ueb_core_staging_test_operator_${suffix}`;
-  const restoreDatabase = `ueb_core_staging_test_restore_${suffix}`;
+  const restoreDatabase = `ueb_core_staging_restore_${suffix}`;
   const roleAdmin = `ueb_core_phase6_test_admin_${suffix}`;
   const ownerPassword = randomBytes(36).toString("base64url");
   const runtimePassword = randomBytes(36).toString("base64url");
@@ -103,6 +105,9 @@ async function main(): Promise<void> {
       PHASE6_STAGING_INTEGRATION: "1",
       PHASE6_TEST_DATABASE_HOST: process.env.PHASE6_TEST_DATABASE_HOST,
       PHASE6_TEST_DATABASE_PORT: process.env.PHASE6_TEST_DATABASE_PORT,
+      STAGING_TARGET_HOST: STAGING_VPS_HOST,
+      STAGING_DATABASE_HOST: process.env.PHASE6_TEST_DATABASE_HOST,
+      STAGING_DATABASE_PORT: process.env.PHASE6_TEST_DATABASE_PORT,
       STAGING_EXPECTED_DATABASE: database,
       STAGING_MIGRATION_OWNER_ROLE: STAGING_OWNER_ROLE,
       STAGING_MIGRATION_OWNER_PASSWORD: ownerPassword,
@@ -169,13 +174,13 @@ async function main(): Promise<void> {
     });
     stage = "SECURITY_AND_FINGERPRINT";
     await verifyStagingSecurity({ environment, allowTest: true });
-    const fingerprint = await fingerprintStaging({
+    const sourceFingerprintBefore = await fingerprintStaging({
       environment,
       allowTest: true,
     });
     if (
-      fingerprint.migrationCount !== STAGING_MIGRATION_COUNT ||
-      fingerprint.failedMigrationCount !== 0
+      sourceFingerprintBefore.migrationCount !== STAGING_MIGRATION_COUNT ||
+      sourceFingerprintBefore.failedMigrationCount !== 0
     ) {
       throw new SafePhase6StagingError(
         "Local operator migration fingerprint is invalid.",
@@ -184,6 +189,7 @@ async function main(): Promise<void> {
 
     stage = "BACKUP";
     const backupPath = join(temporaryDirectory, "operator-test.dump");
+    const restoreLockPath = `${backupPath}.restore-lock`;
     await execFileAsync(
       "pg_dump",
       [
@@ -196,10 +202,36 @@ async function main(): Promise<void> {
       { env: postgresEnvironment(ownerUrl) },
     );
     await execFileAsync("pg_restore", ["--list", backupPath]);
+    await writeFile(restoreLockPath, `${restoreDatabase}\n`, {
+      flag: "wx",
+      mode: 0o600,
+    });
     stage = "RESTORE_CREATE";
-    await maintenance.query(
-      `CREATE DATABASE "${restoreDatabase}" OWNER "${STAGING_OWNER_ROLE}"`,
-    );
+    const restoreBootstrap = new Client({
+      connectionString: withDatabaseName(roleAdminUrl, "postgres"),
+      application_name: "ueb-core-phase6-operator-restore-create",
+    });
+    let restoreOwnership;
+    try {
+      await restoreBootstrap.connect();
+      restoreOwnership = await createStagingRestoreDatabase({
+        client: restoreBootstrap,
+        bootstrapRole: roleAdmin,
+        targetDatabase: restoreDatabase,
+      });
+    } finally {
+      await restoreBootstrap.end().catch(() => undefined);
+    }
+    if (
+      restoreOwnership.databaseOwner !== STAGING_OWNER_ROLE ||
+      !restoreOwnership.restoreBootstrapCanSetOwnerRoleBeforeCreate ||
+      !restoreOwnership.temporaryMembershipRevoked ||
+      restoreOwnership.restoreBootstrapCanSetOwnerRoleAfter
+    ) {
+      throw new SafePhase6StagingError(
+        "Local restore ownership evidence is invalid.",
+      );
+    }
     const restoreUrl = roleUrl(
       sourceUrl,
       restoreDatabase,
@@ -233,25 +265,26 @@ async function main(): Promise<void> {
       );
     }
     stage = "RESTORE_VERIFY";
-    const restored = new Client({
-      connectionString: restoreUrl,
-      application_name: "ueb-core-phase6-operator-restore-verify",
+    const sourceFingerprintAfter = await fingerprintStaging({
+      environment,
+      allowTest: true,
     });
-    try {
-      await restored.connect();
-      const migrationCount = (
-        await restored.query<{ count: number }>(
-          `SELECT count(*)::integer AS count FROM public._prisma_migrations
-           WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`,
-        )
-      ).rows[0]?.count;
-      if (migrationCount !== STAGING_MIGRATION_COUNT) {
-        throw new SafePhase6StagingError(
-          "Local operator restore verification is invalid.",
-        );
-      }
-    } finally {
-      await restored.end().catch(() => undefined);
+    const restoredFingerprint = await fingerprintStaging({
+      environment: {
+        ...environment,
+        MIGRATION_DATABASE_URL: restoreUrl,
+        STAGING_EXPECTED_DATABASE: restoreDatabase,
+      },
+      databaseUrl: restoreUrl,
+      expectedDatabase: restoreDatabase,
+    });
+    if (
+      sourceFingerprintBefore.sha256 !== sourceFingerprintAfter.sha256 ||
+      !sameFingerprintMetadata(sourceFingerprintAfter, restoredFingerprint)
+    ) {
+      throw new SafePhase6StagingError(
+        "Local operator restore fingerprint verification is invalid.",
+      );
     }
 
     console.log("OPERATOR_COMMANDS=PASS");
@@ -263,6 +296,10 @@ async function main(): Promise<void> {
     console.log("ROLE_ACL_RLS=PASS");
     console.log("FINGERPRINT=PASS");
     console.log("BACKUP_RESTORE=PASS");
+    console.log("RESTORE_REHEARSAL=PASS");
+    console.log("RESTORE_VERIFY=PASS");
+    console.log("SOURCE_RESTORE_FINGERPRINT_MATCH=YES");
+    console.log("SOURCE_STAGING_FINGERPRINT_UNCHANGED=YES");
     executionPassed = true;
   } catch (error) {
     console.log(`OPERATOR_LOCAL_STAGE=${stage}`);
@@ -285,6 +322,8 @@ async function main(): Promise<void> {
           ],
         );
       }
+      console.log("RESTORE_CLEANUP=PASS");
+      console.log("RESTORE_LOCK_CLEANUP=PASS");
       cleanupPassed = true;
     } catch {
       process.exitCode = 1;
@@ -298,6 +337,26 @@ async function main(): Promise<void> {
   } else if (executionPassed) {
     fail("Local operator disposable-resource cleanup failed.");
   }
+}
+
+function sameFingerprintMetadata(
+  source: Awaited<ReturnType<typeof fingerprintStaging>>,
+  restored: Awaited<ReturnType<typeof fingerprintStaging>>,
+): boolean {
+  return (
+    source.migrationCount === restored.migrationCount &&
+    source.failedMigrationCount === restored.failedMigrationCount &&
+    source.coreCount === restored.coreCount &&
+    source.workflowCount === restored.workflowCount &&
+    source.importRunCount === restored.importRunCount &&
+    source.maxStt === restored.maxStt &&
+    source.sequenceLastValue === restored.sequenceLastValue &&
+    source.sequenceIsCalled === restored.sequenceIsCalled &&
+    source.authUserCount === restored.authUserCount &&
+    source.activeSessionCount === restored.activeSessionCount &&
+    source.runtimeFlags === restored.runtimeFlags &&
+    source.provisionerFlags === restored.provisionerFlags
+  );
 }
 
 function readIsolatedAdminUrl(

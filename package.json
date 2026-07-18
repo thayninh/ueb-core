@@ -67,6 +67,7 @@
     "phase6:restore-staging-rehearsal": "tsx scripts/phase-6/staging-operations.ts restore-rehearsal",
     "phase6:verify-staging-restore": "tsx scripts/phase-6/staging-operations.ts verify-restore",
     "phase6:cleanup-staging-restore": "tsx scripts/phase-6/staging-operations.ts cleanup-restore",
+    "phase6:clear-stale-staging-restore-lock": "tsx scripts/phase-6/staging-operations.ts clear-stale-restore-lock",
     "phase6:staging-deployment-preflight": "tsx scripts/phase-6/staging-operations.ts deployment-preflight",
     "phase6:verify-rollback-image": "tsx scripts/phase-6/staging-operations.ts verify-rollback-image",
     "phase6:generate-staging-secrets": "tsx scripts/phase-6/staging-secrets.ts generate",

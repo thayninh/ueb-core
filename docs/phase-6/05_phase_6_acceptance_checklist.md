@@ -78,8 +78,12 @@ jobs produce checksum/catalog/retrieval/restore evidence.
 - [ ] Encrypted off-host copy và retrieval `PASS`.
 - [ ] Retention, freshness alert, deletion guard và owner được phê duyệt.
 - [ ] Guarded restore vào new isolated target `PASS`.
+- [ ] PostgreSQL 18 restore evidence chứng minh temporary owner `SET ROLE` trước create, exact owner sau create, revoke membership và `SET ROLE=NO` trước `pg_restore`.
 - [ ] Restore verifies migrations, counts, latest rows, sequence metadata, ACL/RLS.
+- [ ] Source staging fingerprint bất biến trước/sau restore và source/target fingerprint metadata match.
 - [ ] Restore không overwrite active staging và không target UAT/canonical.
+- [ ] Create/revoke/restore failure giữ target/lock để điều tra, không auto-drop và báo capability residue.
+- [ ] Stale-lock recovery chỉ clear exact lock khi target absent, không có active restore process và có explicit confirmation.
 - [ ] Restore/cleanup commands có negative guard tests.
 
 ## 6. Deployment and smoke validation

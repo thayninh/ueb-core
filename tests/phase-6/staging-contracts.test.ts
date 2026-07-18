@@ -8,6 +8,7 @@ import {
   assertMonitoringEmail,
   assertRoleSeparation,
   parseChangeWindow,
+  parseClearStaleRestoreLockCommand,
   parseConfirmedTargetCommand,
   parseRestoreCommand,
   parseStagingConnection,
@@ -151,7 +152,12 @@ describe("Phase 6 staging target contracts", () => {
       "--backup=/tmp/phase6-test.dump",
       "--confirm-create-staging-restore",
     ];
-    for (const target of [STAGING_DATABASE, "ueb_core", "ueb_core_uat_phase5"])
+    for (const target of [
+      STAGING_DATABASE,
+      "ueb_core",
+      "ueb_core_uat_phase5",
+      "ueb_core_staging_restore_unsafe-target",
+    ])
       expect(() =>
         parseRestoreCommand([...base, `--target-database=${target}`]),
       ).toThrow();
@@ -161,6 +167,37 @@ describe("Phase 6 staging target contracts", () => {
         "--target-database=ueb_core_staging_restore_guard_01",
       ]).targetDatabase,
     ).toBe("ueb_core_staging_restore_guard_01");
+  });
+
+  it("requires exact confirmation for stale restore-lock recovery", () => {
+    const args = [
+      "--target-database=ueb_core_staging_restore_guard_01",
+      "--backup=/tmp/phase6-test.dump",
+    ];
+    expect(() => parseClearStaleRestoreLockCommand(args)).toThrow();
+    expect(
+      parseClearStaleRestoreLockCommand([
+        ...args,
+        "--confirm-clear-stale-restore-lock",
+      ]),
+    ).toEqual({
+      targetDatabase: "ueb_core_staging_restore_guard_01",
+      backupPath: "/tmp/phase6-test.dump",
+    });
+    for (const target of [
+      STAGING_DATABASE,
+      "ueb_core",
+      "ueb_core_uat_phase5",
+      "ueb_core_staging_restore_unsafe-target",
+    ]) {
+      expect(() =>
+        parseClearStaleRestoreLockCommand([
+          `--target-database=${target}`,
+          "--backup=/tmp/phase6-test.dump",
+          "--confirm-clear-stale-restore-lock",
+        ]),
+      ).toThrow();
+    }
   });
 });
 

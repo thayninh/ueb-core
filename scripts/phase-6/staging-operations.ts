@@ -2,6 +2,7 @@ import { pathToFileURL } from "node:url";
 
 import {
   backupStaging,
+  clearStaleStagingRestoreLock,
   cleanupStagingBackups,
   cleanupStagingRestore,
   restoreStagingRehearsal,
@@ -30,6 +31,7 @@ import {
   assertStagingRestoreDatabase,
   normalizeArguments,
   parseBackupCommand,
+  parseClearStaleRestoreLockCommand,
   parseCleanupBackupsCommand,
   parseCleanupRestoreCommand,
   parseConfirmedTargetCommand,
@@ -55,6 +57,7 @@ type Operation =
   | "restore-rehearsal"
   | "verify-restore"
   | "cleanup-restore"
+  | "clear-stale-restore-lock"
   | "deployment-preflight"
   | "verify-rollback-image";
 
@@ -72,6 +75,7 @@ const OPERATIONS = new Set<Operation>([
   "restore-rehearsal",
   "verify-restore",
   "cleanup-restore",
+  "clear-stale-restore-lock",
   "deployment-preflight",
   "verify-rollback-image",
 ]);
@@ -238,6 +242,12 @@ async function main(): Promise<void> {
           `TARGET_DATABASE=${command.targetDatabase}`,
           `SOURCE_FINGERPRINT=${result.sourceFingerprint}`,
           `RESTORED_FINGERPRINT=${result.restoredFingerprint}`,
+          `RESTORE_DATABASE_OWNER=${result.databaseOwner}`,
+          `RESTORE_BOOTSTRAP_CAN_SET_OWNER_ROLE_BEFORE_CREATE=${result.restoreBootstrapCanSetOwnerRoleBeforeCreate ? "YES" : "NO"}`,
+          `TEMPORARY_MEMBERSHIP_REVOKED=${result.temporaryMembershipRevoked ? "YES" : "NO"}`,
+          `RESTORE_BOOTSTRAP_CAN_SET_OWNER_ROLE_AFTER=${result.restoreBootstrapCanSetOwnerRoleAfter ? "YES" : "NO"}`,
+          `SOURCE_STAGING_FINGERPRINT_UNCHANGED=${result.sourceFingerprintUnchanged ? "YES" : "NO"}`,
+          `SOURCE_RESTORE_FINGERPRINT_MATCH=${result.sourceRestoreFingerprintMatch ? "YES" : "NO"}`,
           "RESTORE_REHEARSAL=PASS",
         ]);
         break;
@@ -275,6 +285,21 @@ async function main(): Promise<void> {
         print([
           `TARGET_DATABASE=${command.targetDatabase}`,
           "RESTORE_CLEANUP=PASS",
+        ]);
+        break;
+      }
+      case "clear-stale-restore-lock": {
+        const command = parseClearStaleRestoreLockCommand(args);
+        await clearStaleStagingRestoreLock({
+          environment: process.env,
+          targetDatabase: command.targetDatabase,
+          backupPath: command.backupPath,
+        });
+        print([
+          `TARGET_DATABASE=${command.targetDatabase}`,
+          "RESTORE_TARGET_DATABASE=ABSENT",
+          "ACTIVE_RESTORE_PROCESS=NO",
+          "RESTORE_LOCK_CLEANUP=PASS",
         ]);
         break;
       }
