@@ -1,6 +1,6 @@
 {
-  "name": "@ueb-core/phase6-operator",
-  "version": "0.1.0",
+  "name": "@ueb-core/operator",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -25,12 +25,21 @@
     "phase6:verify-rollback-image": "tsx scripts/phase-6/staging-operations.ts verify-rollback-image",
     "phase6:generate-staging-secrets": "tsx scripts/phase-6/staging-secrets.ts generate",
     "phase6:validate-staging-secrets": "tsx scripts/phase-6/staging-secrets.ts validate",
-    "phase6:operator-local-execution-test": "tsx scripts/phase-6/operator-local-execution-test.ts"
+    "phase6:operator-local-execution-test": "tsx scripts/phase-6/operator-local-execution-test.ts",
+    "phase7:preflight-production-target": "tsx scripts/phase-7/production-target.ts preflight",
+    "phase7:bootstrap-production-target": "tsx scripts/phase-7/production-target.ts bootstrap",
+    "phase7:verify-production-target": "tsx scripts/phase-7/production-target.ts verify",
+    "phase7:reconcile-production-identities": "tsx scripts/phase-7/production-target.ts reconcile-identities",
+    "phase7:backup-production-target": "tsx scripts/phase-7/production-target.ts backup",
+    "phase7:restore-production-rehearsal": "tsx scripts/phase-7/production-target.ts restore",
+    "phase7:cleanup-production-restore": "tsx scripts/phase-7/production-target.ts cleanup-restore"
   },
   "dependencies": {
     "@prisma/client": "^7.8.0",
     "dotenv": "^17.4.2",
+    "exceljs": "^4.4.0",
     "pg": "^8.22.0",
+    "uuid": "^14.0.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {

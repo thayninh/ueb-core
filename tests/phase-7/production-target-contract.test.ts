@@ -286,7 +286,7 @@ function baseArguments(mode: ProductionTargetMode): string[] {
     `--owner-role=${PRODUCTION_TARGET_CONTRACT.ownerRole}`,
     `--runtime-role=${PRODUCTION_TARGET_CONTRACT.runtimeRole}`,
     `--provisioner-role=${PRODUCTION_TARGET_CONTRACT.provisionerRole}`,
-    `--change-window=${PRODUCTION_TARGET_CONTRACT.changeWindow}`,
+    "--change-window=2026-07-19T20:00:00+07:00/2026-07-19T23:00:00+07:00",
     `--rollback-image-sha=${PRODUCTION_TARGET_CONTRACT.rollbackImageSha}`,
     `--backup-evidence=${backupEvidence}`,
     `--off-host-backup-evidence=${offHostEvidence}`,

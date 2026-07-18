@@ -23,10 +23,13 @@ RUN pnpm install --frozen-lockfile --prod=false
 
 COPY --chown=operator:operator prisma.config.ts tsconfig.json ./
 COPY --chown=operator:operator prisma ./prisma
+COPY --chown=operator:operator config/phase-2 ./config/phase-2
+COPY --chown=operator:operator scripts/phase-2 ./scripts/phase-2
 COPY --chown=operator:operator scripts/phase-3/grant-auth-runtime-permissions.ts ./scripts/phase-3/grant-auth-runtime-permissions.ts
 COPY --chown=operator:operator scripts/phase-4/grant-workflow-runtime-permissions.ts ./scripts/phase-4/grant-workflow-runtime-permissions.ts
 COPY --chown=operator:operator scripts/phase-5/lib/provisioning-role.ts ./scripts/phase-5/lib/provisioning-role.ts
 COPY --chown=operator:operator scripts/phase-6 ./scripts/phase-6
+COPY --chown=operator:operator scripts/phase-7 ./scripts/phase-7
 
 RUN pnpm exec prisma generate \
   && chown -R operator:operator /operator /pnpm

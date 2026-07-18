@@ -1,238 +1,135 @@
-# Phase 7 guarded production target bootstrap contract
+# Phase 7 guarded production target executor
 
-## 1. Execution status
+## 1. Scope and authorization
 
-This contract records the approved target decisions and defines local-only plan
-validation. It does not connect to PostgreSQL, create a role/database, apply a
-migration, import canonical rows, provision an identity, connect over SSH/SCP,
-change DNS/Caddy or deploy an image.
+The Phase 7 operator can create and validate only the dedicated database
+`ueb_core_prod`. Executable operations require an authorization reference that
+starts with `CREATE_AND_VALIDATE_PRODUCTION_TARGET_ONLY`, exact immutable
+release inputs and an active operator-supplied change window. This authorization
+does not permit application start, Caddy/DNS changes or identity provisioning.
 
-```text
-PRODUCTION_TARGET_TOOLING=LOCAL_PLAN_ONLY
-DATABASE_CONNECTIONS=0
-DATABASE_MUTATIONS=0
-PRODUCTION_DEPLOYMENT=NOT_PERFORMED
-PRODUCTION_PROVISIONING=NOT_PERFORMED
-```
+Preflight and `bootstrap --dry-run` reject database credentials and make zero
+database connections or mutations. Apply modes fail closed, never accept
+`--force`, redact credentials and require reconciliation after any failure once
+an operation may have started.
 
-The command implementation rejects database credential environment variables.
-There is no `--force` path. A future executable implementation requires a new,
-explicitly authorized change and must not reinterpret these plan-only commands
-as database execution.
-
-## 2. Operator decision contract
-
-| Decision | Approved value | Current gate |
-| --- | --- | --- |
-| Domain strategy | `PROMOTE_CURRENT_DOMAIN_AND_MOVE_STAGING` | approved for planning |
-| Production domain | `ueb-core.cargis.vn` | cutover not performed |
-| Staging domain after go-live | `ueb-core-staging.cargis.vn` | DNS/TLS/Caddy evidence required |
-| Production database | `ueb_core_prod` | dedicated and guarded |
-| Migration owner | `ueb_core_owner` | credential not created |
-| Runtime role | `ueb_core_app` | must be non-owner, non-superuser and `NOBYPASSRLS` |
-| Provisioning role | `ueb_core_provisioner` | must be non-owner, non-superuser and `NOBYPASSRLS` |
-| Change window | `2026-07-19T20:00:00+07:00/2026-07-19T23:00:00+07:00` | revalidate immediately before execution |
-| Rollback release source | `971c42027873f7de3140f815b06c2dddcfb61ba6` | Git commit exists; immutable image evidence still required |
-| RPO | `24h` | approved for planning |
-| RTO | `4h` | approved for planning |
-| Email alert transport | Gmail SMTP with a redacted delivery test | validated from restricted evidence; never from a credential file |
-
-Role names are distinct. Credential values must also be separately generated,
-stored and distributed; sharing a password between these roles is forbidden.
-The production target must not reuse a canonical acceptance, staging, UAT,
-restore, `postgres`, `template0` or `template1` database.
-
-## 3. Immutable source gates
+## 2. Immutable contract
 
 ```text
-TARGET_STATE_MODE=PLANNED_EMPTY_TARGET
+PRODUCTION_DATABASE=ueb_core_prod
+PRODUCTION_OWNER_ROLE=ueb_core_owner
+PRODUCTION_RUNTIME_ROLE=ueb_core_app
+PRODUCTION_PROVISIONER_ROLE=ueb_core_provisioner
 ROSTER_MANIFEST_SHA256=c622297ee3a0b31c6265b01973fa4589d8be949e9e720d9e04d6cd59be85f8b4
-ROSTER_BLOCK_COUNT=0
-ROSTER_CONFLICT_COUNT=0
 CANONICAL_SOURCE_SHA256=e276a144f5f8accb4ed6c6d2a6d7ec38a862d2e84467cb5fe43d342a95d7e972
 CANONICAL_CORE_ROW_COUNT=2497
 EXPECTED_MIGRATION_COUNT=8
-EXPECTED_IDENTITY_CREATE_COUNT=254
-EXPECTED_CANONICAL_LECTURER_CREATE_COUNT=246
-EXPECTED_FACULTY_LEADER_CREATE_COUNT=6
-EXPECTED_TEST_IDENTITY_CREATE_COUNT=2
+EXPECTED_EMPTY_IDENTITY_COUNT=0
+EXPECTED_ROSTER_IDENTITY_COUNT=254
 ```
 
-The roster SHA is an input guard only. These commands do not rebuild or change
-the authoritative roster manifest.
+Canonical, acceptance, staging, UAT, maintenance and non-production restore
+database names are rejected. Restore rehearsal targets must use the prefix
+`ueb_core_prod_restore_` and an executor-owned database marker.
 
-## 4. Required evidence outside Git
+## 3. Change-window contract
 
-Every command requires four absolute evidence paths outside the repository.
-Each file must be regular, non-symlinked, at most 1 MiB and mode `0600`.
-
-The backup evidence must contain exact lines:
+The source does not pin a date or time. Every command accepts:
 
 ```text
-BACKUP_STATUS=PASS
-BACKUP_CHECKSUM_STATUS=PASS
-RESTORE_REHEARSAL_STATUS=PASS
+--change-window-start=<ISO-8601 with timezone>
+--change-window-end=<ISO-8601 with timezone>
 ```
 
-The off-host evidence must contain:
+The end must be later than the start and the duration must not exceed four
+hours. Mutation commands reject execution before the start and after the end.
+Read-only preflight and bootstrap dry-run may validate an upcoming window but
+reject an expired or malformed window.
+
+## 4. Credential and endpoint separation
+
+Apply operations use restricted environment supplied outside Git:
+
+- `PRODUCTION_BOOTSTRAP_DATABASE_URL`: distinct non-superuser role with only
+  the required role/database bootstrap capabilities, targeting `postgres`;
+- `MIGRATION_DATABASE_URL`: exact `ueb_core_owner` connection;
+- `DATABASE_URL`: exact `ueb_core_app` connection;
+- `PHASE7_PROVISIONING_DATABASE_URL`: exact `ueb_core_provisioner` connection;
+- three different strong role passwords for initial role creation.
+
+All URLs must use the approved private `PRODUCTION_DATABASE_HOST`, and
+`PRODUCTION_DATABASE_PUBLIC_PORT=NO` is mandatory. Secrets are never accepted as
+CLI arguments or printed. The application image is not started by this tooling.
+
+## 5. Immutable artifact and evidence gates
+
+Every mode verifies restricted, non-symlinked app/operator archives against
+their exact SHA-256 values. Email evidence must be mode `0600`, redacted,
+credential-free, successful and no older than 24 hours. Rollback evidence must
+prove both image existence and verification. Canonical Excel data is never
+baked into an image: the authorized file is mounted separately and verified
+before the first database mutation.
+
+## 6. Commands
+
+The root package and immutable operator image expose:
 
 ```text
-OFF_HOST_BACKUP_STATUS=PASS
+phase7:preflight-production-target
+phase7:bootstrap-production-target
+phase7:verify-production-target
+phase7:reconcile-production-identities
+phase7:backup-production-target
+phase7:restore-production-rehearsal
+phase7:cleanup-production-restore
 ```
 
-The rollback evidence must contain:
+All commands take the common exact target, role, Git SHA, roster SHA, canonical
+checksum, authorization, change-window, email/rollback evidence and app/operator
+archive arguments. Mode-specific inputs are:
 
-```text
-ROLLBACK_IMAGE_EXISTS=YES
-ROLLBACK_VERIFY=PASS
-ROLLBACK_IMAGE_SHA=971c42027873f7de3140f815b06c2dddcfb61ba6
-```
+- bootstrap: `--canonical-source`, `--canonical-audit-directory`, plus either
+  `--dry-run` or `--confirm-create-production-target`;
+- backup: `--backup`, `--off-host-directory`,
+  `--confirm-production-backup`;
+- restore: exact source, disposable target, backup and
+  `--confirm-production-restore-rehearsal`;
+- cleanup: exact source, marked disposable target, backup and
+  `--confirm-cleanup-production-restore`.
 
-The redacted email evidence must contain:
+Unknown/duplicate inputs and confirmation plus `--dry-run` are rejected.
 
-```text
-EVIDENCE_TIMESTAMP_UTC=<ISO-8601 UTC timestamp no older than 24 hours>
-EMAIL_ALERT_TRANSPORT=GMAIL_SMTP
-SMTP_AUTH=PASS
-EMAIL_TEST=PASS
-EMAIL_ALERT_GATE=PASS
-SENDER_CONFIRMED=YES
-RECIPIENT_CONFIRMED=YES
-MESSAGE_CONTENT=NON_SENSITIVE
-CREDENTIAL_LOGGED=NO
-```
+## 7. Executable order
 
-The validator rejects missing, stale, future-dated, malformed or non-`0600`
-email evidence. It also rejects password fields and credential-bearing URLs.
-Only the redacted result is read; Gmail App Password values are never accepted
-or emitted by this local-only command.
+1. Preflight immutable inputs and evidence without credentials.
+2. Dry-run bootstrap with zero connections/mutations.
+3. During the active window, verify the canonical artifact before mutation.
+4. Create the exact owner and database; create distinct runtime/provisioner
+   roles; apply eight immutable migrations.
+5. Import exactly 2,497 canonical rows transactionally using the owner.
+6. Reconcile minimal runtime and provisioning ACLs and verify RLS default deny.
+7. Verify zero workflow, auth and session rows before identity provisioning.
+8. Create a custom-format backup, checksum and catalog; copy only a verified
+   archive to the approved off-host directory.
+9. Restore to a new marked `ueb_core_prod_restore_*` database, verify counts and
+   fingerprint, then use the separate guarded cleanup command.
+10. Reconcile the exact roster SHA read-only against the empty identity target.
 
-Evidence content is necessary but not production authorization. The actual
-rollback image ID/digest, architecture and registry/transfer evidence must be
-verified in the change window before any mutation.
+The executor never drops `ueb_core_prod`, never retries a partial apply blindly,
+never deletes a backup and never provisions identities.
 
-## 5. Local-only command contract
+## 8. Operator image contract
 
-Set only non-secret shell variables. Do not export a database URL when running
-these commands.
+The operator image contains Node 24, PostgreSQL client tools, Prisma schema and
+all eight migrations, Phase 2 canonical import code and contract, Phase 3/4 ACL
+reconciliation code, and `scripts/phase-7`. It does not contain the canonical
+Excel artifact, credentials, backup data or a `latest` image tag.
 
-```bash
-AUTHORIZED_GIT_SHA="$(git rev-parse HEAD)"
-PRODUCTION_BACKUP_EVIDENCE="/absolute/secure/path/production-backup-evidence.txt"
-OFF_HOST_BACKUP_EVIDENCE="/absolute/secure/path/off-host-backup-evidence.txt"
-ROLLBACK_IMAGE_EVIDENCE="/absolute/secure/path/rollback-image-evidence.txt"
-EMAIL_ALERT_EVIDENCE="/absolute/secure/path/email-alert-evidence.txt"
+## 9. Failure and hard-stop policy
 
-production_plan_args=(
-  --target-database=ueb_core_prod
-  --expected-git-sha="$AUTHORIZED_GIT_SHA"
-  --roster-manifest-sha=c622297ee3a0b31c6265b01973fa4589d8be949e9e720d9e04d6cd59be85f8b4
-  --canonical-checksum=e276a144f5f8accb4ed6c6d2a6d7ec38a862d2e84467cb5fe43d342a95d7e972
-  --expected-block-count=0
-  --target-state-mode=PLANNED_EMPTY_TARGET
-  --domain-strategy=PROMOTE_CURRENT_DOMAIN_AND_MOVE_STAGING
-  --production-domain=ueb-core.cargis.vn
-  --staging-domain-after-go-live=ueb-core-staging.cargis.vn
-  --owner-role=ueb_core_owner
-  --runtime-role=ueb_core_app
-  --provisioner-role=ueb_core_provisioner
-  --change-window=2026-07-19T20:00:00+07:00/2026-07-19T23:00:00+07:00
-  --rollback-image-sha=971c42027873f7de3140f815b06c2dddcfb61ba6
-  --backup-evidence="$PRODUCTION_BACKUP_EVIDENCE"
-  --off-host-backup-evidence="$OFF_HOST_BACKUP_EVIDENCE"
-  --rollback-evidence="$ROLLBACK_IMAGE_EVIDENCE"
-  --email-alert-evidence="$EMAIL_ALERT_EVIDENCE"
-)
-```
-
-Run the guarded plan stages independently:
-
-```bash
-pnpm phase7:preflight-production-target -- \
-  "${production_plan_args[@]}" \
-  --confirm-production-preflight-plan
-
-pnpm phase7:bootstrap-production-target -- \
-  "${production_plan_args[@]}" \
-  --confirm-production-bootstrap-plan
-
-pnpm phase7:verify-production-target -- \
-  "${production_plan_args[@]}" \
-  --confirm-production-verify-plan
-
-pnpm phase7:reconcile-production-identities -- \
-  "${production_plan_args[@]}" \
-  --confirm-production-identity-reconciliation-plan
-```
-
-All commands require a clean working tree and `--expected-git-sha` equal to
-`HEAD`. Unknown/duplicate flags, missing confirmation, non-zero roster blockers,
-wrong hashes, unsafe database names, role collisions, expired/invalid windows,
-missing evidence or a missing rollback source commit fail closed.
-
-## 6. Future empty-target bootstrap order
-
-The local plan fixes this order; it does not execute it:
-
-1. Reconfirm production authorization, target host and change window.
-2. Verify pre-change backup, SHA-256, restore rehearsal and off-host copy.
-3. Verify immutable app/operator/rollback images and their digests.
-4. Create only `ueb_core_prod` and the three separately credentialed roles.
-5. Apply the eight immutable migrations using only `ueb_core_owner`.
-6. Reconcile minimal runtime/provisioning ACL; verify both roles are non-owner,
-   non-superuser and `NOBYPASSRLS`.
-7. Verify RLS default deny before loading data.
-8. Import the exact canonical artifact transactionally as exactly `2,497`
-   core rows; do not import auth/session/staging/UAT data.
-9. Verify canonical checksum/count, empty workflow/auth/session baselines,
-   append-only behavior, sequence metadata and migration status.
-10. Run the exact-roster identity dry-run, bounded apply and reconciliation as
-    separate authorized operations.
-
-Any unexpected existing target object/row, checksum mismatch, extra migration,
-role collapse or RLS failure stops before the next stage.
-
-## 7. Domain and Caddy cutover plan
-
-1. Back up the current Caddy configuration and record its checksum.
-2. Provision DNS and TLS for `ueb-core-staging.cargis.vn` without changing the
-   current staging route.
-3. Validate the relocated staging upstream, health/readiness and independent
-   rollback route.
-4. Stage the production upstream privately and verify health/readiness/RLS.
-5. Validate the full Caddy configuration before any reload.
-6. Move staging to `ueb-core-staging.cargis.vn`, then promote
-   `ueb-core.cargis.vn` to production within the approved window.
-7. Verify public TLS, redirects, security headers and both endpoints.
-8. On failure, restore the checksummed Caddy backup and prior staging route;
-   do not modify the production database to repair routing.
-
-No DNS, certificate, Caddy or container action is performed by the local tool.
-
-## 8. Production smoke and rollback gates
-
-Before public cutover, verify internal health/readiness, TLS plan, runtime RLS
-default deny, role isolation, exact `2,497` baseline, zero unexplained workflow
-events, identity reconciliation and monitoring. After cutover, run the Phase 7
-smoke checklist with the approved test identities, then take and verify a new
-off-host backup.
-
-Rollback is mandatory when health/readiness/TLS, RLS, identity isolation,
-canonical counts, alerting or unexplained-delta checks fail. A database rollback
-after any production write requires explicit data-owner reconciliation and is
-never automatic.
-
-## 9. Current hard gate
-
-```text
-PRODUCTION_TARGET_CONTRACT=DEFINED
-LOCAL_PLAN_TESTABILITY=REQUIRED
-EMAIL_ALERT_GATE=VALIDATED_FROM_REDACTED_EVIDENCE
-PRODUCTION_AUTHORIZATION_REFERENCE=REQUIRED_BEFORE_EXECUTION
-BACKUP_EVIDENCE=REQUIRED_BEFORE_EXECUTION
-OFF_HOST_BACKUP_EVIDENCE=REQUIRED_BEFORE_EXECUTION
-ROLLBACK_IMAGE_EVIDENCE=REQUIRED_BEFORE_EXECUTION
-PRODUCTION_DATABASE_CREATED=NO
-PRODUCTION_DEPLOYMENT=NOT_PERFORMED
-PRODUCTION_PROVISIONING=NOT_PERFORMED
-```
+Before target creation, invalid source/evidence/window/artifacts produce zero
+database mutations. A failed database creation attempts to remove the newly
+created unused owner role. After the target may exist, failures report
+`UNKNOWN_RECONCILIATION_REQUIRED`; the target and evidence are preserved.
+Operators must run guarded verification before any retry. Production app start,
+domain/Caddy cutover and identity provisioning require separate authorization.
