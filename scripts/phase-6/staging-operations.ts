@@ -277,13 +277,20 @@ async function main(): Promise<void> {
       }
       case "cleanup-restore": {
         const command = parseCleanupRestoreCommand(args);
-        await cleanupStagingRestore({
+        const result = await cleanupStagingRestore({
           environment: process.env,
           targetDatabase: command.targetDatabase,
           backupPath: command.backupPath,
         });
         print([
           `TARGET_DATABASE=${command.targetDatabase}`,
+          `CLEANUP_CAN_SET_OWNER_ROLE_BEFORE_DROP=${result.cleanupCanSetOwnerRoleBeforeDrop ? "YES" : "NO"}`,
+          `TEMPORARY_MEMBERSHIP_REVOKED=${result.temporaryMembershipRevoked ? "YES" : "NO"}`,
+          `CLEANUP_CAN_SET_OWNER_ROLE_AFTER=${result.cleanupCanSetOwnerRoleAfter ? "YES" : "NO"}`,
+          `ACTIVE_RESTORE_PROCESS=${result.activeRestoreProcess ? "YES" : "NO"}`,
+          `ACTIVE_CONNECTION_COUNT=${result.activeConnectionCount}`,
+          `RESTORE_TARGET_EXISTS_AFTER=${result.targetExistsAfter ? "YES" : "NO"}`,
+          `RESTORE_LOCK_STATUS=${result.restoreLockCleared ? "CLEARED" : "PRESENT"}`,
           "RESTORE_CLEANUP=PASS",
         ]);
         break;

@@ -9,6 +9,7 @@ import {
   assertRoleSeparation,
   parseChangeWindow,
   parseClearStaleRestoreLockCommand,
+  parseCleanupRestoreCommand,
   parseConfirmedTargetCommand,
   parseRestoreCommand,
   parseStagingConnection,
@@ -195,6 +196,37 @@ describe("Phase 6 staging target contracts", () => {
           `--target-database=${target}`,
           "--backup=/tmp/phase6-test.dump",
           "--confirm-clear-stale-restore-lock",
+        ]),
+      ).toThrow();
+    }
+  });
+
+  it("allows cleanup only for an exact disposable restore target", () => {
+    const args = [
+      "--target-database=ueb_core_staging_restore_cleanup_01",
+      "--backup=/tmp/phase6-test.dump",
+    ];
+    expect(() => parseCleanupRestoreCommand(args)).toThrow();
+    expect(
+      parseCleanupRestoreCommand([...args, "--confirm-drop-staging-restore"]),
+    ).toEqual({
+      targetDatabase: "ueb_core_staging_restore_cleanup_01",
+      backupPath: "/tmp/phase6-test.dump",
+    });
+    for (const target of [
+      STAGING_DATABASE,
+      "ueb_core",
+      "ueb_core_uat_phase5",
+      "postgres",
+      "template0",
+      "template1",
+      "ueb_core_staging_restore_unsafe-target",
+    ]) {
+      expect(() =>
+        parseCleanupRestoreCommand([
+          `--target-database=${target}`,
+          "--backup=/tmp/phase6-test.dump",
+          "--confirm-drop-staging-restore",
         ]),
       ).toThrow();
     }

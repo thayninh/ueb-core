@@ -249,6 +249,37 @@ pnpm phase6:cleanup-staging-restore -- \
   --confirm-drop-staging-restore
 ```
 
+PostgreSQL 18 cleanup chỉ chấp nhận exact
+`ueb_core_staging_restore_<SAFE_SUFFIX>`, matching lock mode `0600`, target còn
+tồn tại với owner `ueb_core_staging_owner`, và zero active restore process/zero
+active target connection. Cleanup không dùng `WITH (FORCE)` và không terminate
+session. Nếu có connection, command fail-safe; không có confirmation ngầm để
+terminate.
+
+Restricted role-admin phải khác owner/runtime/provisioner. Guarded helper
+reconcile zero owner capability, cấp đúng temporary membership `ADMIN FALSE,
+INHERIT FALSE, SET TRUE`, verify `SET ROLE`, rồi chạy ngoài transaction theo
+exact order: `SET ROLE ueb_core_staging_owner`, `DROP DATABASE` exact disposable
+target, `RESET ROLE`, revoke membership và verify `SET ROLE=NO`. Tool chứng minh
+target absent trước khi xóa matching restore-lock. PASS evidence bắt buộc:
+
+```text
+CLEANUP_CAN_SET_OWNER_ROLE_BEFORE_DROP=YES
+TEMPORARY_MEMBERSHIP_REVOKED=YES
+CLEANUP_CAN_SET_OWNER_ROLE_AFTER=NO
+ACTIVE_RESTORE_PROCESS=NO
+ACTIVE_CONNECTION_COUNT=0
+RESTORE_TARGET_EXISTS_AFTER=NO
+RESTORE_LOCK_STATUS=CLEARED
+RESTORE_CLEANUP=PASS
+```
+
+Grant/`DROP` failure giữ target và lock; helper vẫn cố `RESET ROLE` và revoke.
+Nếu revoke fail sau `DROP`, command hard-fail, target có thể absent nhưng lock
+phải được giữ để báo owner-capability residue. Không được giả PASS hoặc clear
+lock. Target đã absent cùng lock còn lại chỉ được xử lý bằng stale-lock command
+riêng bên dưới sau incident review.
+
 Nếu previous fail-safe attempt để lại lock nhưng target đã absent, không xóa
 file thủ công. Guarded recovery dưới đây chỉ PASS khi lock chứa exact disposable
 target, target không tồn tại và không có active restore process; confirmation là

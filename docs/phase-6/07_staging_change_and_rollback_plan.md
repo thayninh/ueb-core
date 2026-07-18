@@ -335,6 +335,16 @@ bởi exact guarded restore-cleanup command; absent-target stale lock dùng riê
 Operator artifact chỉ được chấp nhận khi `operator/package.json` expose exact
 command này và image-level missing-confirmation test fail-safe.
 
+PostgreSQL 18 restore cleanup dùng restricted role-admin và cùng temporary
+owner `SET ROLE` helper với restore-create. Trước mutation phải chứng minh exact
+restore namespace, matching lock, exact owner, zero active restore process và
+zero target connection. Sequence là `SET ROLE owner` → plain `DROP DATABASE`
+(không `WITH (FORCE)`) → `RESET ROLE` → revoke/verify membership → verify target
+absent → clear lock. Active connection không bị tự terminate. Grant/Drop failure
+giữ target/lock; revoke failure sau Drop giữ lock và hard-fail với capability
+residue. Source staging/canonical/UAT target bị negative guard chặn trước
+mutation.
+
 ## 8. Caddy add-only change
 
 Approved source site block là `infra/caddy/Caddyfile.ueb-core.example`; upstream

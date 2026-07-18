@@ -1,13 +1,16 @@
 import { randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
 
 import { Client } from "pg";
 
-import { createStagingRestoreDatabase } from "./lib/staging-backup";
+import {
+  cleanupStagingRestore,
+  createStagingRestoreDatabase,
+} from "./lib/staging-backup";
 import {
   bootstrapStagingDatabase,
   bootstrapStagingRole,
@@ -54,6 +57,7 @@ async function main(): Promise<void> {
   let resourcesCreated = false;
   let executionPassed = false;
   let cleanupPassed = false;
+  let guardedRestoreCleanupPassed = false;
   try {
     stage = "CONNECT_ADMIN";
     await maintenance.connect();
@@ -287,6 +291,45 @@ async function main(): Promise<void> {
       );
     }
 
+    stage = "RESTORE_CLEANUP";
+    const restoreCleanup = await cleanupStagingRestore({
+      environment,
+      targetDatabase: restoreDatabase,
+      backupPath,
+      allowTest: true,
+    });
+    const sourceFingerprintAfterCleanup = await fingerprintStaging({
+      environment,
+      allowTest: true,
+    });
+    const restoreTargetExists = (
+      await maintenance.query<{ exists: boolean }>(
+        "SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1) AS exists",
+        [restoreDatabase],
+      )
+    ).rows[0]?.exists;
+    const restoreLockExists = await readFile(restoreLockPath, "utf8").then(
+      () => true,
+      () => false,
+    );
+    if (
+      !restoreCleanup.cleanupCanSetOwnerRoleBeforeDrop ||
+      !restoreCleanup.temporaryMembershipRevoked ||
+      restoreCleanup.cleanupCanSetOwnerRoleAfter ||
+      restoreCleanup.activeRestoreProcess ||
+      restoreCleanup.activeConnectionCount !== 0 ||
+      restoreCleanup.targetExistsAfter ||
+      !restoreCleanup.restoreLockCleared ||
+      restoreTargetExists !== false ||
+      restoreLockExists ||
+      sourceFingerprintAfterCleanup.sha256 !== sourceFingerprintBefore.sha256
+    ) {
+      throw new SafePhase6StagingError(
+        "Local guarded restore cleanup evidence is invalid.",
+      );
+    }
+    guardedRestoreCleanupPassed = true;
+
     console.log("OPERATOR_COMMANDS=PASS");
     console.log("DATABASE_OWNER=ueb_core_staging_owner");
     console.log("BOOTSTRAP_CAN_SET_OWNER_ROLE=YES");
@@ -300,6 +343,12 @@ async function main(): Promise<void> {
     console.log("RESTORE_VERIFY=PASS");
     console.log("SOURCE_RESTORE_FINGERPRINT_MATCH=YES");
     console.log("SOURCE_STAGING_FINGERPRINT_UNCHANGED=YES");
+    console.log("CLEANUP_CAN_SET_OWNER_ROLE_BEFORE_DROP=YES");
+    console.log("TEMPORARY_MEMBERSHIP_REVOKED=YES");
+    console.log("CLEANUP_CAN_SET_OWNER_ROLE_AFTER=NO");
+    console.log("RESTORE_TARGET_EXISTS_AFTER=NO");
+    console.log("RESTORE_LOCK_STATUS=CLEARED");
+    console.log("RESTORE_CLEANUP=PASS");
     executionPassed = true;
   } catch (error) {
     console.log(`OPERATOR_LOCAL_STAGE=${stage}`);
@@ -322,8 +371,9 @@ async function main(): Promise<void> {
           ],
         );
       }
-      console.log("RESTORE_CLEANUP=PASS");
-      console.log("RESTORE_LOCK_CLEANUP=PASS");
+      if (guardedRestoreCleanupPassed) {
+        console.log("RESTORE_LOCK_CLEANUP=PASS");
+      }
       cleanupPassed = true;
     } catch {
       process.exitCode = 1;

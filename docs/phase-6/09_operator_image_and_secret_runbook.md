@@ -168,6 +168,16 @@ gate chạy command trong image và chứng minh thiếu
 `--confirm-clear-stale-restore-lock` fail trước mutation. Source staging
 fingerprint trước/sau phải bất biến.
 
+Restore cleanup trên PostgreSQL 18 cũng chạy bằng exact operator command
+`phase6:cleanup-staging-restore` với `--confirm-drop-staging-restore`. Tool phải
+verify exact disposable target/owner/matching lock và zero active restore/target
+connection, rồi dùng temporary membership tối thiểu `ADMIN FALSE, INHERIT
+FALSE, SET TRUE`. Exact sequence là `SET ROLE owner`, plain `DROP DATABASE`,
+`RESET ROLE`, revoke/verify owner capability, prove target absent, sau đó mới
+clear lock. Không dùng `WITH (FORCE)` hoặc tự terminate session. Drop failure
+giữ target/lock; revoke failure sau Drop giữ lock và hard-fail. Operator image
+acceptance phải chạy PostgreSQL 18 regression và local guarded cleanup evidence.
+
 ## 5. Hard stops
 
 Stop on any Git/image/checksum mismatch, secret validation failure, UAT

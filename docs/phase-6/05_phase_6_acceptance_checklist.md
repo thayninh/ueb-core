@@ -85,6 +85,10 @@ jobs produce checksum/catalog/retrieval/restore evidence.
 - [ ] Create/revoke/restore failure giữ target/lock để điều tra, không auto-drop và báo capability residue.
 - [ ] Stale-lock recovery chỉ clear exact lock khi target absent, không có active restore process và có explicit confirmation.
 - [ ] Operator package/image expose exact `phase6:clear-stale-staging-restore-lock`; missing `--confirm-clear-stale-restore-lock` fail trước mutation.
+- [ ] PostgreSQL 18 cleanup verify exact restore owner/lock, zero active restore process và zero target connection trước mutation.
+- [ ] Cleanup evidence chứng minh temporary owner `SET ROLE` trước Drop, `RESET ROLE`, revoke membership, `SET ROLE=NO`, target absent rồi mới clear lock.
+- [ ] Cleanup không dùng forced session termination; active connection fail-safe và giữ target/lock.
+- [ ] Drop failure revoke membership và giữ target/lock; revoke failure sau Drop giữ lock, hard-fail và báo capability residue.
 - [ ] Restore/cleanup commands có negative guard tests.
 
 ## 6. Deployment and smoke validation

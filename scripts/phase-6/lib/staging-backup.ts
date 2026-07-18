@@ -45,6 +45,16 @@ interface BackupMetadata {
   readonly checksum: string;
 }
 
+export interface RestoreCleanupReport {
+  readonly cleanupCanSetOwnerRoleBeforeDrop: true;
+  readonly temporaryMembershipRevoked: true;
+  readonly cleanupCanSetOwnerRoleAfter: false;
+  readonly activeRestoreProcess: false;
+  readonly activeConnectionCount: 0;
+  readonly targetExistsAfter: false;
+  readonly restoreLockCleared: true;
+}
+
 export async function backupStaging(input: {
   readonly environment: Readonly<Record<string, string | undefined>>;
   readonly outputPath: string;
@@ -443,10 +453,65 @@ export async function cleanupStagingRestore(input: {
   readonly environment: Readonly<Record<string, string | undefined>>;
   readonly targetDatabase: string;
   readonly backupPath: string;
-}): Promise<void> {
+  readonly allowTest?: boolean;
+}): Promise<RestoreCleanupReport> {
+  assertStagingRestoreDatabase(input.targetDatabase);
+  const backupPath = assertExternalArtifactPath(input.backupPath, ".dump");
+  const expectedSourceDatabase = input.allowTest
+    ? input.environment.STAGING_EXPECTED_DATABASE
+    : STAGING_DATABASE;
+  if (!expectedSourceDatabase) {
+    throw new SafePhase6StagingError(
+      "Restore cleanup source database is unavailable.",
+    );
+  }
+  parseStagingConnection({
+    value: input.environment.MIGRATION_DATABASE_URL,
+    expectedDatabase: expectedSourceDatabase,
+    expectedUser: STAGING_OWNER_ROLE,
+    environment: input.environment,
+    allowTest: input.allowTest,
+  });
+  const maintenance = await connectDatabaseAdmin(
+    input.environment,
+    "ueb-core-phase6-restore-cleanup",
+    expectedSourceDatabase,
+    input.allowTest,
+  );
+  try {
+    return await cleanupStagingRestoreWithClient({
+      client: maintenance,
+      bootstrapRole: input.environment.STAGING_AUTHORIZED_BOOTSTRAP_ROLE!,
+      targetDatabase: input.targetDatabase,
+      backupPath,
+    });
+  } finally {
+    await maintenance.end().catch(() => undefined);
+  }
+}
+
+export async function cleanupStagingRestoreWithClient(input: {
+  readonly client: ClientBase;
+  readonly bootstrapRole: string;
+  readonly targetDatabase: string;
+  readonly backupPath: string;
+}): Promise<RestoreCleanupReport> {
   assertStagingRestoreDatabase(input.targetDatabase);
   const backupPath = assertExternalArtifactPath(input.backupPath, ".dump");
   const lockPath = `${backupPath}.restore-lock`;
+  const [backupArtifact, lockArtifact] = await Promise.all([
+    stat(backupPath).catch(() => undefined),
+    stat(lockPath).catch(() => undefined),
+  ]);
+  if (
+    !backupArtifact?.isFile() ||
+    !lockArtifact?.isFile() ||
+    (lockArtifact.mode & 0o777) !== 0o600
+  ) {
+    throw new SafePhase6StagingError(
+      "Restore cleanup lock or its backup artifact is missing or unsafe.",
+    );
+  }
   const lockedTarget = await readFile(lockPath, "utf8").then(
     (value) => value.trim(),
     () => undefined,
@@ -456,41 +521,86 @@ export async function cleanupStagingRestore(input: {
       "Restore cleanup lock does not match the disposable target.",
     );
   }
-  parseStagingConnection({
-    value: input.environment.MIGRATION_DATABASE_URL,
-    expectedDatabase: STAGING_DATABASE,
-    expectedUser: STAGING_OWNER_ROLE,
-    environment: input.environment,
-  });
-  const maintenance = await connectDatabaseAdmin(
-    input.environment,
-    "ueb-core-phase6-restore-cleanup",
-  );
-  try {
-    const owner = (
-      await maintenance.query<{ owner: string }>(
-        `SELECT pg_get_userbyid(datdba) AS owner
-         FROM pg_database WHERE datname = $1`,
-        [input.targetDatabase],
-      )
-    ).rows[0]?.owner;
-    if (owner !== STAGING_OWNER_ROLE) {
-      throw new SafePhase6StagingError(
-        "Restore cleanup target is absent or has an unexpected owner.",
-      );
-    }
-    await maintenance.query(
-      `DROP DATABASE ${quoteIdentifier(input.targetDatabase)} WITH (FORCE)`,
+
+  const state = (
+    await input.client.query<{
+      owner: string | null;
+      active_restore: boolean;
+      active_connections: number;
+    }>(
+      `SELECT
+         (SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = $1) AS owner,
+         EXISTS (
+           SELECT 1 FROM pg_stat_activity
+           WHERE pid <> pg_backend_pid()
+             AND (
+               application_name = 'ueb-core-phase6-restore-create'
+               OR application_name = 'ueb-core-phase6-restore-apply:' || $1
+             )
+         ) AS active_restore,
+         (SELECT count(*)::integer FROM pg_stat_activity
+          WHERE pid <> pg_backend_pid() AND datname = $1) AS active_connections`,
+      [input.targetDatabase],
+    )
+  ).rows[0];
+  if (!state || state.owner !== STAGING_OWNER_ROLE) {
+    throw new SafePhase6StagingError(
+      "Restore cleanup target is absent or has an unexpected owner.",
     );
-  } finally {
-    await maintenance.end().catch(() => undefined);
+  }
+  if (state.active_restore || state.active_connections !== 0) {
+    throw new SafePhase6StagingError(
+      "Restore cleanup refuses active restore work or database connections.",
+    );
+  }
+
+  const membership = await withTemporaryOwnerSetRole({
+    client: input.client,
+    bootstrapRole: input.bootstrapRole,
+    ownerRole: STAGING_OWNER_ROLE,
+    operation: async () => {
+      let roleSet = false;
+      try {
+        await input.client.query(
+          `SET ROLE ${quoteIdentifier(STAGING_OWNER_ROLE)}`,
+        );
+        roleSet = true;
+        await input.client.query(
+          `DROP DATABASE ${quoteIdentifier(input.targetDatabase)}`,
+        );
+      } finally {
+        if (roleSet) await input.client.query("RESET ROLE");
+      }
+    },
+  });
+  const targetExists = (
+    await input.client.query<{ exists: boolean }>(
+      "SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1) AS exists",
+      [input.targetDatabase],
+    )
+  ).rows[0]?.exists;
+  if (targetExists !== false) {
+    throw new SafePhase6StagingError(
+      "Restore cleanup could not prove that the disposable target is absent.",
+    );
   }
   await rm(lockPath);
+  return {
+    cleanupCanSetOwnerRoleBeforeDrop: membership.canSetBeforeOperation,
+    temporaryMembershipRevoked: membership.membershipRevoked,
+    cleanupCanSetOwnerRoleAfter: membership.canSetAfterOperation,
+    activeRestoreProcess: false,
+    activeConnectionCount: 0,
+    targetExistsAfter: false,
+    restoreLockCleared: true,
+  };
 }
 
 async function connectDatabaseAdmin(
   environment: Readonly<Record<string, string | undefined>>,
   applicationName: string,
+  expectedDatabase = STAGING_DATABASE,
+  allowTest = false,
 ): Promise<Client> {
   const authorizedRole = environment.STAGING_AUTHORIZED_BOOTSTRAP_ROLE;
   if (!authorizedRole || authorizedRole === STAGING_OWNER_ROLE) {
@@ -500,9 +610,10 @@ async function connectDatabaseAdmin(
   }
   const admin = parseStagingConnection({
     value: environment.STAGING_ROLE_ADMIN_DATABASE_URL,
-    expectedDatabase: STAGING_DATABASE,
+    expectedDatabase,
     expectedUser: authorizedRole,
     environment,
+    allowTest,
   });
   const client = new Client({
     connectionString: withDatabaseName(admin.url, "postgres"),
