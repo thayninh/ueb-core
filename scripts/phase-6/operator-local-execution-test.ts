@@ -164,7 +164,7 @@ async function main(): Promise<void> {
     stage = "ACL_RECONCILIATION";
     await grantStagingRuntimePermissions({ environment, allowTest: true });
     await grantStagingProvisioningPermissions({
-      environment,
+      environment: { ...environment, DATABASE_URL: provisionerUrl },
       allowTest: true,
     });
     stage = "SECURITY_AND_FINGERPRINT";

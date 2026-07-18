@@ -1050,17 +1050,24 @@ export function assertDedicatedProvisioningConnection(
   options: { readonly allowTest?: boolean },
 ): void {
   const provisioning = parseStagingConnection({
-    value: environment.PHASE6_PROVISIONING_DATABASE_URL,
+    value: environment.DATABASE_URL,
     expectedDatabase,
     expectedUser: STAGING_PROVISIONING_ROLE,
     environment,
     allowTest: options.allowTest,
   });
-  const ownerUser = new URL(environment.MIGRATION_DATABASE_URL!).username;
-  const runtimeUser = new URL(environment.DATABASE_URL!).username;
+  const owner = parseStagingConnection({
+    value: environment.MIGRATION_DATABASE_URL,
+    expectedDatabase,
+    expectedUser: STAGING_OWNER_ROLE,
+    environment,
+    allowTest: options.allowTest,
+  });
   if (
-    provisioning.user === decodeURIComponent(ownerUser) ||
-    provisioning.user === decodeURIComponent(runtimeUser)
+    environment.APP_DATABASE_USER !== STAGING_RUNTIME_ROLE ||
+    environment.PHASE6_PROVISIONING_USER !== STAGING_PROVISIONING_ROLE ||
+    provisioning.user === owner.user ||
+    provisioning.user === STAGING_RUNTIME_ROLE
   ) {
     throw new SafePhase6StagingError(
       "Provisioning apply requires the dedicated provisioning URL.",

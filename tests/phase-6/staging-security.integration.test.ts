@@ -89,7 +89,7 @@ isolatedDescribe("Phase 6 ACL and RLS on an isolated local database", () => {
     });
     await grantStagingRuntimePermissions({ environment, allowTest: true });
     await grantStagingProvisioningPermissions({
-      environment,
+      environment: { ...environment, DATABASE_URL: provisionerUrl },
       allowTest: true,
     });
   }, 120_000);

@@ -72,7 +72,7 @@ services:
     <<: *phase6-operator
     environment:
       <<: *phase6-common-environment
-      PHASE6_PROVISIONING_DATABASE_URL: "${PHASE6_PROVISIONING_DATABASE_URL:?PHASE6_PROVISIONING_DATABASE_URL is required}"
+      DATABASE_URL: "${PHASE6_PROVISIONING_DATABASE_URL:?PHASE6_PROVISIONING_DATABASE_URL is required}"
     command:
       - pnpm
       - phase6:grant-staging-provisioning-permissions

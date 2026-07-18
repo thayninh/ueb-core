@@ -22,15 +22,15 @@ const ownerUrl = `postgresql://${STAGING_OWNER_ROLE}:owner-test-password@127.0.0
 const runtimeUrl = `postgresql://${STAGING_RUNTIME_ROLE}:runtime-test-password@127.0.0.1:55432/${database}`;
 const provisionerUrl = `postgresql://${STAGING_PROVISIONING_ROLE}:provisioner-test-password@127.0.0.1:55432/${database}`;
 
-function environment(provisioningUrl: string): Record<string, string> {
+function environment(databaseUrl: string | undefined): Record<string, string> {
   return {
     STAGING_EXPECTED_DATABASE: database,
     STAGING_MIGRATION_OWNER_ROLE: STAGING_OWNER_ROLE,
     MIGRATION_DATABASE_URL: ownerUrl,
     APP_DATABASE_USER: STAGING_RUNTIME_ROLE,
-    DATABASE_URL: runtimeUrl,
+    ...(databaseUrl ? { DATABASE_URL: databaseUrl } : {}),
     PHASE6_PROVISIONING_USER: STAGING_PROVISIONING_ROLE,
-    PHASE6_PROVISIONING_DATABASE_URL: provisioningUrl,
+    PHASE6_PROVISIONING_DATABASE_URL: provisionerUrl,
   };
 }
 
@@ -56,6 +56,46 @@ describe("Phase 6 staging ACL contracts", () => {
         { allowTest: true },
       ),
     ).not.toThrow();
+  });
+
+  it("fails closed when DATABASE_URL is missing without falling back", () => {
+    expect(() =>
+      assertDedicatedProvisioningConnection(environment(undefined), database, {
+        allowTest: true,
+      }),
+    ).toThrow("Required database connection is missing");
+  });
+
+  it("rejects a provisioner connection for any other database", () => {
+    const wrongDatabaseUrl = provisionerUrl.replace(
+      database,
+      "ueb_core_staging_test_wrong_database",
+    );
+    expect(() =>
+      assertDedicatedProvisioningConnection(
+        environment(wrongDatabaseUrl),
+        database,
+        { allowTest: true },
+      ),
+    ).toThrow("does not match the expected target");
+  });
+
+  it("maps only the dedicated provisioner secret into the provisioner job", () => {
+    const compose = readFileSync(
+      resolve(process.cwd(), "compose.staging.operator.yaml"),
+      "utf8",
+    );
+    const ownerBlock = compose
+      .split(/^  operator-owner:/mu)[1]
+      ?.split(/^  operator-runtime:/mu)[0];
+    const provisionerBlock = compose.split(/^  operator-provisioner:/mu)[1];
+    expect(provisionerBlock).toContain(
+      'DATABASE_URL: "${PHASE6_PROVISIONING_DATABASE_URL:',
+    );
+    expect(provisionerBlock).not.toMatch(
+      /^\s+PHASE6_PROVISIONING_DATABASE_URL:/mu,
+    );
+    expect(ownerBlock).not.toMatch(/PHASE6_PROVISIONING_DATABASE_URL/u);
   });
 
   it("keeps provisioning privileges at the audited Phase 5 minimum", () => {

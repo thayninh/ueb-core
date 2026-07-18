@@ -201,6 +201,12 @@ describe("Phase 6 operator image and Compose isolation", () => {
     expect(provisionerBlock).not.toMatch(
       /phase6-owner-environment|STAGING_BOOTSTRAP|STAGING_ROLE_ADMIN|STAGING_RUNTIME_PASSWORD/u,
     );
+    expect(provisionerBlock).toContain(
+      'DATABASE_URL: "${PHASE6_PROVISIONING_DATABASE_URL:',
+    );
+    expect(provisionerBlock).not.toMatch(
+      /^\s+PHASE6_PROVISIONING_DATABASE_URL:/mu,
+    );
   });
 
   it("keeps application Compose environment free of owner and provisioner URLs", async () => {

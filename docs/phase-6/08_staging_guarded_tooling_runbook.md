@@ -34,8 +34,8 @@ STAGING_AUTHORIZED_BOOTSTRAP_ROLE=<APPROVED_NON_SUPERUSER_CREATEDB_CREATEROLE_AD
 STAGING_BOOTSTRAP_DATABASE_URL=<RESTRICTED_BOOTSTRAP_URL>
 MIGRATION_DATABASE_URL=<RESTRICTED_OWNER_URL>
 STAGING_ROLE_ADMIN_DATABASE_URL=<RESTRICTED_ROLE_ADMIN_URL>
-DATABASE_URL=<RESTRICTED_RUNTIME_URL>
-PHASE6_PROVISIONING_DATABASE_URL=<RESTRICTED_PROVISIONER_URL>
+DATABASE_URL=<SERVICE_SCOPED_RUNTIME_OR_PROVISIONER_URL>
+PHASE6_PROVISIONING_DATABASE_URL=<RESTRICTED_PROVISIONER_SOURCE_URL>
 STAGING_MIGRATION_OWNER_PASSWORD=<RESTRICTED_VALUE>
 STAGING_RUNTIME_PASSWORD=<RESTRICTED_VALUE>
 STAGING_PROVISIONING_PASSWORD=<RESTRICTED_VALUE>
@@ -52,6 +52,16 @@ Production staging URLs must use the declared private database host and port
 bootstrap; app chỉ nhận `app-runtime.env`. Unit và integration test chỉ dùng
 `ueb_core_staging_test_<safe_suffix>` trên endpoint local được explicit test gate
 cho phép.
+
+`DATABASE_URL` là service-scoped, không phải fallback credential. App và
+`operator-runtime` nhận runtime URL từ `app-runtime.env`; chỉ
+`operator-provisioner` map `PHASE6_PROVISIONING_DATABASE_URL` trong
+`provisioner.env` thành container-local `DATABASE_URL`. Provisioning guard bắt
+buộc URL này authenticate đúng `ueb_core_staging_provisioner`, đúng database và
+fail trước transaction nếu thiếu hoặc dùng owner/runtime role. `operator-owner`
+không nhận provisioner URL. Provisioning ACL vẫn cần `MIGRATION_DATABASE_URL`
+riêng để owner thực hiện audited `GRANT`/`REVOKE`; giá trị đó không được dùng
+thay cho `DATABASE_URL`.
 
 ## 3. Local immutable artifact and rollback preflight
 
@@ -170,6 +180,12 @@ BOOTSTRAP_CAN_SET_OWNER_ROLE_AFTER=NO
 Role/restore bootstrap dùng distinct `STAGING_ROLE_ADMIN_DATABASE_URL` với
 `CREATEROLE`/`CREATEDB`; ACL/migrations dùng owner URL; verifier còn yêu cầu
 dedicated runtime/provisioner URLs.
+
+Credential mapping cho các one-off jobs là exact: `operator-owner` dùng owner
+env; `operator-runtime` dùng owner URL để reconcile và runtime `DATABASE_URL`;
+`operator-provisioner` dùng owner URL để reconcile và dedicated provisioner URL
+được map thành `DATABASE_URL`. Không source `app-runtime.env` vào provisioner
+container và không source `provisioner.env` vào app/owner container.
 
 ```bash
 pnpm phase6:bootstrap-staging-runtime-role -- \

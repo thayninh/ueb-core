@@ -50,6 +50,8 @@ UAT_CREDENTIAL_REUSE=NO
 - [ ] Secret store/access/rotation evidence `PASS`; tracked secrets bằng 0.
 - [ ] Guarded generator/validator xác minh directory `0700`, files `0600`, no symlink/overwrite/UAT reference.
 - [ ] App chỉ nhận runtime file; owner và provisioner URLs không có trong app environment.
+- [ ] `operator-provisioner` map dedicated provisioner secret thành service-scoped `DATABASE_URL`; missing/owner/runtime/wrong-database inputs fail trước ACL mutation.
+- [ ] `operator-owner` không nhận provisioner URL; provisioning command không fallback giữa owner/runtime/provisioner credentials.
 
 ## 4. Database safety and roles
 

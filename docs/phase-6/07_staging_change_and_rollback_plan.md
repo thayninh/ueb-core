@@ -165,6 +165,14 @@ owner/role-admin jobs; `app-runtime.env` là file duy nhất app nhận;
 `provisioner.env` chỉ được ghép vào provisioning job. Không dùng lại một
 `staging.env` tổng hợp.
 
+Compose mapping giữ exact credential classes: owner jobs dùng
+`MIGRATION_DATABASE_URL`; runtime ACL job dùng owner URL cộng runtime
+`DATABASE_URL`; provisioning ACL job dùng owner URL cộng
+`PHASE6_PROVISIONING_DATABASE_URL` từ `provisioner.env` được map thành
+container-local `DATABASE_URL`. Provisioner command fail trước transaction nếu
+mapping thiếu/sai role/sai database và không fallback sang owner hoặc runtime
+URL. App tiếp tục chỉ nhận `app-runtime.env`.
+
 ```text
 POSTGRES_DB=postgres
 POSTGRES_USER=ueb_core_staging_cluster_admin
@@ -185,8 +193,11 @@ Validate mà không render values:
 ssh -o BatchMode=yes ueb-core-staging '
   cd /opt/ueb-core
   docker compose \
+    --env-file /opt/ueb-core/config/staging-deployment.env \
     --env-file /opt/ueb-core/secrets/postgres-bootstrap.env \
+    --env-file /opt/ueb-core/secrets/database-owner.env \
     --env-file /opt/ueb-core/secrets/app-runtime.env \
+    --env-file /opt/ueb-core/secrets/provisioner.env \
     -f compose.yaml \
     -f compose.staging.yaml \
     -f compose.staging.operator.yaml \

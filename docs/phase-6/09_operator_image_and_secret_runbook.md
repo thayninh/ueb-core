@@ -101,6 +101,19 @@ Operator services are profile-gated and attach only to internal `database`.
 Owner, runtime and provisioner operations use separate Compose services so the
 app never receives owner/provisioner connections:
 
+- `operator-owner`: owner/bootstrap environment only; no runtime or provisioner
+  `DATABASE_URL`.
+- `operator-runtime`: owner URL for ACL reconciliation plus runtime
+  `DATABASE_URL` from `app-runtime.env`.
+- `operator-provisioner`: owner URL for ACL reconciliation plus
+  `PHASE6_PROVISIONING_DATABASE_URL` from `provisioner.env`, explicitly mapped
+  to its container-local `DATABASE_URL`.
+- `app`: `app-runtime.env` only; never receives owner or provisioner URL.
+
+The provisioning command does not fall back between credential classes.
+Missing `DATABASE_URL`, an owner/runtime identity, a wrong database, or an
+unsafe provisioner role fails before any ACL mutation.
+
 `postgres-bootstrap.env` starts PostgreSQL with the isolated
 `ueb_core_staging_cluster_admin` only for first-cluster initialization. The
 tracked init hook creates `ueb_core_staging_bootstrap` as `NOSUPERUSER` with
@@ -120,6 +133,21 @@ docker compose \
   pnpm phase6:bootstrap-staging-database -- \
   --expected-database=ueb_core_staging \
   --confirm-create-staging-database
+```
+
+Run the provisioning ACL job with the same split owner/provisioner inputs;
+Compose performs the explicit mapping without copying or rendering the secret
+value:
+
+```bash
+docker compose \
+  --env-file /opt/ueb-core/secrets/postgres-bootstrap.env \
+  --env-file /opt/ueb-core/secrets/database-owner.env \
+  --env-file /opt/ueb-core/secrets/provisioner.env \
+  -f compose.yaml \
+  -f compose.staging.yaml \
+  -f compose.staging.operator.yaml \
+  --profile operator run --rm operator-provisioner
 ```
 
 Continue in the exact database command order in
