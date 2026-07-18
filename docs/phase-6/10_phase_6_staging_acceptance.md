@@ -40,6 +40,17 @@ The database owner, runtime and provisioning identities are distinct:
 - application runtime: `ueb_core_staging_app`;
 - controlled provisioner: `ueb_core_staging_provisioner`.
 
+PostgreSQL 18 bootstrap used the guarded temporary `SET ROLE` path. The
+restricted bootstrap identity received only the exact temporary owner
+membership needed to create the database with the approved owner. The tool
+verified `SET ROLE` before creation, revoked its temporary membership before
+migrations, and verified that no `SET` or `INHERIT` capability remained.
+
+The dedicated provisioner URL wiring also passes. Only the provisioner job maps
+the restricted provisioning URL to its service-scoped `DATABASE_URL`; the
+application and owner jobs do not receive it, and the tooling has no fallback
+to owner, runtime or UAT credentials.
+
 Runtime and provisioner are non-owner, non-superuser and `NOBYPASSRLS`. Exact
 core, workflow, RLS helper, runtime and provisioning ACL checks pass, with zero
 provisioner excess privileges. Seven migrations are applied, zero are pending,
@@ -84,10 +95,19 @@ verification pass. The retained server backup SHA-256 is
 
 The off-host copy is retained outside the repository under the restricted Phase
 6 operator directory, has mode `0600`, and its SHA-256 sidecar verifies. Restore
-rehearsal and restore verification pass. Guarded cleanup subsequently verified
-the restore owner, zero active restore processes and connections, dropped only
-the approved restore target, revoked temporary membership, and cleared the
-matching lock. Final restore target and restore lock counts are both zero.
+rehearsal and restore verification pass. PostgreSQL 18 restore ownership used
+the same guarded temporary `SET ROLE` contract: the new restore database had the
+exact approved owner, temporary membership was revoked and zero residual owner
+capability was verified before `pg_restore`.
+
+The stale restore-lock recovery path was also verified. It can clear only the
+exact matching lock after proving that the target is absent and no restore
+process is active. Guarded PostgreSQL 18 cleanup subsequently verified the
+restore owner, zero active restore processes and target connections, obtained
+the exact temporary owner capability required for the drop, reset role, revoked
+temporary membership, and verified zero owner capability afterward. It dropped
+only the approved restore target and then cleared the matching lock. Final
+restore target and restore lock counts are both zero.
 
 ## 6. Minimal monitoring
 
@@ -165,13 +185,22 @@ gates.
 ```text
 PHASE6_STATUS=PASS
 STAGING_DEPLOYMENT=PASS
+STAGING_GIT_SHA=971c42027873f7de3140f815b06c2dddcfb61ba6
 STAGING_HTTPS=PASS
 STAGING_BACKUP=PASS
 OFF_HOST_BACKUP=PASS
 RESTORE_REHEARSAL=PASS
+RESTORE_VERIFY=PASS
 RESTORE_CLEANUP=PASS
+RESTORE_TARGET_EXISTS=NO
+RESTORE_LOCK_STATUS=CLEARED
 MONITORING_LOCAL_CHECKS=PASS
+EMAIL_ALERT_DELIVERY=BLOCKED_TRANSPORT_NOT_CONFIGURED
 STAGING_ADMIN_SMOKE=PASS
+FINAL_CORE_ROW_COUNT=0
+FINAL_WORKFLOW_EVENT_COUNT=0
+FINAL_AUTH_USER_COUNT=1
+ACTIVE_SESSION_COUNT=0
 RLS_DEFAULT_DENY=PASS
 PRODUCTION_SERVICES_HEALTH=PASS
 PRODUCTION_DEPLOYMENT=NO
