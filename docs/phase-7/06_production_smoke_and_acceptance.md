@@ -28,7 +28,7 @@ a production smoke, identity apply or deployment.
 ## 3. Mandatory smoke sequence
 
 1. Public login page renders over valid HTTPS.
-2. The test lecturer `ktpt.giangvientest@gmail.com` logs in with the secure
+2. The test lecturer `testgiangvien@vnu.edu.vn` logs in with the secure
    initial lecturer password and is forced to change it before any other route.
 3. Successful change revokes the old session; the initial password and old
    session no longer work; fresh login succeeds.
@@ -38,7 +38,7 @@ a production smoke, identity apply or deployment.
    current core row.
 6. Lecturer `create new` creates a pending submission without premature core
    insertion.
-7. Test leader `ktpt.lanhdaotest@gmail.com`, with only `KTPT` scope, rejects the
+7. Test leader `testlanhdao@vnu.edu.vn`, with only `KTPT` scope, rejects the
    approved test submission.
 8. The lecturer sees the reason, resubmits the rejected change and preserves the
    immutable history link.

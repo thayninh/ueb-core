@@ -54,8 +54,8 @@ flag to match the explicit manifest value; mismatch requires manual review.
 
 The production smoke roster includes these separate test identities:
 
-- lecturer: `ktpt.giangvientest@gmail.com`;
-- leader: `ktpt.lanhdaotest@gmail.com`.
+- lecturer: `testgiangvien@vnu.edu.vn`;
+- leader: `testlanhdao@vnu.edu.vn`.
 
 Both use the shared initial lecturer password from the secure environment. The
 test lecturer has a dedicated test-only lecturer mapping, never a real

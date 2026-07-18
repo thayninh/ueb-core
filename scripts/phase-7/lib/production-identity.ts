@@ -43,8 +43,8 @@ export const PHASE7_SECURE_INPUT_NAMES = {
   },
 } as const;
 
-export const TEST_LECTURER_EMAIL = "ktpt.giangvientest@gmail.com";
-export const TEST_LEADER_EMAIL = "ktpt.lanhdaotest@gmail.com";
+export const TEST_LECTURER_EMAIL = "testgiangvien@vnu.edu.vn";
+export const TEST_LEADER_EMAIL = "testlanhdao@vnu.edu.vn";
 
 export type ProductionIdentityIssueSeverity = "BLOCKER" | "WARNING";
 
