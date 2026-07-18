@@ -229,6 +229,18 @@ PostgreSQL entrypoint creates maintenance database/cluster admin, then the init
 script creates the restricted bootstrap role. Guarded operator bootstrap creates
 owner/target later. Command must not run for an existing or ambiguous target.
 
+Trên PostgreSQL 18, `CREATEDB` riêng lẻ không đủ để tạo database với owner khác.
+Guarded implementation dùng membership tạm thời `ADMIN FALSE, INHERIT FALSE,
+SET TRUE`, verify bằng `pg_has_role(..., 'SET')`, chạy exact `CREATE DATABASE`,
+revoke trong cả success/failure path, rồi verify database owner và bootstrap
+không còn `SET`/`INHERIT` capability. Automatic PostgreSQL 18 administrative row
+`ADMIN TRUE, SET FALSE, INHERIT FALSE` có thể còn tồn tại nhưng không cho phép
+`SET ROLE`; không có temporary access grant nào được giữ lại.
+
+Nếu cleanup capability không thể chứng minh, migrations không được chạy và
+deployment dừng để xử lý residue. Target existing/sai owner không được tự sửa;
+rollback không drop target hoặc đổi owner ngoài một authorization riêng.
+
 ### 6.2 Ordered guarded operator jobs
 
 1. Deployment/rollback preflight PASS từ immutable local artifact.

@@ -96,6 +96,10 @@ async function main(): Promise<void> {
         });
         print([
           `TARGET_DATABASE=${command.expectedDatabase}`,
+          `DATABASE_OWNER=${result.databaseOwner}`,
+          `BOOTSTRAP_CAN_SET_OWNER_ROLE=${result.bootstrapCanSetOwnerRoleBeforeCreate ? "YES" : "NO"}`,
+          `BOOTSTRAP_OWNER_MEMBERSHIP_RETAINED=${result.temporaryMembershipRevoked ? "NO" : "YES"}`,
+          `BOOTSTRAP_CAN_SET_OWNER_ROLE_AFTER=${result.bootstrapCanSetOwnerRoleAfter ? "YES" : "NO"}`,
           `MIGRATION_COUNT=${result.migrationCount}`,
           "PENDING_MIGRATIONS=0",
           "USERS_PROVISIONED=0",

@@ -55,6 +55,8 @@ UAT_CREDENTIAL_REUSE=NO
 
 - [ ] Staging database/volume là dedicated target, không phải UAT/canonical.
 - [ ] Migration owner, app runtime và provisioning role là ba identities khác nhau.
+- [ ] PostgreSQL 18 bootstrap chứng minh temporary `SET ROLE` trước `CREATE DATABASE`, exact database owner sau create, và zero bootstrap `SET`/`INHERIT` capability trước migrations.
+- [ ] Failure-path regression chứng minh temporary owner capability được revoke; cleanup không xác minh được phải hard-fail với residue rõ ràng.
 - [ ] Runtime và provisioning non-owner, non-superuser, `NOBYPASSRLS`.
 - [ ] Exact runtime/provisioning ACL reconciliation `PASS`.
 - [ ] Applied migrations không modified; failed/pending migration bằng 0.

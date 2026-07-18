@@ -141,6 +141,24 @@ isolatedDescribe("Phase 6 ACL and RLS on an isolated local database", () => {
       securityVerify: "PASS",
     });
   });
+
+  it("rejects persistent bootstrap SET ROLE membership to the owner", async () => {
+    await maintenance!.query(
+      `GRANT "${STAGING_OWNER_ROLE}" TO "${ROLE_ADMIN}" WITH INHERIT FALSE, SET TRUE`,
+    );
+    try {
+      await expect(
+        verifyStagingSecurity({
+          environment: stagingEnvironment(),
+          allowTest: true,
+        }),
+      ).rejects.toThrow("retains SET ROLE capability");
+    } finally {
+      await maintenance!.query(
+        `REVOKE "${STAGING_OWNER_ROLE}" FROM "${ROLE_ADMIN}"`,
+      );
+    }
+  });
 });
 
 function stagingEnvironment(): Record<string, string> {

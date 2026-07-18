@@ -130,6 +130,23 @@ Chỉ dùng branch này khi exact target chưa tồn tại.
 superuser/existing target, tạo exact owner/database rồi chạy `prisma migrate
 deploy` và require 7 applied migrations.
 
+PostgreSQL 18 yêu cầu identity chạy `CREATE DATABASE ... OWNER <role-khác>` có
+khả năng `SET ROLE` sang owner. Guarded bootstrap vì vậy reconcile mọi grant
+`SET`/`INHERIT` còn sót, giữ nguyên automatic administrative membership
+`ADMIN TRUE, SET FALSE, INHERIT FALSE` do PostgreSQL 18 tạo, rồi cấp một grant
+tạm thời chính xác `ADMIN FALSE, INHERIT FALSE, SET TRUE`. Tool bắt buộc chứng
+minh `pg_has_role(bootstrap, owner, 'SET')`, tạo database, revoke grant do chính
+bootstrap cấp và chứng minh lại `SET=FALSE` trước khi chạy migration. Automatic
+administrative row không cho truy cập owner và không được tính là retained owner
+access.
+
+Nếu create hoặc revoke lỗi, tool dừng trước migrations. Failure path vẫn cố
+revoke; nếu không chứng minh được zero `SET`/`INHERIT` capability, output là hard
+failure với residue rõ ràng. Retry chỉ được phép khi target vẫn absent; stale
+self-granted capability được revoke trước khi cấp lại. Existing target, target
+sai owner hoặc role collision đều fail-safe; tooling không tự `ALTER DATABASE
+OWNER`.
+
 ```bash
 pnpm phase6:bootstrap-staging-database -- \
   --expected-database=ueb_core_staging \
@@ -138,6 +155,15 @@ pnpm phase6:bootstrap-staging-database -- \
 
 Sau PASS, các job tiếp theo tiếp tục dùng `MIGRATION_DATABASE_URL` owner đã được
 sinh sẵn. Không ghi URL vào evidence.
+
+Bootstrap PASS evidence phải gồm:
+
+```text
+DATABASE_OWNER=ueb_core_staging_owner
+BOOTSTRAP_CAN_SET_OWNER_ROLE=YES
+BOOTSTRAP_OWNER_MEMBERSHIP_RETAINED=NO
+BOOTSTRAP_CAN_SET_OWNER_ROLE_AFTER=NO
+```
 
 ## 6. Roles, ACL, security and fingerprint
 

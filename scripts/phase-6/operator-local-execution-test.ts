@@ -8,7 +8,9 @@ import { promisify } from "node:util";
 import { Client } from "pg";
 
 import {
+  bootstrapStagingDatabase,
   bootstrapStagingRole,
+  ensureRestrictedStagingOwnerRole,
   fingerprintStaging,
   grantStagingProvisioningPermissions,
   grantStagingRuntimePermissions,
@@ -48,6 +50,8 @@ async function main(): Promise<void> {
     join(tmpdir(), "ueb-core-phase6-operator-"),
   );
   let resourcesCreated = false;
+  let executionPassed = false;
+  let cleanupPassed = false;
   try {
     stage = "CONNECT_ADMIN";
     await maintenance.connect();
@@ -65,20 +69,11 @@ async function main(): Promise<void> {
     );
     await createRole(
       maintenance,
-      STAGING_OWNER_ROLE,
-      ownerPassword,
-      "NOCREATEDB NOCREATEROLE",
-    );
-    resourcesCreated = true;
-    await createRole(
-      maintenance,
       roleAdmin,
       roleAdminPassword,
       "CREATEDB CREATEROLE",
     );
-    await maintenance.query(
-      `CREATE DATABASE "${database}" OWNER "${STAGING_OWNER_ROLE}"`,
-    );
+    resourcesCreated = true;
 
     const ownerUrl = roleUrl(
       sourceUrl,
@@ -110,6 +105,8 @@ async function main(): Promise<void> {
       PHASE6_TEST_DATABASE_PORT: process.env.PHASE6_TEST_DATABASE_PORT,
       STAGING_EXPECTED_DATABASE: database,
       STAGING_MIGRATION_OWNER_ROLE: STAGING_OWNER_ROLE,
+      STAGING_MIGRATION_OWNER_PASSWORD: ownerPassword,
+      STAGING_BOOTSTRAP_DATABASE_URL: roleAdminUrl,
       MIGRATION_DATABASE_URL: ownerUrl,
       APP_DATABASE_USER: STAGING_RUNTIME_ROLE,
       DATABASE_URL: runtimeUrl,
@@ -121,15 +118,38 @@ async function main(): Promise<void> {
       STAGING_PROVISIONING_PASSWORD: provisionerPassword,
     };
 
-    stage = "MIGRATE_DEPLOY";
-    await execFileAsync("pnpm", ["exec", "prisma", "migrate", "deploy"], {
-      cwd: process.cwd(),
-      env: {
-        ...process.env,
-        MIGRATION_DATABASE_URL: ownerUrl,
-        DATABASE_URL: ownerUrl,
-      },
+    stage = "PRECREATE_OWNER_AS_BOOTSTRAP";
+    const bootstrapMaintenance = new Client({
+      connectionString: withDatabaseName(roleAdminUrl, "postgres"),
+      application_name: "ueb-core-phase6-operator-owner-precondition",
     });
+    try {
+      await bootstrapMaintenance.connect();
+      await ensureRestrictedStagingOwnerRole(
+        bootstrapMaintenance,
+        ownerPassword,
+      );
+    } finally {
+      await bootstrapMaintenance.end().catch(() => undefined);
+    }
+
+    stage = "DATABASE_BOOTSTRAP";
+    const bootstrap = await bootstrapStagingDatabase({
+      environment,
+      expectedDatabase: database,
+      allowTest: true,
+    });
+    if (
+      bootstrap.databaseOwner !== STAGING_OWNER_ROLE ||
+      !bootstrap.bootstrapCanSetOwnerRoleBeforeCreate ||
+      !bootstrap.temporaryMembershipRevoked ||
+      bootstrap.bootstrapCanSetOwnerRoleAfter ||
+      bootstrap.migrationCount !== STAGING_MIGRATION_COUNT
+    ) {
+      throw new SafePhase6StagingError(
+        "Local PostgreSQL 18 ownership bootstrap evidence is invalid.",
+      );
+    }
     stage = "ROLE_BOOTSTRAP";
     await bootstrapStagingRole({
       environment,
@@ -235,11 +255,15 @@ async function main(): Promise<void> {
     }
 
     console.log("OPERATOR_COMMANDS=PASS");
+    console.log("DATABASE_OWNER=ueb_core_staging_owner");
+    console.log("BOOTSTRAP_CAN_SET_OWNER_ROLE=YES");
+    console.log("BOOTSTRAP_OWNER_MEMBERSHIP_RETAINED=NO");
+    console.log("BOOTSTRAP_CAN_SET_OWNER_ROLE_AFTER=NO");
     console.log(`MIGRATION_COUNT=${STAGING_MIGRATION_COUNT}`);
     console.log("ROLE_ACL_RLS=PASS");
     console.log("FINGERPRINT=PASS");
     console.log("BACKUP_RESTORE=PASS");
-    console.log("OPERATOR_LOCAL_EXECUTION_TEST=PASS");
+    executionPassed = true;
   } catch (error) {
     console.log(`OPERATOR_LOCAL_STAGE=${stage}`);
     fail(
@@ -248,27 +272,40 @@ async function main(): Promise<void> {
         : "Local operator execution validation failed safely.",
     );
   } finally {
-    if (resourcesCreated) {
-      await cleanup(
-        maintenance,
-        [database, restoreDatabase],
-        [
-          STAGING_RUNTIME_ROLE,
-          STAGING_PROVISIONING_ROLE,
-          STAGING_OWNER_ROLE,
-          roleAdmin,
-        ],
-      ).catch(() => undefined);
+    try {
+      if (resourcesCreated) {
+        await cleanup(
+          maintenance,
+          [database, restoreDatabase],
+          [
+            STAGING_RUNTIME_ROLE,
+            STAGING_PROVISIONING_ROLE,
+            STAGING_OWNER_ROLE,
+            roleAdmin,
+          ],
+        );
+      }
+      cleanupPassed = true;
+    } catch {
+      process.exitCode = 1;
     }
     await maintenance.end().catch(() => undefined);
     await rm(temporaryDirectory, { recursive: true, force: true });
+  }
+  if (executionPassed && cleanupPassed) {
+    console.log("DISPOSABLE_RESOURCE_CLEANUP=PASS");
+    console.log("OPERATOR_LOCAL_EXECUTION_TEST=PASS");
+  } else if (executionPassed) {
+    fail("Local operator disposable-resource cleanup failed.");
   }
 }
 
 function readIsolatedAdminUrl(
   environment: Readonly<Record<string, string | undefined>>,
 ): string {
-  const value = environment.PHASE6_TEST_ADMIN_DATABASE_URL;
+  const value =
+    environment.PHASE6_TEST_ADMIN_DATABASE_URL ??
+    environment.MIGRATION_DATABASE_URL;
   if (!value || environment.PHASE6_STAGING_INTEGRATION !== "1") {
     throw new SafePhase6StagingError(
       "Local operator test database input is missing.",

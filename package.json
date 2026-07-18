@@ -35,7 +35,7 @@
     "test:phase4:e2e": "pnpm test:phase4:lecturer:e2e && pnpm test:phase4:leader:e2e && pnpm test:phase4:approval:e2e && pnpm test:phase4:resubmission:e2e",
     "test:phase4": "pnpm test:phase4:unit && pnpm test:phase4:integration && pnpm test:phase4:e2e",
     "test:phase5:provisioning-role:integration": "PHASE5_PROVISIONING_ROLE_INTEGRATION=1 vitest run --fileParallelism=false tests/phase-5/provisioning-role.integration.test.ts",
-    "test:phase6:integration": "PHASE6_STAGING_INTEGRATION=1 vitest run --fileParallelism=false tests/phase-6/staging-security.integration.test.ts",
+    "test:phase6:integration": "PHASE6_STAGING_INTEGRATION=1 vitest run --fileParallelism=false tests/phase-6/staging-database-ownership.integration.test.ts tests/phase-6/staging-security.integration.test.ts",
     "phase4:grant-runtime-permissions": "tsx scripts/phase-4/grant-workflow-runtime-permissions.ts",
     "phase5:backup": "tsx scripts/phase-5/backup-database.ts",
     "phase5:restore-rehearsal": "tsx scripts/phase-5/restore-rehearsal.ts",

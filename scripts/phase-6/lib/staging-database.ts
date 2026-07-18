@@ -98,10 +98,26 @@ export interface StagingFingerprint {
   readonly sha256: string;
 }
 
+export interface DatabaseBootstrapReport {
+  readonly migrationCount: number;
+  readonly databaseOwner: typeof STAGING_OWNER_ROLE;
+  readonly bootstrapCanSetOwnerRoleBeforeCreate: true;
+  readonly temporaryMembershipRevoked: true;
+  readonly bootstrapCanSetOwnerRoleAfter: false;
+}
+
+interface TemporaryOwnerSetRoleReport<T> {
+  readonly value: T;
+  readonly canSetBeforeOperation: true;
+  readonly membershipRevoked: true;
+  readonly canSetAfterOperation: false;
+}
+
 export async function bootstrapStagingDatabase(input: {
   readonly environment: Readonly<Record<string, string | undefined>>;
-  readonly expectedDatabase: typeof STAGING_DATABASE;
-}): Promise<{ readonly migrationCount: number }> {
+  readonly expectedDatabase: string;
+  readonly allowTest?: boolean;
+}): Promise<DatabaseBootstrapReport> {
   const target = parseStagingConnection({
     value:
       input.environment.STAGING_BOOTSTRAP_DATABASE_URL ??
@@ -109,15 +125,19 @@ export async function bootstrapStagingDatabase(input: {
     expectedDatabase: input.expectedDatabase,
     expectedUser: undefined,
     environment: input.environment,
+    allowTest: input.allowTest,
   });
   const authorizedBootstrapRole =
     input.environment.STAGING_AUTHORIZED_BOOTSTRAP_ROLE;
   if (
-    target.user !== STAGING_OWNER_ROLE &&
-    (!authorizedBootstrapRole || target.user !== authorizedBootstrapRole)
+    !authorizedBootstrapRole ||
+    target.user !== authorizedBootstrapRole ||
+    target.user === STAGING_OWNER_ROLE ||
+    target.user === STAGING_RUNTIME_ROLE ||
+    target.user === STAGING_PROVISIONING_ROLE
   ) {
     throw new SafePhase6StagingError(
-      "Connection role is not the staging owner or authorized bootstrap role.",
+      "Connection role must be the distinct authorized staging bootstrap role.",
     );
   }
   const maintenance = new Client({
@@ -132,28 +152,45 @@ export async function bootstrapStagingDatabase(input: {
         "Bootstrap connection must be non-superuser with CREATEDB.",
       );
     }
-    const exists = await databaseExists(maintenance, STAGING_DATABASE);
+    const exists = await databaseExists(maintenance, input.expectedDatabase);
     if (exists) {
       throw new SafePhase6StagingError(
         "Staging target already exists; bootstrap refuses existing databases.",
       );
     }
-    if (target.user !== STAGING_OWNER_ROLE) {
-      if (!current.rolcreaterole) {
-        throw new SafePhase6StagingError(
-          "Authorized bootstrap role lacks required CREATEROLE capability.",
-        );
-      }
-      await createRestrictedOwnerRole(
-        maintenance,
-        input.environment.STAGING_MIGRATION_OWNER_PASSWORD,
+    if (!current.rolcreaterole) {
+      throw new SafePhase6StagingError(
+        "Authorized bootstrap role lacks required CREATEROLE capability.",
       );
-    } else {
-      await assertOwnerRoleIsRestricted(maintenance, STAGING_OWNER_ROLE);
     }
-    await maintenance.query(
-      `CREATE DATABASE ${quoteIdentifier(STAGING_DATABASE)} OWNER ${quoteIdentifier(STAGING_OWNER_ROLE)}`,
+    await ensureRestrictedStagingOwnerRole(
+      maintenance,
+      input.environment.STAGING_MIGRATION_OWNER_PASSWORD,
     );
+    const membership = await withTemporaryOwnerSetRole({
+      client: maintenance,
+      bootstrapRole: target.user,
+      ownerRole: STAGING_OWNER_ROLE,
+      operation: async () => {
+        await maintenance.query(
+          `CREATE DATABASE ${quoteIdentifier(input.expectedDatabase)} OWNER ${quoteIdentifier(STAGING_OWNER_ROLE)}`,
+        );
+      },
+    });
+    const databaseOwner = await readNamedDatabaseOwner(
+      maintenance,
+      input.expectedDatabase,
+    );
+    if (databaseOwner !== STAGING_OWNER_ROLE) {
+      throw new SafePhase6StagingError(
+        "New staging database is not owned by the exact owner role.",
+      );
+    }
+    if (!membership) {
+      throw new SafePhase6StagingError(
+        "Temporary owner membership verification is unavailable.",
+      );
+    }
   } catch (error) {
     if (error instanceof SafePhase6StagingError) throw error;
     throw new SafePhase6StagingError(
@@ -168,12 +205,127 @@ export async function bootstrapStagingDatabase(input: {
     expectedDatabase: input.expectedDatabase,
     expectedUser: STAGING_OWNER_ROLE,
     environment: input.environment,
+    allowTest: input.allowTest,
   });
-  const ownerUrl =
-    target.user === STAGING_OWNER_ROLE ? target.url : configuredOwner.url;
+  const ownerUrl = configuredOwner.url;
   await runPrismaMigrateDeploy(ownerUrl);
   const migrationCount = await verifyMigrationState(ownerUrl);
-  return { migrationCount };
+  return {
+    migrationCount,
+    databaseOwner: STAGING_OWNER_ROLE,
+    bootstrapCanSetOwnerRoleBeforeCreate: true,
+    temporaryMembershipRevoked: true,
+    bootstrapCanSetOwnerRoleAfter: false,
+  };
+}
+
+export async function withTemporaryOwnerSetRole<T>(input: {
+  readonly client: ClientBase;
+  readonly bootstrapRole: string;
+  readonly ownerRole: typeof STAGING_OWNER_ROLE;
+  readonly operation: () => Promise<T>;
+}): Promise<TemporaryOwnerSetRoleReport<T>> {
+  if (
+    input.bootstrapRole === input.ownerRole ||
+    input.bootstrapRole === STAGING_RUNTIME_ROLE ||
+    input.bootstrapRole === STAGING_PROVISIONING_ROLE
+  ) {
+    throw new SafePhase6StagingError(
+      "Bootstrap, owner, runtime and provisioner roles must remain distinct.",
+    );
+  }
+  const currentUser = (
+    await input.client.query<{ current_user: string }>("SELECT current_user")
+  ).rows[0]?.current_user;
+  if (currentUser !== input.bootstrapRole) {
+    throw new SafePhase6StagingError(
+      "Temporary membership must be managed by the authenticated bootstrap role.",
+    );
+  }
+  const bootstrap = await readRoleAttributes(input.client, input.bootstrapRole);
+  if (
+    !bootstrap?.rolcanlogin ||
+    bootstrap.rolinherit ||
+    bootstrap.rolsuper ||
+    !bootstrap.rolcreatedb ||
+    !bootstrap.rolcreaterole ||
+    bootstrap.rolreplication ||
+    bootstrap.rolbypassrls
+  ) {
+    throw new SafePhase6StagingError(
+      "Authorized bootstrap role attributes are unsafe.",
+    );
+  }
+  await assertOwnerRoleIsRestricted(input.client, input.ownerRole);
+
+  const owner = quoteIdentifier(input.ownerRole);
+  const bootstrapRole = quoteIdentifier(input.bootstrapRole);
+  await input.client.query(`REVOKE ${owner} FROM ${bootstrapRole}`);
+  await assertNoOwnerSetRoleCapability(
+    input.client,
+    input.bootstrapRole,
+    input.ownerRole,
+  );
+  await input.client.query(
+    `GRANT ${owner} TO ${bootstrapRole} WITH ADMIN FALSE, INHERIT FALSE, SET TRUE`,
+  );
+  const canSetBeforeOperation = await canSetRole(
+    input.client,
+    input.bootstrapRole,
+    input.ownerRole,
+  );
+  const exactTemporaryGrant = (
+    await input.client.query<{ count: number }>(
+      `SELECT count(*)::integer AS count
+       FROM pg_auth_members membership
+       JOIN pg_roles granted_role ON granted_role.oid = membership.roleid
+       JOIN pg_roles member_role ON member_role.oid = membership.member
+       JOIN pg_roles grantor_role ON grantor_role.oid = membership.grantor
+       WHERE granted_role.rolname = $1
+         AND member_role.rolname = $2
+         AND grantor_role.rolname = $2
+         AND membership.admin_option = false
+         AND membership.inherit_option = false
+         AND membership.set_option = true`,
+      [input.ownerRole, input.bootstrapRole],
+    )
+  ).rows[0]?.count;
+  if (!canSetBeforeOperation || exactTemporaryGrant !== 1) {
+    await input.client
+      .query(`REVOKE ${owner} FROM ${bootstrapRole}`)
+      .catch(() => undefined);
+    throw new SafePhase6StagingError(
+      "Temporary SET ROLE membership could not be proven.",
+    );
+  }
+
+  let value: T | undefined;
+  let operationError: unknown;
+  try {
+    value = await input.operation();
+  } catch (error) {
+    operationError = error;
+  }
+
+  try {
+    await input.client.query(`REVOKE ${owner} FROM ${bootstrapRole}`);
+    await assertNoOwnerSetRoleCapability(
+      input.client,
+      input.bootstrapRole,
+      input.ownerRole,
+    );
+  } catch {
+    throw new SafePhase6StagingError(
+      "Temporary SET ROLE cleanup failed; owner-access residue may remain.",
+    );
+  }
+  if (operationError) throw operationError;
+  return {
+    value: value as T,
+    canSetBeforeOperation: true,
+    membershipRevoked: true,
+    canSetAfterOperation: false,
+  };
 }
 
 export async function bootstrapStagingRole(input: {
@@ -393,6 +545,15 @@ export async function verifyStagingSecurity(input: {
       ownerClient,
       STAGING_PROVISIONING_ROLE,
     );
+    const bootstrapRole = input.environment.STAGING_AUTHORIZED_BOOTSTRAP_ROLE;
+    if (
+      !bootstrapRole ||
+      (await canSetRole(ownerClient, bootstrapRole, STAGING_OWNER_ROLE))
+    ) {
+      throw new SafePhase6StagingError(
+        "Authorized bootstrap role retains SET ROLE capability to the owner.",
+      );
+    }
     if (!runtimeAttributes || !provisionerAttributes) {
       throw new SafePhase6StagingError("Dedicated staging roles are missing.");
     }
@@ -636,6 +797,61 @@ async function readDatabaseOwner(client: ClientBase): Promise<string> {
   return row.owner;
 }
 
+async function readNamedDatabaseOwner(
+  client: ClientBase,
+  database: string,
+): Promise<string | undefined> {
+  return (
+    await client.query<{ owner: string }>(
+      `SELECT pg_get_userbyid(datdba) AS owner
+       FROM pg_database WHERE datname = $1`,
+      [database],
+    )
+  ).rows[0]?.owner;
+}
+
+async function canSetRole(
+  client: ClientBase,
+  memberRole: string,
+  targetRole: string,
+): Promise<boolean> {
+  return (
+    (
+      await client.query<{ can_set: boolean }>(
+        "SELECT pg_has_role($1, $2, 'SET') AS can_set",
+        [memberRole, targetRole],
+      )
+    ).rows[0]?.can_set ?? false
+  );
+}
+
+async function assertNoOwnerSetRoleCapability(
+  client: ClientBase,
+  memberRole: string,
+  targetRole: string,
+): Promise<void> {
+  const accessMemberships = (
+    await client.query<{ count: number }>(
+      `SELECT count(*)::integer AS count
+       FROM pg_auth_members membership
+       JOIN pg_roles granted_role ON granted_role.oid = membership.roleid
+       JOIN pg_roles member_role ON member_role.oid = membership.member
+       WHERE granted_role.rolname = $1
+         AND member_role.rolname = $2
+         AND (membership.set_option OR membership.inherit_option)`,
+      [targetRole, memberRole],
+    )
+  ).rows[0]?.count;
+  if (
+    (await canSetRole(client, memberRole, targetRole)) ||
+    accessMemberships !== 0
+  ) {
+    throw new SafePhase6StagingError(
+      "Bootstrap role retains owner SET ROLE or INHERIT capability.",
+    );
+  }
+}
+
 async function readRoleAttributes(
   client: ClientBase,
   role: string,
@@ -718,7 +934,7 @@ async function assertRoleOwnsNoObjects(
   }
 }
 
-async function createRestrictedOwnerRole(
+export async function ensureRestrictedStagingOwnerRole(
   client: ClientBase,
   password: string | undefined,
 ): Promise<void> {
@@ -747,7 +963,9 @@ async function assertOwnerRoleIsRestricted(
   const role = await readRoleAttributes(client, roleName);
   if (
     !role?.rolcanlogin ||
+    role.rolinherit ||
     role.rolsuper ||
+    role.rolcreatedb ||
     role.rolcreaterole ||
     role.rolreplication ||
     role.rolbypassrls
