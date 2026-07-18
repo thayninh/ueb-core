@@ -31,7 +31,8 @@ STAGING_MIGRATION_OWNER_ROLE=ueb_core_staging_owner
 APP_DATABASE_USER=ueb_core_staging_app
 PHASE6_PROVISIONING_USER=ueb_core_staging_provisioner
 STAGING_AUTHORIZED_BOOTSTRAP_ROLE=<APPROVED_NON_SUPERUSER_CREATEDB_CREATEROLE_ADMIN>
-MIGRATION_DATABASE_URL=<RESTRICTED_OWNER_OR_BOOTSTRAP_URL>
+STAGING_BOOTSTRAP_DATABASE_URL=<RESTRICTED_BOOTSTRAP_URL>
+MIGRATION_DATABASE_URL=<RESTRICTED_OWNER_URL>
 STAGING_ROLE_ADMIN_DATABASE_URL=<RESTRICTED_ROLE_ADMIN_URL>
 DATABASE_URL=<RESTRICTED_RUNTIME_URL>
 PHASE6_PROVISIONING_DATABASE_URL=<RESTRICTED_PROVISIONER_URL>
@@ -45,8 +46,12 @@ STAGING_TIMEZONE=Asia/Ho_Chi_Minh
 ```
 
 Production staging URLs must use the declared private database host and port
-`5432`. Unit/integration tests are limited to
-`ueb_core_staging_test_<safe_suffix>` on localhost port `55432`.
+`5432`. Các file được sinh bởi `phase6:generate-staging-secrets` được tách thành
+`postgres-bootstrap.env`, `database-owner.env`, `app-runtime.env`,
+`provisioner.env` và `monitoring.env`. Cluster-admin credential chỉ ở file
+bootstrap; app chỉ nhận `app-runtime.env`. Unit và integration test chỉ dùng
+`ueb_core_staging_test_<safe_suffix>` trên endpoint local được explicit test gate
+cho phép.
 
 ## 3. Local immutable artifact and rollback preflight
 
@@ -64,6 +69,10 @@ pnpm phase6:staging-deployment-preflight -- \
   --expected-image-id="$IMAGE_ID" \
   --image-tag="ueb-core:${GIT_SHA}" \
   --image-archive="$IMAGE_ARCHIVE_PATH" \
+  --expected-operator-image-archive-sha256="$OPERATOR_IMAGE_ARCHIVE_SHA256" \
+  --expected-operator-image-id="$OPERATOR_IMAGE_ID" \
+  --operator-image-tag="ueb-core-operator:${GIT_SHA}" \
+  --operator-image-archive="$OPERATOR_IMAGE_ARCHIVE_PATH" \
   --target-host=103.200.25.54 \
   --target-database=ueb_core_staging \
   --deployment-directory=/opt/ueb-core \
@@ -115,8 +124,9 @@ pnpm phase6:verify-staging-backup -- \
 
 ## 5. Absent-database branch: bootstrap once
 
-Chỉ dùng branch này khi exact target chưa tồn tại. `MIGRATION_DATABASE_URL` lúc
-này dùng approved bootstrap identity hoặc owner có `CREATEDB`; bootstrap từ chối
+Chỉ dùng branch này khi exact target chưa tồn tại.
+`STAGING_BOOTSTRAP_DATABASE_URL` dùng approved bootstrap identity;
+`MIGRATION_DATABASE_URL` luôn là dedicated owner. Bootstrap từ chối
 superuser/existing target, tạo exact owner/database rồi chạy `prisma migrate
 deploy` và require 7 applied migrations.
 
@@ -126,8 +136,8 @@ pnpm phase6:bootstrap-staging-database -- \
   --confirm-create-staging-database
 ```
 
-Sau PASS, thay `MIGRATION_DATABASE_URL` trong restricted process environment bằng
-dedicated owner URL. Không ghi URL vào evidence.
+Sau PASS, các job tiếp theo tiếp tục dùng `MIGRATION_DATABASE_URL` owner đã được
+sinh sẵn. Không ghi URL vào evidence.
 
 ## 6. Roles, ACL, security and fingerprint
 

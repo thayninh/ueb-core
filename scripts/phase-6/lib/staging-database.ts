@@ -103,7 +103,9 @@ export async function bootstrapStagingDatabase(input: {
   readonly expectedDatabase: typeof STAGING_DATABASE;
 }): Promise<{ readonly migrationCount: number }> {
   const target = parseStagingConnection({
-    value: input.environment.MIGRATION_DATABASE_URL,
+    value:
+      input.environment.STAGING_BOOTSTRAP_DATABASE_URL ??
+      input.environment.MIGRATION_DATABASE_URL,
     expectedDatabase: input.expectedDatabase,
     expectedUser: undefined,
     environment: input.environment,
@@ -161,11 +163,14 @@ export async function bootstrapStagingDatabase(input: {
     await maintenance.end().catch(() => undefined);
   }
 
-  const ownerUrl = replaceConnectionUser(
-    target.url,
-    STAGING_OWNER_ROLE,
-    input.environment.STAGING_MIGRATION_OWNER_PASSWORD,
-  );
+  const configuredOwner = parseStagingConnection({
+    value: input.environment.MIGRATION_DATABASE_URL,
+    expectedDatabase: input.expectedDatabase,
+    expectedUser: STAGING_OWNER_ROLE,
+    environment: input.environment,
+  });
+  const ownerUrl =
+    target.user === STAGING_OWNER_ROLE ? target.url : configuredOwner.url;
   await runPrismaMigrateDeploy(ownerUrl);
   const migrationCount = await verifyMigrationState(ownerUrl);
   return { migrationCount };
@@ -803,21 +808,6 @@ async function verifyMigrationState(ownerUrl: string): Promise<number> {
   } finally {
     await client.end().catch(() => undefined);
   }
-}
-
-function replaceConnectionUser(
-  databaseUrl: string,
-  user: string,
-  password: string | undefined,
-): string {
-  const url = new URL(databaseUrl);
-  if (decodeURIComponent(url.username) !== user) {
-    assertStrongPassword(password);
-    url.username = user;
-    url.password = password!;
-  }
-  url.pathname = `/${STAGING_DATABASE}`;
-  return url.toString();
 }
 
 function assertStrongPassword(

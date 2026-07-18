@@ -38,6 +38,9 @@ UAT_CREDENTIAL_REUSE=NO
 ```
 
 - [ ] Source commit và immutable image digest khớp approval.
+- [ ] App và operator image dùng cùng exact Git SHA; cả hai archive checksum `PASS`.
+- [ ] Operator image chạy non-root, không expose port, không chứa secret/backup/credential.
+- [ ] Operator Compose job one-off, read-only, private database network, không mount Docker socket.
 - [ ] Rollback image có schema compatibility review.
 - [ ] App chạy non-root, read-only filesystem, bounded tmpfs, dropped capabilities.
 - [ ] CPU/memory/PID limits, restart policy và log rotation hoạt động.
@@ -45,6 +48,8 @@ UAT_CREDENTIAL_REUSE=NO
 - [ ] Caddy TLS/hostname/forwarded/security headers/request limit `PASS`.
 - [ ] App environment chỉ có runtime allowlist; owner/provisioning keys vắng mặt.
 - [ ] Secret store/access/rotation evidence `PASS`; tracked secrets bằng 0.
+- [ ] Guarded generator/validator xác minh directory `0700`, files `0600`, no symlink/overwrite/UAT reference.
+- [ ] App chỉ nhận runtime file; owner và provisioner URLs không có trong app environment.
 
 ## 4. Database safety and roles
 
@@ -140,7 +145,7 @@ STAGING_AUTHORIZATION=APPROVED
 STAGING_DEPLOYMENT=NOT_PERFORMED
 DOMAIN=ueb-core.cargis.vn
 RESOURCE_PROFILE_ACCEPTED=YES_CONDITIONAL_WITH_RESOURCE_LIMITS
-STAGING_GUARDED_TOOLING_READY=YES_STATIC_NOT_EXECUTED
+STAGING_GUARDED_TOOLING_READY=YES_OPERATOR_IMAGE_AND_SPLIT_SECRETS_NOT_EXECUTED
 EXTERNAL_PROXY_NETWORK=ueb-core-proxy
 TARGET_TLS_CONFIGURATION=PENDING_EXECUTION
 MONITORING_EMAIL_DESTINATION=PENDING

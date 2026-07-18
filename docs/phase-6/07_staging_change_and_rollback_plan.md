@@ -12,7 +12,7 @@ RESOURCE_PROFILE_ACCEPTED=YES_CONDITIONAL_WITH_RESOURCE_LIMITS
 STAGING_DEPLOYMENT=NOT_PERFORMED
 SERVER_MUTATIONS=0
 DATABASE_MUTATIONS=0
-STAGING_GUARDED_TOOLING_READY=YES_STATIC_NOT_EXECUTED
+STAGING_GUARDED_TOOLING_READY=YES_OPERATOR_IMAGE_AND_SPLIT_SECRETS_NOT_EXECUTED
 EXECUTION_HARD_GATE=BLOCKED_PENDING_OPERATOR_INPUTS_AND_REHEARSAL
 ```
 
@@ -29,6 +29,7 @@ dùng raw SQL hoặc Phase 5 UAT commands.
 | Host/domain | `103.200.25.54`, `ueb-core.cargis.vn` | SSH/DNS discovery match |
 | Deployment directory | `/opt/ueb-core` | Không trùng `/opt/khtc-ueb` |
 | App image | `ueb-core:<GIT_COMMIT_SHA>` | `Dockerfile` runner dùng Node 24, non-root |
+| Operator image | `ueb-core-operator:<GIT_COMMIT_SHA>` | Node 24, pnpm, Prisma, 7 migrations và PostgreSQL 18 client; non-root, không expose port |
 | App limit | `512m`, `0.75` CPU | Override `STAGING_APP_*` defaults |
 | Database limit | `768m`, `0.75` CPU | Override `STAGING_DB_*` defaults |
 | Combined memory limit | `1280 MiB` | Không vượt approved ceiling 1280 MiB |
@@ -58,9 +59,10 @@ node --version
 export CHANGE_REF=<APPROVED_CHANGE_REFERENCE>
 export GIT_SHA="$(git rev-parse HEAD)"
 export UEB_CORE_IMAGE="ueb-core:${GIT_SHA}"
-export LOCAL_ARTIFACT_DIR=/Users/thayninh/Secure/ueb-core-phase6/images
+export UEB_CORE_OPERATOR_IMAGE="ueb-core-operator:${GIT_SHA}"
+export LOCAL_ARTIFACT_DIR="/Users/thayninh/Secure/ueb-core-phase6/images/${GIT_SHA}"
 export IMAGE_ARCHIVE_NAME="ueb-core-${GIT_SHA}.tar"
-export REMOTE_STAGING_ENV_FILE=/opt/ueb-core/secrets/staging.env
+export REMOTE_STAGING_SECRET_DIRECTORY=/opt/ueb-core/secrets
 export CADDY_NETWORK_NAME=ueb-core-proxy
 export STAGING_APP_MEMORY_LIMIT=512m
 export STAGING_APP_CPU_LIMIT=0.75
@@ -83,11 +85,15 @@ change record.
 
 ## 4. Immutable image delivery
 
-Build runner image local, record immutable image ID, save archive, checksum và
-transfer bằng SSH alias. Không tạo hoặc dùng tag `latest`.
+Trước mọi transfer, sinh và validate split secret bundle theo
+`09_operator_image_and_secret_runbook.md`. Build cả app runner và operator image
+local từ cùng clean commit, record immutable image IDs, save hai archives và
+checksums. Không tạo hoặc dùng tag `latest`; operator image không nhận secret ở
+build time.
 
 ```bash
 docker build --target runner --tag "$UEB_CORE_IMAGE" .
+docker build --file Dockerfile.operator --tag "$UEB_CORE_OPERATOR_IMAGE" .
 LOCAL_IMAGE_ID="$(docker image inspect "$UEB_CORE_IMAGE" --format '{{.Id}}')"
 test -n "$LOCAL_IMAGE_ID"
 
@@ -153,14 +159,18 @@ ssh -o BatchMode=yes ueb-core-staging '
 '
 ```
 
-Secure env phải đặt ít nhất các approved non-secret values sau cùng secret
-references/values cần thiết:
+Secure environment được tách theo least privilege. `postgres-bootstrap.env` chỉ
+khởi tạo maintenance database và bootstrap role; `database-owner.env` dùng cho
+owner/role-admin jobs; `app-runtime.env` là file duy nhất app nhận;
+`provisioner.env` chỉ được ghép vào provisioning job. Không dùng lại một
+`staging.env` tổng hợp.
 
 ```text
-POSTGRES_DB=ueb_core_staging
-POSTGRES_USER=ueb_core_staging_owner
+POSTGRES_DB=postgres
+POSTGRES_USER=ueb_core_staging_cluster_admin
 APP_DATABASE_USER=ueb_core_staging_app
 UEB_CORE_IMAGE=ueb-core:<GIT_COMMIT_SHA>
+UEB_CORE_OPERATOR_IMAGE=ueb-core-operator:<GIT_COMMIT_SHA>
 CADDY_NETWORK_NAME=ueb-core-proxy
 STAGING_DB_VOLUME_NAME=ueb-core-staging-pgdata
 STAGING_APP_MEMORY_LIMIT=512m
@@ -175,9 +185,11 @@ Validate mà không render values:
 ssh -o BatchMode=yes ueb-core-staging '
   cd /opt/ueb-core
   docker compose \
-    --env-file /opt/ueb-core/secrets/staging.env \
+    --env-file /opt/ueb-core/secrets/postgres-bootstrap.env \
+    --env-file /opt/ueb-core/secrets/app-runtime.env \
     -f compose.yaml \
     -f compose.staging.yaml \
+    -f compose.staging.operator.yaml \
     config --quiet
 '
 ```
@@ -189,11 +201,14 @@ internal `database`, và cả app/database có zero published host ports.
 
 ### 6.1 New database decision
 
-Với first deployment, PostgreSQL image có thể tạo owner
-`ueb_core_staging_owner` và database `ueb_core_staging` trên dedicated new volume
-từ `POSTGRES_USER`/`POSTGRES_DB`. Trước khi start DB, guard phải chứng minh exact
-volume chưa tồn tại và không có existing staging target. Nếu target/volume tồn
-tại, chuyển sang pre-deploy backup path; không reinitialize hoặc overwrite.
+Với first deployment, PostgreSQL image chỉ tạo maintenance database `postgres`
+và cluster admin `ueb_core_staging_cluster_admin`. Init script tracked dùng
+cluster admin để tạo `ueb_core_staging_bootstrap` thành non-superuser có
+`CREATEDB`/`CREATEROLE`; cluster-admin credential chỉ tồn tại trong
+`postgres-bootstrap.env` và không được truyền vào operator/app. Guarded bootstrap
+sau đó mới tạo exact owner/database. Trước khi start DB, guard phải chứng minh
+exact volume chưa tồn tại và không có existing staging target. Nếu target/volume
+tồn tại, dừng; không reinitialize hoặc overwrite.
 
 `phase6:bootstrap-staging-database` hiện từ chối existing/ambiguous target và chỉ
 chấp nhận exact target với explicit confirmation. Không dùng `createdb`, `psql`
@@ -203,14 +218,16 @@ authorized infrastructure step trước khi operator job kết nối private end
 ```bash
 cd /opt/ueb-core
 docker compose \
-  --env-file /opt/ueb-core/secrets/staging.env \
+  --env-file /opt/ueb-core/secrets/postgres-bootstrap.env \
+  --env-file /opt/ueb-core/secrets/app-runtime.env \
   -f compose.yaml \
   -f compose.staging.yaml \
   up -d db
 ```
 
-PostgreSQL entrypoint then creates only the approved owner/database on the new
-dedicated volume; this command must not run for an existing or ambiguous target.
+PostgreSQL entrypoint creates maintenance database/cluster admin, then the init
+script creates the restricted bootstrap role. Guarded operator bootstrap creates
+owner/target later. Command must not run for an existing or ambiguous target.
 
 ### 6.2 Ordered guarded operator jobs
 
@@ -327,12 +344,14 @@ Chỉ start app sau DB bootstrap/migrations/ACL/security/backup gates PASS:
 ssh -o BatchMode=yes ueb-core-staging '
   cd /opt/ueb-core
   docker compose \
-    --env-file /opt/ueb-core/secrets/staging.env \
+    --env-file /opt/ueb-core/secrets/postgres-bootstrap.env \
+    --env-file /opt/ueb-core/secrets/app-runtime.env \
     -f compose.yaml \
     -f compose.staging.yaml \
     up -d --no-build app
   docker compose \
-    --env-file /opt/ueb-core/secrets/staging.env \
+    --env-file /opt/ueb-core/secrets/postgres-bootstrap.env \
+    --env-file /opt/ueb-core/secrets/app-runtime.env \
     -f compose.yaml \
     -f compose.staging.yaml \
     ps
@@ -358,15 +377,16 @@ Các command dưới đây chạy trong restricted host monitoring script từ
 
 ```bash
 cd /opt/ueb-core
-export STAGING_ENV_FILE=/opt/ueb-core/secrets/staging.env
+export POSTGRES_ENV_FILE=/opt/ueb-core/secrets/postgres-bootstrap.env
+export APP_ENV_FILE=/opt/ueb-core/secrets/app-runtime.env
 export STAGING_MONITORING_EMAIL=<OPERATOR_MUST_FILL>
 test -n "$STAGING_MONITORING_EMAIL"
 
 APP_ID="$(docker compose \
-  --env-file "$STAGING_ENV_FILE" \
+  --env-file "$POSTGRES_ENV_FILE" --env-file "$APP_ENV_FILE" \
   -f compose.yaml -f compose.staging.yaml ps -q app)"
 DB_ID="$(docker compose \
-  --env-file "$STAGING_ENV_FILE" \
+  --env-file "$POSTGRES_ENV_FILE" --env-file "$APP_ENV_FILE" \
   -f compose.yaml -f compose.staging.yaml ps -q db)"
 
 docker inspect "$APP_ID" \

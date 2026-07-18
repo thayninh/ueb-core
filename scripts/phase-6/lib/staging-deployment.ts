@@ -34,6 +34,10 @@ export interface DeploymentPreflightCommand {
   readonly imageId: string;
   readonly imageTag: string;
   readonly imageArchive: string;
+  readonly operatorArchiveSha256: string;
+  readonly operatorImageId: string;
+  readonly operatorImageTag: string;
+  readonly operatorImageArchive: string;
   readonly targetHost: typeof STAGING_VPS_HOST;
   readonly targetDatabase: typeof STAGING_DATABASE;
   readonly deploymentDirectory: typeof STAGING_DEPLOYMENT_DIRECTORY;
@@ -72,6 +76,10 @@ export function parseDeploymentPreflightCommand(
     "--expected-image-id=",
     "--image-tag=",
     "--image-archive=",
+    "--expected-operator-image-archive-sha256=",
+    "--expected-operator-image-id=",
+    "--operator-image-tag=",
+    "--operator-image-archive=",
     "--target-host=",
     "--target-database=",
     "--deployment-directory=",
@@ -104,6 +112,17 @@ export function parseDeploymentPreflightCommand(
   const imageId = assertImageId(value("--expected-image-id="));
   const imageTag = value("--image-tag=");
   assertImageTag(imageTag, gitCommit);
+  const operatorArchiveSha256 = assertSha256(
+    value("--expected-operator-image-archive-sha256="),
+    "Operator image archive SHA-256",
+  );
+  const operatorImageId = assertImageId(value("--expected-operator-image-id="));
+  const operatorImageTag = value("--operator-image-tag=");
+  if (operatorImageTag !== `ueb-core-operator:${gitCommit}`) {
+    throw new SafePhase6StagingError(
+      "Operator image tag must contain the exact Git SHA.",
+    );
+  }
   const targetHost = value("--target-host=");
   const targetDatabase = value("--target-database=");
   const deploymentDirectory = value("--deployment-directory=");
@@ -129,6 +148,12 @@ export function parseDeploymentPreflightCommand(
     imageId,
     imageTag,
     imageArchive: assertOutsideRepository(value("--image-archive=")),
+    operatorArchiveSha256,
+    operatorImageId,
+    operatorImageTag,
+    operatorImageArchive: assertOutsideRepository(
+      value("--operator-image-archive="),
+    ),
     targetHost: STAGING_VPS_HOST,
     targetDatabase: STAGING_DATABASE,
     deploymentDirectory: STAGING_DEPLOYMENT_DIRECTORY,
@@ -171,11 +196,19 @@ export async function runDeploymentPreflight(input: {
     );
   }
   const archive = await stat(input.command.imageArchive).catch(() => undefined);
+  const operatorArchive = await stat(input.command.operatorImageArchive).catch(
+    () => undefined,
+  );
   const secret = await stat(input.command.secretFile).catch(() => undefined);
   const rollback = await stat(input.command.rollbackEvidence).catch(
     () => undefined,
   );
-  if (!archive?.isFile() || !secret?.isFile() || !rollback?.isFile()) {
+  if (
+    !archive?.isFile() ||
+    !operatorArchive?.isFile() ||
+    !secret?.isFile() ||
+    !rollback?.isFile()
+  ) {
     throw new SafePhase6StagingError(
       "Image, secret or rollback evidence file is missing.",
     );
@@ -187,12 +220,37 @@ export async function runDeploymentPreflight(input: {
   if (actualArchiveSha !== input.command.archiveSha256) {
     throw new SafePhase6StagingError("Image archive SHA-256 mismatch.");
   }
-  const { stdout: actualImageId } = await execFileAsync(
-    "docker",
-    ["image", "inspect", input.command.imageTag, "--format", "{{.Id}}"],
-    { cwd: process.cwd() },
+  const actualOperatorArchiveSha = await sha256File(
+    input.command.operatorImageArchive,
   );
-  if (actualImageId.trim() !== input.command.imageId) {
+  if (actualOperatorArchiveSha !== input.command.operatorArchiveSha256) {
+    throw new SafePhase6StagingError(
+      "Operator image archive SHA-256 mismatch.",
+    );
+  }
+  const [{ stdout: actualImageId }, { stdout: actualOperatorImageId }] =
+    await Promise.all([
+      execFileAsync(
+        "docker",
+        ["image", "inspect", input.command.imageTag, "--format", "{{.Id}}"],
+        { cwd: process.cwd() },
+      ),
+      execFileAsync(
+        "docker",
+        [
+          "image",
+          "inspect",
+          input.command.operatorImageTag,
+          "--format",
+          "{{.Id}}",
+        ],
+        { cwd: process.cwd() },
+      ),
+    ]);
+  if (
+    actualImageId.trim() !== input.command.imageId ||
+    actualOperatorImageId.trim() !== input.command.operatorImageId
+  ) {
     throw new SafePhase6StagingError("Docker image ID mismatch.");
   }
   const rollbackEvidence = await readFile(

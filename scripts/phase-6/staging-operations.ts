@@ -282,6 +282,8 @@ async function main(): Promise<void> {
           `TARGET_DATABASE=${command.targetDatabase}`,
           `IMAGE_ARCHIVE_SHA256=${command.archiveSha256}`,
           `IMAGE_ID=${command.imageId}`,
+          `OPERATOR_IMAGE_ARCHIVE_SHA256=${command.operatorArchiveSha256}`,
+          `OPERATOR_IMAGE_ID=${command.operatorImageId}`,
           "SSH_MUTATIONS=0",
           "STAGING_DEPLOYMENT_PREFLIGHT=PASS",
         ]);

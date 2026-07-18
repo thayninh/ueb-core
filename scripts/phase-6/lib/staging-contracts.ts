@@ -212,7 +212,14 @@ export function parseStagingConnection(input: {
   if (disposableTest) {
     if (!input.allowTest) assertProductionStagingDatabase(database);
     assertStagingTestDatabase(database);
-    if (!LOCAL_TEST_HOSTS.has(url.hostname) || url.port !== "55432") {
+    const explicitContainerTestEndpoint =
+      input.environment.PHASE6_STAGING_INTEGRATION === "1" &&
+      input.environment.PHASE6_TEST_DATABASE_HOST === url.hostname &&
+      input.environment.PHASE6_TEST_DATABASE_PORT === url.port;
+    if (
+      (!LOCAL_TEST_HOSTS.has(url.hostname) || url.port !== "55432") &&
+      !explicitContainerTestEndpoint
+    ) {
       throw new SafePhase6StagingError(
         "Disposable staging tests require the isolated local database endpoint.",
       );

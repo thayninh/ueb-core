@@ -69,6 +69,29 @@ describe("Phase 6 staging target contracts", () => {
         allowTest: true,
       }),
     ).toMatchObject({ database, host: "127.0.0.1", port: "55432" });
+    const containerUrl = `postgresql://${STAGING_OWNER_ROLE}:test-only-password@phase6-test-db:5432/${database}`;
+    expect(() =>
+      parseStagingConnection({
+        value: containerUrl,
+        expectedDatabase: database,
+        expectedUser: STAGING_OWNER_ROLE,
+        environment: {},
+        allowTest: true,
+      }),
+    ).toThrow();
+    expect(
+      parseStagingConnection({
+        value: containerUrl,
+        expectedDatabase: database,
+        expectedUser: STAGING_OWNER_ROLE,
+        environment: {
+          PHASE6_STAGING_INTEGRATION: "1",
+          PHASE6_TEST_DATABASE_HOST: "phase6-test-db",
+          PHASE6_TEST_DATABASE_PORT: "5432",
+        },
+        allowTest: true,
+      }),
+    ).toMatchObject({ database, host: "phase6-test-db", port: "5432" });
   });
 
   it("blocks a wrong production host or port", () => {
