@@ -11,6 +11,7 @@ import { getPrismaClient } from "@/lib/server/prisma";
 
 export interface ActiveSessionDto {
   readonly userId: string;
+  readonly mustChangePassword: boolean;
 }
 
 export const getActiveSession = cache(
@@ -23,8 +24,13 @@ export const getActiveSession = cache(
     });
     if (!session) return null;
 
-    const isActive = await enforceActiveProfile(session.user.id);
-    return isActive ? { userId: session.user.id } : null;
+    const profile = await enforceActiveProfile(session.user.id);
+    return profile
+      ? {
+          userId: session.user.id,
+          mustChangePassword: profile.mustChangePassword,
+        }
+      : null;
   },
 );
 
@@ -34,16 +40,26 @@ export async function requireActiveSession(): Promise<ActiveSessionDto> {
   return session;
 }
 
-async function enforceActiveProfile(userId: string): Promise<boolean> {
+export async function requireBusinessSession(): Promise<ActiveSessionDto> {
+  const session = await requireActiveSession();
+  if (session.mustChangePassword) redirect("/change-password");
+  return session;
+}
+
+async function enforceActiveProfile(
+  userId: string,
+): Promise<{ readonly mustChangePassword: boolean } | null> {
   const prisma = getPrismaClient();
 
   return prisma.$transaction(
     async (transaction) => {
       const profile = await transaction.accessProfile.findUnique({
         where: { userId },
-        select: { status: true },
+        select: { status: true, mustChangePassword: true },
       });
-      if (profile?.status === AccessProfileStatus.ACTIVE) return true;
+      if (profile?.status === AccessProfileStatus.ACTIVE) {
+        return { mustChangePassword: profile.mustChangePassword };
+      }
 
       const revokedSessions = await transaction.auth_session.deleteMany({
         where: { userId },
@@ -60,7 +76,7 @@ async function enforceActiveProfile(userId: string): Promise<boolean> {
           },
         });
       }
-      return false;
+      return null;
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
   );

@@ -130,6 +130,7 @@ export async function provisionUser(
           userId: targetUserId,
           lecturerUid: validated.lecturerUid,
           status: AccessProfileStatus.ACTIVE,
+          mustChangePassword: validated.requirePasswordChange,
           createdBy: actorUserId,
         },
       });
@@ -170,7 +171,10 @@ export async function provisionUser(
         actorUserId,
         targetUserId,
         metadata: withPhase5ProvisioningAuditContext(
-          { passwordType: "TEMPORARY_CREDENTIAL" },
+          {
+            passwordType: "TEMPORARY_CREDENTIAL",
+            passwordChangeRequired: validated.requirePasswordChange,
+          },
           options.phase5AuditContext,
         ),
       });
@@ -335,7 +339,11 @@ async function assertExistingProvisioningIsCompatible(
       }),
       transaction.accessProfile.findUnique({
         where: { userId },
-        select: { lecturerUid: true, status: true },
+        select: {
+          lecturerUid: true,
+          status: true,
+          mustChangePassword: true,
+        },
       }),
       transaction.roleAssignment.findMany({
         where: { userId, revokedAt: null },
@@ -363,6 +371,7 @@ async function assertExistingProvisioningIsCompatible(
     credentialAccounts.length === 1 &&
     credentialAccounts[0]?.password != null &&
     profile?.status === AccessProfileStatus.ACTIVE &&
+    profile.mustChangePassword === input.requirePasswordChange &&
     (input.lecturerUid === undefined ||
       profile.lecturerUid === input.lecturerUid) &&
     input.roles.every((role) => activeRoles.has(role)) &&

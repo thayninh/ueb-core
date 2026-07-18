@@ -1,6 +1,7 @@
 import "server-only";
 
 import { cache } from "react";
+import { redirect } from "next/navigation";
 
 import { AccessProfileStatus } from "@/generated/prisma/client";
 import { getActiveSession } from "@/lib/auth/session";
@@ -13,6 +14,7 @@ export const getCurrentPrincipal = cache(
   async (): Promise<Principal | null> => {
     const session = await getActiveSession();
     if (!session) return null;
+    if (session.mustChangePassword) redirect("/change-password");
 
     const profile = await getPrismaClient().accessProfile.findUnique({
       where: { userId: session.userId },

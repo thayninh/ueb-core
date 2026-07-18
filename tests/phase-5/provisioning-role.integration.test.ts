@@ -175,6 +175,7 @@ isolatedDescribe("Phase 5 provisioning role on an isolated database", () => {
         temporaryPassword: "Temporary-password-only-for-isolated-test-1!",
         roles: ["LECTURER"],
         lecturerUid: LECTURER_UID,
+        requirePasswordChange: true,
       },
       {
         auditHmacSecret: "a".repeat(32),

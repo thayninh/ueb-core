@@ -2,12 +2,17 @@ import { toNextJsHandler } from "better-auth/next-js";
 
 import { getAuth } from "@/lib/auth/server";
 import { recordLoginFailure } from "@/lib/auth/audit-writer";
+import { guardBetterAuthRequest } from "@/lib/auth/password-change-route-guard";
 
 const handlers = toNextJsHandler((request) => getAuth().handler(request));
 
-export const GET = handlers.GET;
+export async function GET(request: Request): Promise<Response> {
+  return (await guardBetterAuthRequest(request)) ?? handlers.GET(request);
+}
 
 export async function POST(request: Request): Promise<Response> {
+  const blocked = await guardBetterAuthRequest(request);
+  if (blocked) return blocked;
   if (!new URL(request.url).pathname.endsWith("/sign-in/email")) {
     return handlers.POST(request);
   }

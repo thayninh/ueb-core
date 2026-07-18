@@ -21,6 +21,7 @@ describe("controlled authentication provisioning policy", () => {
         email: "admin@example.edu",
         temporaryPassword: "short-pass",
         roles: ["ADMIN"],
+        requirePasswordChange: false,
       }),
     ).toThrow(/temporaryPassword/u);
   });
@@ -31,6 +32,7 @@ describe("controlled authentication provisioning policy", () => {
         email: " Admin@Example.edu ",
         temporaryPassword: "a-secure-temporary-password",
         roles: ["ADMIN", "ADMIN"],
+        requirePasswordChange: false,
       }),
     ).toMatchObject({
       email: "admin@example.edu",
@@ -44,6 +46,7 @@ describe("controlled authentication provisioning policy", () => {
         email: "lecturer@example.edu",
         temporaryPassword: "a-secure-temporary-password",
         roles: ["LECTURER"],
+        requirePasswordChange: true,
       }),
     ).toThrow(/LECTURER requires a lecturerUid/u);
 
@@ -52,6 +55,7 @@ describe("controlled authentication provisioning policy", () => {
         email: "leader@example.edu",
         temporaryPassword: "a-secure-temporary-password",
         roles: ["FACULTY_LEADER"],
+        requirePasswordChange: false,
       }),
     ).toThrow(/at least one organization unit/u);
 
@@ -61,6 +65,7 @@ describe("controlled authentication provisioning policy", () => {
         temporaryPassword: "a-secure-temporary-password",
         roles: ["ADMIN"],
         unitIds: [unitId],
+        requirePasswordChange: false,
       }),
     ).toThrow(/require the FACULTY_LEADER role/u);
   });
@@ -74,11 +79,13 @@ describe("controlled authentication provisioning policy", () => {
         lecturerUid,
         unitIds: [unitId, secondUnitId, unitId],
         name: " Faculty Leader ",
+        requirePasswordChange: true,
       }),
     ).toMatchObject({
       lecturerUid,
       unitIds: [unitId, secondUnitId],
       name: "Faculty Leader",
+      requirePasswordChange: true,
     });
   });
 
@@ -88,11 +95,13 @@ describe("controlled authentication provisioning policy", () => {
         email: "admin@example.edu",
         temporaryPassword: "a-secure-temporary-password",
         roles: ["ADMIN"],
+        requirePasswordChange: false,
       }),
     ).toMatchObject({
       roles: ["ADMIN"],
       unitIds: [],
       lecturerUid: undefined,
+      requirePasswordChange: false,
     });
   });
 

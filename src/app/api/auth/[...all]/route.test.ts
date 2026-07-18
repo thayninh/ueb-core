@@ -16,6 +16,9 @@ vi.mock("@/lib/auth/server", () => ({ getAuth: vi.fn() }));
 vi.mock("@/lib/auth/audit-writer", () => ({
   recordLoginFailure: mocks.recordLoginFailure,
 }));
+vi.mock("@/lib/auth/password-change-route-guard", () => ({
+  guardBetterAuthRequest: vi.fn().mockResolvedValue(null),
+}));
 
 describe("Better Auth route audit", () => {
   beforeEach(() => {

@@ -10,6 +10,8 @@ export const AUTH_AUDIT_EVENT_TYPES = [
   "USER_ENABLED",
   "USER_DISABLED",
   "PASSWORD_SET_BY_ADMIN",
+  "AUTH_PASSWORD_CHANGE_REQUIRED",
+  "AUTH_REQUIRED_PASSWORD_CHANGED",
   "ROLE_GRANTED",
   "ROLE_REVOKED",
   "UNIT_SCOPE_GRANTED",
@@ -23,7 +25,7 @@ export const AUTH_AUDIT_EVENT_TYPES = [
 export type AuthAuditEventType = (typeof AUTH_AUDIT_EVENT_TYPES)[number];
 export type AuthAuditOutcome = "SUCCESS" | "FAILED";
 export type AuthAuditMetadata = Readonly<
-  Record<string, string | number | null>
+  Record<string, string | number | boolean | null>
 >;
 
 export interface Phase5ProvisioningAuditContext {
