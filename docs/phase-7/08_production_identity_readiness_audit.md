@@ -52,18 +52,15 @@ warning requiring operator/business confirmation of the intended population.
 
 ## 3. Secure-input audit
 
-The current local workbook is inside the workspace with observed parent/file
-modes `0755/0644`. It therefore fails the Phase 7 external `0700/0600` secure
-input contract even though it is Git-ignored. It was not moved, copied or
-modified in this workstream.
+The original local workbook remains inside the workspace with observed
+parent/file modes `0755/0644`. A byte-identical copy is now held in the explicit
+external Phase 7 secure directory. That directory is `0700`; the canonical copy
+and all five operator templates are `0600`. The original was not modified.
 
-The current local environment contains none of the Phase 7 variables. Required
-inputs remain:
+The generated secret template contains these required variable names with no
+values. Operator inputs remain:
 
 ```text
-PHASE7_CANONICAL_SOURCE_FILE
-PHASE7_IDENTITY_MANIFEST_FILE
-PHASE7_IDENTITY_STATE_FILE
 PHASE7_SHARED_LECTURER_INITIAL_PASSWORD
 PHASE7_LEADER_KTPT_INITIAL_PASSWORD
 PHASE7_LEADER_QTKD_INITIAL_PASSWORD
@@ -73,9 +70,10 @@ PHASE7_LEADER_TCNH_INITIAL_PASSWORD
 PHASE7_LEADER_KTKT_INITIAL_PASSWORD
 ```
 
-An optional production-admin record may be included only in the external
-manifest. No real leader records, leader passwords, test-identity manifest or
-production target snapshot were present, so none was inferred.
+The external templates now contain six fixed leader slots and the two fixed
+test identity contracts. Their operator-controlled email/name/boolean/UUID
+fields remain empty. The target-state schema exists but remains
+`OPERATOR_INPUT_REQUIRED` with no target data.
 
 ## 4. Identity readiness
 
@@ -94,7 +92,7 @@ FACULTY_LEADER_REQUIRED_COUNT=6
 FACULTY_LEADER_INPUT_COUNT=0
 TEST_IDENTITY_REQUIRED_COUNT=2
 TEST_IDENTITY_CONFIGURED_COUNT=0
-IDENTITY_DRY_RUN=BLOCKED_SECURE_INPUTS_AND_CANONICAL_ANOMALIES
+IDENTITY_DRY_RUN=BLOCKED_OPERATOR_INPUTS
 IDENTITY_RECONCILIATION=NOT_RUN
 PRODUCTION_USER_PROVISIONING=NOT_PERFORMED
 PRODUCTION_DATABASE_CONNECTIONS=0

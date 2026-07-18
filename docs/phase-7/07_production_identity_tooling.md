@@ -1,5 +1,10 @@
 # Phase 7 production identity tooling
 
+> The split-file operator workflow in
+> `09_production_operator_identity_inputs.md` is the authoritative execution
+> path. The combined manifest/state interface below remains a lower-level typed
+> contract used by that workflow.
+
 ## 1. Scope and safety boundary
 
 The Phase 7 identity commands are offline, read-only checks. They do not import
@@ -80,11 +85,12 @@ The external manifest is a strict JSON object (`manifestVersion: 1`) containing:
 - optional `productionAdmin` with explicit email/name and
   `requirePasswordChange: false`.
 
-Password values and password-environment names are not manifest fields. Leader
-password variables are fixed by unit, preventing a manifest from redirecting
-credential lookup. Real leaders have no lecturer mapping. The test lecturer UID
-must not collide with canonical lecturer UIDs. All emails must be unique across
-real lecturer, real leader, test and optional admin identities.
+Password values are not manifest fields. Each record carries only a fixed
+`passwordSecretReference`; leader references are fixed by unit and both test
+records reference the shared lecturer key, preventing a manifest from
+redirecting credential lookup. Real leaders have no lecturer mapping. The test
+lecturer UID must not collide with canonical lecturer UIDs. All emails must be
+unique across real lecturer, real leader, test and optional admin identities.
 
 ## 5. Read-only target-state contract
 
@@ -97,7 +103,8 @@ The secure state JSON is strict and contains:
 - `canonicalCoreRowCount`;
 - all target identities with email/name, access status, nullable lecturer UID,
   forced-change flag, active role set, active unit-code set and aggregate
-  provisioning-audit count.
+  provisioning-audit count; and
+- an explicit boolean test-identity marker for every state record.
 
 Exact desired state is:
 

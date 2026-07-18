@@ -61,6 +61,34 @@ describe("Phase 7 production identity roster", () => {
     );
   });
 
+  it("applies only explicit UID-scoped email and display-name decisions", () => {
+    const lecturerUid = "11111111-1111-4111-8111-111111111111";
+    const prepared = {
+      sourceSha256: canonicalChecksum,
+      headers: Array.from({ length: 20 }, (_, index) => `column_${index}`),
+      violations: [],
+      rows: [
+        canonicalRow(2, "Lecturer A"),
+        canonicalRow(3, "Lecturer A Variant"),
+      ],
+    } as unknown as PreparedSource;
+    const audit = auditCanonicalPersonnel(prepared, {
+      approvedNonVnuLecturerUids: new Set([lecturerUid]),
+      displayNameByLecturerUid: new Map([[lecturerUid, "Lecturer A"]]),
+    });
+
+    expect(audit.identities).toHaveLength(1);
+    expect(audit.identities[0]).toMatchObject({
+      lecturerUid,
+      normalizedEmail: "lecturer@gmail.com",
+      displayName: "Lecturer A",
+    });
+    expect(audit.issues.map(({ code }) => code)).not.toContain("NON_VNU_EMAIL");
+    expect(audit.issues.map(({ code }) => code)).not.toContain(
+      "DISPLAY_NAME_AMBIGUOUS",
+    );
+  });
+
   it("builds a deterministic roster with six real leaders and two test identities", () => {
     const first = buildProductionRoster({
       canonicalAudit: canonicalAudit(),
@@ -185,6 +213,7 @@ describe("Phase 7 production identity reconciliation", () => {
         activeUnitCodes:
           identity.identityType === "FACULTY_LEADER" ? [identity.unitCode] : [],
         provisioningAuditEventCount: 1,
+        testIdentityMarker: identity.testIdentity,
       }));
     const passing = compareProductionIdentityState({
       roster,
@@ -270,18 +299,22 @@ function manifest(): ProductionIdentityManifest {
       displayName: `Leader ${index + 1}`,
       unitCode,
       requirePasswordChange: index % 2 === 0,
+      passwordSecretReference:
+        PHASE7_SECURE_INPUT_NAMES.leaderPasswords[unitCode],
     })),
     testLecturer: {
       email: TEST_LECTURER_EMAIL,
       displayName: "KTPT Test Lecturer",
       lecturerUid: "22222222-2222-4222-8222-222222222222",
       requirePasswordChange: true,
+      passwordSecretReference: PHASE7_SECURE_INPUT_NAMES.lecturerPassword,
     },
     testLeader: {
       email: TEST_LEADER_EMAIL,
       displayName: "KTPT Test Leader",
       unitCode: "KTPT",
       requirePasswordChange: true,
+      passwordSecretReference: PHASE7_SECURE_INPUT_NAMES.lecturerPassword,
     },
   };
 }

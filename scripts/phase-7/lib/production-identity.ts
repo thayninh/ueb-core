@@ -147,6 +147,13 @@ export interface CanonicalPersonnelAudit {
   };
 }
 
+export interface CanonicalPersonnelResolutionOptions {
+  readonly approvedNonVnuLecturerUids?: ReadonlySet<string>;
+  readonly replacementEmailByLecturerUid?: ReadonlyMap<string, string>;
+  readonly excludedLecturerUids?: ReadonlySet<string>;
+  readonly displayNameByLecturerUid?: ReadonlyMap<string, string>;
+}
+
 const unitCodeSchema = z.enum(PRODUCTION_UNIT_CODES);
 const normalizedEmailSchema = z.string().trim().toLowerCase().pipe(z.email());
 const displayNameSchema = z.string().trim().min(1).max(256);
@@ -157,6 +164,7 @@ const leaderManifestSchema = z
     displayName: displayNameSchema,
     unitCode: unitCodeSchema,
     requirePasswordChange: z.boolean(),
+    passwordSecretReference: z.string().regex(/^PHASE7_[A-Z0-9_]+$/u),
   })
   .strict();
 
@@ -172,6 +180,9 @@ export const productionIdentityManifestSchema = z
         displayName: displayNameSchema,
         lecturerUid: z.uuid(),
         requirePasswordChange: z.literal(true),
+        passwordSecretReference: z.literal(
+          PHASE7_SECURE_INPUT_NAMES.lecturerPassword,
+        ),
       })
       .strict(),
     testLeader: z
@@ -180,6 +191,9 @@ export const productionIdentityManifestSchema = z
         displayName: displayNameSchema,
         unitCode: z.literal("KTPT"),
         requirePasswordChange: z.literal(true),
+        passwordSecretReference: z.literal(
+          PHASE7_SECURE_INPUT_NAMES.lecturerPassword,
+        ),
       })
       .strict(),
     productionAdmin: z
@@ -207,6 +221,7 @@ const stateIdentitySchema = z
     activeRoles: z.array(z.enum(["LECTURER", "FACULTY_LEADER", "ADMIN"])),
     activeUnitCodes: z.array(unitCodeSchema),
     provisioningAuditEventCount: z.number().int().nonnegative(),
+    testIdentityMarker: z.boolean(),
   })
   .strict();
 
@@ -256,6 +271,7 @@ export function normalizeIdentityEmail(value: string): string {
 
 export function auditCanonicalPersonnel(
   prepared: PreparedSource,
+  resolutions: CanonicalPersonnelResolutionOptions = {},
 ): CanonicalPersonnelAudit {
   const issueCounts = new Map<
     string,
@@ -380,13 +396,29 @@ export function auditCanonicalPersonnel(
       addIssue("MULTIPLE_EMAILS_FOR_LECTURER", "BLOCKER");
       continue;
     }
-    const normalizedEmail = first(group.emails);
-    if (normalizedEmail.endsWith("@vnu.edu.vn")) vnuLecturerCount += 1;
+    const sourceEmail = first(group.emails);
+    if (sourceEmail.endsWith("@vnu.edu.vn")) vnuLecturerCount += 1;
     else {
       nonVnuLecturerCount += 1;
+    }
+    if (resolutions.excludedLecturerUids?.has(lecturerUid)) continue;
+    const replacementEmail =
+      resolutions.replacementEmailByLecturerUid?.get(lecturerUid);
+    const normalizedEmail = replacementEmail
+      ? normalizeIdentityEmail(replacementEmail)
+      : sourceEmail;
+    if (
+      !normalizedEmail.endsWith("@vnu.edu.vn") &&
+      !resolutions.approvedNonVnuLecturerUids?.has(lecturerUid)
+    ) {
       addIssue("NON_VNU_EMAIL", "BLOCKER");
     }
-    if (group.names.size !== 1) {
+    const selectedDisplayName =
+      resolutions.displayNameByLecturerUid?.get(lecturerUid);
+    if (
+      group.names.size !== 1 &&
+      (!selectedDisplayName || !group.names.has(selectedDisplayName))
+    ) {
       addIssue("DISPLAY_NAME_AMBIGUOUS", "BLOCKER");
       continue;
     }
@@ -394,7 +426,7 @@ export function auditCanonicalPersonnel(
       addIssue("UNIT_AMBIGUOUS", "BLOCKER");
       continue;
     }
-    const displayName = first(group.names);
+    const displayName = selectedDisplayName ?? first(group.names);
     const sourceUnit = first(group.units);
     const unitCode = sourceUnitToCode.get(sourceUnit);
     if (!unitCode) {
@@ -414,6 +446,19 @@ export function auditCanonicalPersonnel(
       identityType: "LECTURER",
       testIdentity: false,
     });
+  }
+
+  const effectiveLecturersByEmail = new Map<string, Set<string>>();
+  for (const identity of identities) {
+    const lecturerUids =
+      effectiveLecturersByEmail.get(identity.normalizedEmail) ?? new Set();
+    lecturerUids.add(identity.lecturerUid);
+    effectiveLecturersByEmail.set(identity.normalizedEmail, lecturerUids);
+  }
+  for (const lecturerUids of effectiveLecturersByEmail.values()) {
+    if (lecturerUids.size > 1) {
+      addIssue("EMAIL_ASSIGNED_TO_MULTIPLE_LECTURERS", "BLOCKER");
+    }
   }
 
   identities.sort(compareIdentities);
@@ -457,7 +502,12 @@ export function buildProductionRoster(input: {
   const leaderUnits = manifest.facultyLeaders.map(({ unitCode }) => unitCode);
   if (
     new Set(leaderUnits).size !== PRODUCTION_UNIT_CODES.length ||
-    PRODUCTION_UNIT_CODES.some((unitCode) => !leaderUnits.includes(unitCode))
+    PRODUCTION_UNIT_CODES.some((unitCode) => !leaderUnits.includes(unitCode)) ||
+    manifest.facultyLeaders.some(
+      ({ unitCode, passwordSecretReference }) =>
+        passwordSecretReference !==
+        PHASE7_SECURE_INPUT_NAMES.leaderPasswords[unitCode],
+    )
   ) {
     issues.push(issue("LEADER_UNIT_COVERAGE_INVALID", "BLOCKER"));
   }
@@ -675,7 +725,8 @@ function identityStateMatches(
     actual.lecturerUid === expectedLecturerUid &&
     actual.mustChangePassword === expected.requirePasswordChange &&
     sameStringSet(actual.activeRoles, [expectedRole]) &&
-    sameStringSet(actual.activeUnitCodes, expectedUnitCodes)
+    sameStringSet(actual.activeUnitCodes, expectedUnitCodes) &&
+    actual.testIdentityMarker === expected.testIdentity
   );
 }
 
@@ -705,7 +756,9 @@ function first(values: ReadonlySet<string>): string {
   return values.values().next().value ?? "";
 }
 
-function createSourceRowReference(rowNumbers: readonly number[]): string {
+export function createSourceRowReference(
+  rowNumbers: readonly number[],
+): string {
   const digest = createHash("sha256")
     .update(rowNumbers.join(","), "utf8")
     .digest("hex")
