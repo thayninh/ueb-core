@@ -87,6 +87,7 @@ isolatedDescribe("Phase 3 isolated authentication and RBAC integration", () => {
       name: "Phase 3 Bootstrap Administrator",
       temporaryPassword: TEST_PASSWORD,
       roles: ["ADMIN" as const],
+      requirePasswordChange: false,
     };
     bootstrapFirstExpectedStatus = (await runtimePrisma.auth_user.findUnique({
       where: { email: bootstrap.email },

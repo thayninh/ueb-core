@@ -31,6 +31,26 @@ describe("authentication proxy", () => {
     );
   });
 
+  it("requires authentication for the password-change page", () => {
+    const response = proxy(
+      new NextRequest("http://localhost:3000/change-password"),
+    );
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      "http://localhost:3000/sign-in",
+    );
+  });
+
+  it("allows a session cookie to reach password-change without a redirect loop", () => {
+    const response = proxy(
+      new NextRequest("http://localhost:3000/change-password?next=/admin", {
+        headers: { cookie: sessionCookie },
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+  });
+
   it("optimistically redirects a session cookie away from sign-in", () => {
     const response = proxy(
       new NextRequest("http://localhost:3000/sign-in", {

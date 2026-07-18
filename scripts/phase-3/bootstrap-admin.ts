@@ -23,6 +23,7 @@ async function main(): Promise<void> {
         temporaryPassword: environment.password,
         name: environment.name,
         roles: ["ADMIN"],
+        requirePasswordChange: false,
       },
       {
         auditHmacSecret: environment.auditHmacSecret,

@@ -2,13 +2,13 @@ import Link from "next/link";
 import { connection } from "next/server";
 
 import { signOutAction } from "@/app/actions/auth";
-import { requireActiveSession } from "@/lib/auth/session";
+import { requireBusinessSession } from "@/lib/auth/session";
 
 export default async function ProtectedLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   await connection();
-  await requireActiveSession();
+  await requireBusinessSession();
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">

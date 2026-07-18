@@ -103,6 +103,7 @@ export async function runControlledProvisioning(input: {
             temporaryPassword,
             roles: ["LECTURER"],
             lecturerUid: entry.lecturerUid,
+            requirePasswordChange: true,
           },
           { phase5AuditContext: auditContext, prisma },
         );

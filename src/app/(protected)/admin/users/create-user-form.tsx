@@ -52,6 +52,21 @@ export function CreateUserForm({
             ))}
           </select>
         </label>
+        <label className="text-sm font-medium text-zinc-700 dark:text-zinc-200">
+          Yêu cầu đổi mật khẩu lần đầu
+          <select
+            className="mt-2 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 dark:border-zinc-700 dark:bg-zinc-950"
+            defaultValue=""
+            name="requirePasswordChange"
+            required
+          >
+            <option disabled value="">
+              Chọn chính sách
+            </option>
+            <option value="true">Có</option>
+            <option value="false">Không</option>
+          </select>
+        </label>
       </div>
 
       <fieldset>

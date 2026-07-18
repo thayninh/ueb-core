@@ -14,6 +14,7 @@ export interface ProvisionUserInput {
   readonly unitIds?: readonly string[];
   readonly name?: string;
   readonly actorUserId?: string;
+  readonly requirePasswordChange: boolean;
 }
 
 export interface ValidatedProvisionUserInput {
@@ -24,6 +25,7 @@ export interface ValidatedProvisionUserInput {
   readonly unitIds: readonly string[];
   readonly name: string;
   readonly actorUserId?: string;
+  readonly requirePasswordChange: boolean;
 }
 
 export interface BootstrapAdminEnvironment {
@@ -60,6 +62,7 @@ const provisionUserSchema = z.object({
   unitIds: z.array(z.uuid()).optional(),
   name: z.string().trim().min(1).optional(),
   actorUserId: z.uuid().optional(),
+  requirePasswordChange: z.boolean(),
 });
 
 const bootstrapAdminEnvironmentSchema = z.object({
@@ -121,6 +124,7 @@ export function validateProvisionUserInput(
     unitIds,
     name: result.data.name ?? result.data.email,
     actorUserId: result.data.actorUserId,
+    requirePasswordChange: result.data.requirePasswordChange,
   };
 }
 

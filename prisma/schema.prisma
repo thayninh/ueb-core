@@ -181,13 +181,15 @@ model Auth_verification {
 }
 
 model AccessProfile {
-  id          String              @id @default(uuid()) @db.Uuid
-  userId      String              @unique(map: "access_profile_user_id_key") @map("user_id") @db.Uuid
-  lecturerUid String?             @unique(map: "access_profile_lecturer_uid_key") @map("lecturer_uid") @db.Uuid
-  status      AccessProfileStatus @default(PENDING_MAPPING)
-  createdAt   DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
-  createdBy   String              @map("created_by") @db.Uuid
+  id                 String              @id @default(uuid()) @db.Uuid
+  userId             String              @unique(map: "access_profile_user_id_key") @map("user_id") @db.Uuid
+  lecturerUid        String?             @unique(map: "access_profile_lecturer_uid_key") @map("lecturer_uid") @db.Uuid
+  status             AccessProfileStatus @default(PENDING_MAPPING)
+  mustChangePassword Boolean             @default(false) @map("must_change_password")
+  passwordChangedAt  DateTime?           @map("password_changed_at") @db.Timestamptz(6)
+  createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+  createdBy          String              @map("created_by") @db.Uuid
 
   user          Auth_user @relation("AccessProfileUser", fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   createdByUser Auth_user @relation("AccessProfileCreatedBy", fields: [createdBy], references: [id], onDelete: Restrict, onUpdate: Cascade)

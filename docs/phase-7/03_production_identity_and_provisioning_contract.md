@@ -37,6 +37,19 @@ No leader password is generated or inferred by repository tooling. Any leader
 credential subject to an initial-password policy must also use the same forced
 change enforcement.
 
+Every provisioning call carries an explicit `requirePasswordChange: boolean`:
+
+- production lecturers created with the shared initial password: `true`;
+- approved shared-password test lecturer and test leader: `true`;
+- each real faculty leader: explicit operator input, never inferred from role,
+  email, unit or password source; and
+- existing/bootstrap staging administrator: `false` and not modified by the
+  backward-compatible migration.
+
+The access-profile row stores `must_change_password` (default `false`) and the
+nullable `password_changed_at`. Idempotent reconciliation requires the stored
+flag to match the explicit manifest value; mismatch requires manual review.
+
 ## 3. Approved test identities
 
 The production smoke roster includes these separate test identities:
@@ -75,6 +88,12 @@ counts and stops on the first unexplained mismatch. Database provisioning uses
 the dedicated non-owner provisioner identity; application runtime and migration
 owner credentials are not fallbacks.
 
+Account creation writes the explicit forced-change flag in the same identity
+transaction. Provisioning audit metadata records only whether password change
+is required and never contains credential material. Current lecturer
+provisioning passes `true`; local bootstrap admin passes `false`. No production
+provisioning is executed by this implementation change.
+
 ### 4.3 Reconciliation
 
 After every batch and at finalization, reconcile identities, lecturer mappings,
@@ -90,6 +109,11 @@ must not delete pre-existing identities, core/workflow rows or audit history.
 After any account has authenticated or produced dependent audit/session state,
 rollback becomes disable/reconcile plus incident review, not destructive user
 deletion. Credentials are rotated if exposure is suspected.
+
+If required password change fails, the serializable application transaction
+rolls back credential update, flag/timestamp, audit insert and session deletion
+together and reports no false success. After success, every prior session is
+revoked and the user must log in with the new password.
 
 ## 5. Mass-provisioning hard stops
 
@@ -121,4 +145,7 @@ LECTURER_UID_MAPPING=EXACT_ONE_TO_ONE
 LEADER_COUNT=6
 TEST_LEADER_SCOPE=KTPT_ONLY
 MASS_PROVISIONING=NOT_AUTHORIZED
+FORCED_CHANGE_FIELD=access_profile.must_change_password
+PASSWORD_CHANGED_AT_FIELD=access_profile.password_changed_at
+PROVISIONING_FLAG=EXPLICIT
 ```

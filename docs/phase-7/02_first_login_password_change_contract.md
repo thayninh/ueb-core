@@ -17,10 +17,25 @@ Provisioning must atomically create an active identity with a server-enforced
 `must_change_password` state. The state is not controlled by a client-only flag,
 cookie claim or UI convention.
 
+The implemented state is stored on the one-to-one `access_profile` row:
+
+- `must_change_password BOOLEAN NOT NULL DEFAULT false` leaves all existing
+  users, including an existing staging administrator, unchanged by migration;
+- `password_changed_at TIMESTAMPTZ NULL` records a successful required change;
+  and
+- a missing profile/state fails closed and cannot authorize business access.
+
 While the state is active, the authenticated user may access only:
 
 - the password-change page and its narrowly scoped server action/API; and
 - logout.
+
+The canonical browser route is `/change-password`. The only Better Auth paths
+allowed for an already authenticated forced-change session are
+`/api/auth/get-session` and `/api/auth/sign-out`. Health/readiness and static
+assets remain independent of the user session. Query parameters do not extend
+the allowlist. A blocked API request returns HTTP `403` with code
+`PASSWORD_CHANGE_REQUIRED`.
 
 Every other page, API, server action and direct URL must deny or redirect to the
 password-change flow. This includes lecturer, leader, admin and workflow routes.
@@ -45,6 +60,13 @@ workflow:
 Failure must leave the account forced-change state active. No partial password,
 session or audit state may be reported as success.
 
+The implementation uses Better Auth's supported password verify/hash
+primitives inside one serializable Prisma transaction. Credential update occurs
+before the conditional flag clear; password, flag/timestamp, audit insert and
+deletion of every database session commit or roll back together. Direct Better
+Auth password change is denied while the flag is set so it cannot bypass this
+transaction. Success deletes the submitting session and requires login again.
+
 ## 4. Audit contract
 
 Audit records contain the event type, actor reference, timestamp, outcome and
@@ -54,6 +76,11 @@ evidence.
 
 Required event classes include provisioning-with-forced-change,
 password-change-success, password-change-failure and pre-change-session-revoked.
+
+The successful event is `AUTH_REQUIRED_PASSWORD_CHANGED`, with actor and target
+set to the same auth user. Metadata contains only `secretFields=NONE`,
+`sessionRevocation=ALL` and the aggregate revoked-session count. Passwords,
+hashes, cookies and request bodies are never audit inputs.
 
 ## 5. Required tests
 
@@ -74,10 +101,15 @@ The production provisioning dry-run may validate identities before this feature
 passes, but batch apply and mass provisioning are forbidden until all required
 tests pass on the authorized release.
 
+Provisioning supplies `requirePasswordChange: boolean` explicitly; it is not
+defaulted from role. Production/shared-password lecturers and both approved
+shared-password test identities use `true`; an operator supplies the explicit
+value for each real leader; bootstrap admin uses `false`.
+
 ```text
-FORCED_PASSWORD_CHANGE_IMPLEMENTED=<YES|NO>
-FORCED_PASSWORD_CHANGE_TESTS=<PASS|FAIL>
-OLD_SESSIONS_REVOKED=<YES|NO>
-PASSWORD_AUDIT_REDACTED=<YES|NO>
-MASS_PROVISIONING_ALLOWED=<YES|NO>
+FORCED_PASSWORD_CHANGE_IMPLEMENTED=YES
+FORCED_PASSWORD_CHANGE_TESTS=PASS_LOCAL
+OLD_SESSIONS_REVOKED=YES
+PASSWORD_AUDIT_REDACTED=YES
+MASS_PROVISIONING_ALLOWED=NO
 ```

@@ -10,9 +10,10 @@ export function proxy(request: NextRequest) {
     "/leader",
     "/admin",
   ].some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+  const isChangePasswordRoute = pathname === "/change-password";
   const isSignInRoute = pathname === "/sign-in";
 
-  if (isProtectedRoute && !hasSessionCookie) {
+  if ((isProtectedRoute || isChangePasswordRoute) && !hasSessionCookie) {
     return NextResponse.redirect(new URL("/sign-in", request.url));
   }
 
@@ -33,6 +34,7 @@ export const config = {
     "/lecturer/:path*",
     "/leader/:path*",
     "/admin/:path*",
+    "/change-password",
     "/sign-in",
   ],
 };

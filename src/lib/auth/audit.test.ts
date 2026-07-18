@@ -19,6 +19,8 @@ describe("authentication audit policy", () => {
       "USER_ENABLED",
       "USER_DISABLED",
       "PASSWORD_SET_BY_ADMIN",
+      "AUTH_PASSWORD_CHANGE_REQUIRED",
+      "AUTH_REQUIRED_PASSWORD_CHANGED",
       "ROLE_GRANTED",
       "ROLE_REVOKED",
       "UNIT_SCOPE_GRANTED",

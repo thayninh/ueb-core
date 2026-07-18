@@ -160,7 +160,7 @@ describe("Phase 4 workflow domain types", () => {
     const files = [
       [
         "prisma/schema.prisma",
-        "69818041f9cb17351a08b9ba70a633fb54656ef2070e3bf8ef7dc53922ccecd4",
+        "03b5724c8bb10403a206a634daddb4ed1ff0bdaf60638afade5fd0a26c52d0e3",
       ],
       [
         "prisma/migrations/20260716040000_phase_4_row_workflow_contract/migration.sql",

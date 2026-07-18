@@ -59,6 +59,7 @@ describe("admin Server Actions", () => {
     form.set("name", "Test Administrator");
     form.set("email", "test-admin@example.edu");
     form.set("temporaryPassword", "secure-temporary-password");
+    form.set("requirePasswordChange", "false");
     form.append("roles", "ADMIN");
 
     await expect(
@@ -66,7 +67,11 @@ describe("admin Server Actions", () => {
     ).resolves.toMatchObject({ status: "SUCCESS" });
     expect(mocks.requireAdmin).toHaveBeenCalledOnce();
     expect(mocks.provisionUser).toHaveBeenCalledWith(
-      expect.objectContaining({ actorUserId, roles: ["ADMIN"] }),
+      expect.objectContaining({
+        actorUserId,
+        roles: ["ADMIN"],
+        requirePasswordChange: false,
+      }),
     );
   });
 

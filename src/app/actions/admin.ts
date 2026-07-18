@@ -49,6 +49,10 @@ export async function createUserAction(
       lecturerUid: lecturerUidValue
         ? uuidSchema.parse(lecturerUidValue)
         : undefined,
+      requirePasswordChange:
+        z
+          .enum(["true", "false"])
+          .parse(formString(formData, "requirePasswordChange")) === "true",
     });
   } catch {
     return {

@@ -13,6 +13,7 @@ export default defineConfig({
       "tests/phase-4/**/*.test.{ts,tsx}",
       "tests/phase-5/**/*.test.ts",
       "tests/phase-6/**/*.test.ts",
+      "tests/phase-7/**/*.test.ts",
     ],
     setupFiles: ["./vitest.setup.ts"],
   },

@@ -11,6 +11,10 @@ PRODUCTION_ACCEPTANCE=NOT_EVALUATED
 PRODUCTION_DEPLOYMENT=NOT_PERFORMED
 ```
 
+The forced-change application contract has passed unit, local PostgreSQL
+integration and local Playwright coverage. This does not authorize or represent
+a production smoke, identity apply or deployment.
+
 ## 2. Preconditions
 
 - explicit production authorization and selected domain topology are current;
@@ -54,6 +58,14 @@ PRODUCTION_DEPLOYMENT=NOT_PERFORMED
 16. Every rollback checkpoint and the final route/application rollback path is
     either rehearsed or verified against the approved immutable artifacts.
 
+For step 2, all browser business/admin/workflow routes redirect to
+`/change-password`. Auth APIs outside `/api/auth/get-session` and
+`/api/auth/sign-out` return HTTP `403` and `PASSWORD_CHANGE_REQUIRED`. Direct
+`/api/auth/change-password` is blocked for forced users; the canonical page
+executes the atomic application service. Step 3 also verifies
+`password_changed_at`, event `AUTH_REQUIRED_PASSWORD_CHANGED`, metadata
+`secretFields=NONE`, and deletion of all database sessions before fresh login.
+
 ## 4. Identity and scope assertions
 
 - The test lecturer uses a dedicated test-only lecturer mapping.
@@ -79,6 +91,12 @@ before production acceptance.
 Evidence is redacted and aggregate. It contains no password, token, cookie,
 database URL, complete roster, personal staging-admin email, internal user ID,
 dump or raw audit/log export.
+
+Incorrect current password, confirmation mismatch, same-as-current password,
+credential update error, audit error or transaction error must keep
+`must_change_password=true` and must not report success. A successful change
+sets the flag false only after password update within the same transaction,
+then commits timestamp, audit and revoke-all together.
 
 ## 6. Future machine-readable acceptance
 
