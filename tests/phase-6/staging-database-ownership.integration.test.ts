@@ -181,6 +181,22 @@ isolatedDescribe("PostgreSQL 18 staging database ownership", () => {
         }),
       ).rejects.toThrow("target or restore activity exists");
       await admin.query(`DROP DATABASE "${RESTORE_DATABASE}"`);
+      const activeRestore = new Client({
+        connectionString: withDatabaseName(sourceUrl, "postgres"),
+        application_name: "ueb-core-phase6-restore-create",
+      });
+      await activeRestore.connect();
+      try {
+        await expect(
+          clearStaleStagingRestoreLockWithClient({
+            client: admin,
+            targetDatabase: RESTORE_DATABASE,
+            backupPath,
+          }),
+        ).rejects.toThrow("target or restore activity exists");
+      } finally {
+        await activeRestore.end();
+      }
       await clearStaleStagingRestoreLockWithClient({
         client: admin,
         targetDatabase: RESTORE_DATABASE,

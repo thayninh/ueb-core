@@ -169,6 +169,17 @@ describe("Phase 6 staging secret validation", () => {
 });
 
 describe("Phase 6 operator image and Compose isolation", () => {
+  it("exposes the exact guarded stale restore-lock recovery command", async () => {
+    const operatorPackage = JSON.parse(
+      await readFile("operator/package.json", "utf8"),
+    ) as { readonly scripts?: Readonly<Record<string, string>> };
+    expect(
+      operatorPackage.scripts?.["phase6:clear-stale-staging-restore-lock"],
+    ).toBe(
+      "tsx scripts/phase-6/staging-operations.ts clear-stale-restore-lock",
+    );
+  });
+
   it("copies an allowlisted operator source set without runtime exposure", async () => {
     const dockerfile = await readFile("Dockerfile.operator", "utf8");
     expect(dockerfile).toContain("FROM node:24-bookworm-slim");

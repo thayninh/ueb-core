@@ -332,6 +332,8 @@ latest verified backup. Không chạy cleanup cho đến khi negative tests PASS
 Restore lock còn hiệu lực cũng chặn retention. Target và lock chỉ được cleanup
 bởi exact guarded restore-cleanup command; absent-target stale lock dùng riêng
 `phase6:clear-stale-staging-restore-lock` và không thay thế incident review.
+Operator artifact chỉ được chấp nhận khi `operator/package.json` expose exact
+command này và image-level missing-confirmation test fail-safe.
 
 ## 8. Caddy add-only change
 

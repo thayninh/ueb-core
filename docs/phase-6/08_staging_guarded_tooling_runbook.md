@@ -261,6 +261,10 @@ pnpm phase6:clear-stale-staging-restore-lock -- \
   --confirm-clear-stale-restore-lock
 ```
 
+Command này phải được expose nguyên tên trong cả root `package.json` và
+`operator/package.json`; operator image availability gate phải chứng minh
+missing confirmation fail-safe trước khi image được chuyển lên staging.
+
 Restore PASS vẫn giữ target/lock cho verify. Chỉ explicit guarded cleanup được
 drop target và giải phóng lock. Backup retention không được xóa artifact đang có
 restore lock.

@@ -84,6 +84,7 @@ jobs produce checksum/catalog/retrieval/restore evidence.
 - [ ] Restore không overwrite active staging và không target UAT/canonical.
 - [ ] Create/revoke/restore failure giữ target/lock để điều tra, không auto-drop và báo capability residue.
 - [ ] Stale-lock recovery chỉ clear exact lock khi target absent, không có active restore process và có explicit confirmation.
+- [ ] Operator package/image expose exact `phase6:clear-stale-staging-restore-lock`; missing `--confirm-clear-stale-restore-lock` fail trước mutation.
 - [ ] Restore/cleanup commands có negative guard tests.
 
 ## 6. Deployment and smoke validation

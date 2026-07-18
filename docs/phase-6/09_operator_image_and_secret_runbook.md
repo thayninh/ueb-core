@@ -163,7 +163,10 @@ trước `pg_restore`. Failure giữ target/lock để investigation, không aut
 Nếu target absent nhưng lock còn lại, chỉ chạy
 `phase6:clear-stale-staging-restore-lock` với exact target/backup/confirmation;
 command phải chứng minh không có target hoặc active restore process trước khi
-xóa lock. Source staging fingerprint trước/sau phải bất biến.
+xóa lock. Exact package script phải tồn tại trong `operator/package.json`; build
+gate chạy command trong image và chứng minh thiếu
+`--confirm-clear-stale-restore-lock` fail trước mutation. Source staging
+fingerprint trước/sau phải bất biến.
 
 ## 5. Hard stops
 
