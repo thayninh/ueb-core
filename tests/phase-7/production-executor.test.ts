@@ -272,6 +272,7 @@ describe("Phase 7 executable production guards", () => {
       "phase7:bootstrap-production-target",
       "phase7:verify-production-target",
       "phase7:reconcile-production-identities",
+      "phase7:apply-production-identities",
       "phase7:backup-production-target",
       "phase7:restore-production-rehearsal",
       "phase7:cleanup-production-restore",
@@ -281,10 +282,38 @@ describe("Phase 7 executable production guards", () => {
     expect(dockerfile).toContain("scripts/phase-7 ./scripts/phase-7");
     expect(dockerfile).toContain("scripts/phase-2 ./scripts/phase-2");
     expect(dockerfile).toContain("config/phase-2 ./config/phase-2");
+    expect(dockerfile).toContain(
+      "src/lib/auth/provisioning-policy.ts ./src/lib/auth/provisioning-policy.ts",
+    );
     expect(dockerfile).toContain("UEB_CORE_SOURCE_GIT_SHA");
     expect(dockerfile).toContain("/operator/.source-git-sha");
+    expect(dockerfile).not.toMatch(/COPY\s+(?:--\S+\s+)*\.\s+/u);
+    expect(dockerfile).not.toMatch(/COPY\s+(?:--\S+\s+)*src\s+/u);
     expect(dockerfile).not.toMatch(/(?:apt-get|apk).*(?:install).*\bgit\b/u);
     expect(dockerfile).not.toMatch(/COPY\s+.*\.git/u);
+  });
+
+  it("packages the complete external source closure for identity apply", async () => {
+    const [identitySource, dockerfile] = await Promise.all([
+      readFile("scripts/phase-7/lib/production-identity.ts", "utf8"),
+      readFile("Dockerfile.operator", "utf8"),
+    ]);
+    const externalSourceImports = [
+      ...identitySource.matchAll(/from\s+"(\.\.\/\.\.\/\.\.\/src\/[^"]+)"/gu),
+    ].map((match) => match[1]);
+
+    expect(externalSourceImports).toEqual([
+      "../../../src/lib/auth/provisioning-policy",
+    ]);
+    expect(dockerfile).toContain(
+      "COPY --chown=operator:operator src/lib/auth/provisioning-policy.ts ./src/lib/auth/provisioning-policy.ts",
+    );
+
+    const policySource = await readFile(
+      "src/lib/auth/provisioning-policy.ts",
+      "utf8",
+    );
+    expect(policySource).not.toMatch(/from\s+"\.\.?\//u);
   });
 
   it("wires production database creation through temporary owner membership", async () => {

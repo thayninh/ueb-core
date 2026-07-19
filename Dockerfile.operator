@@ -32,6 +32,7 @@ COPY --chown=operator:operator scripts/phase-4/grant-workflow-runtime-permission
 COPY --chown=operator:operator scripts/phase-5/lib/provisioning-role.ts ./scripts/phase-5/lib/provisioning-role.ts
 COPY --chown=operator:operator scripts/phase-6 ./scripts/phase-6
 COPY --chown=operator:operator scripts/phase-7 ./scripts/phase-7
+COPY --chown=operator:operator src/lib/auth/provisioning-policy.ts ./src/lib/auth/provisioning-policy.ts
 
 RUN case "${UEB_CORE_SOURCE_GIT_SHA}" in \
       [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;; \

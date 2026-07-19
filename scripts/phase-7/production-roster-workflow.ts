@@ -19,6 +19,9 @@ import {
   buildProductionRoster,
   compareProductionIdentityState,
   type ProductionIdentityIssue,
+  type ProductionIdentityManifest,
+  type ProductionIdentityState,
+  type ProductionRosterResult,
 } from "./lib/production-identity";
 
 export type ProductionRosterWorkflowMode =
@@ -29,10 +32,137 @@ export interface ProductionRosterWorkflowResult {
   readonly exitCode: number;
 }
 
-class SafeProductionRosterWorkflowError extends Error {
-  constructor(readonly code: string) {
+export class SafeProductionRosterWorkflowError extends Error {
+  constructor(
+    readonly code: string,
+    readonly validation?: {
+      readonly missingInputs: readonly string[];
+      readonly blockerCodes: readonly string[];
+      readonly conflictCodes: readonly string[];
+      readonly counts: Parameters<typeof blockedReport>[4];
+    },
+  ) {
     super(code);
   }
+}
+
+export interface LoadedProductionRoster {
+  readonly roster: ProductionRosterResult;
+  readonly manifest: ProductionIdentityManifest;
+  readonly state: ProductionIdentityState;
+  readonly secrets: Readonly<Record<string, string>>;
+  readonly emailExceptionCount: number;
+  readonly ambiguityCount: number;
+}
+
+export async function loadValidatedProductionRoster(
+  secureDirectoryInput: string,
+): Promise<LoadedProductionRoster> {
+  const secureDirectory = await assertSecureDirectory(secureDirectoryInput);
+  const paths = Object.fromEntries(
+    Object.entries(PHASE7_SECURE_FILE_NAMES).map(([key, fileName]) => [
+      key,
+      join(secureDirectory, fileName),
+    ]),
+  ) as Record<keyof typeof PHASE7_SECURE_FILE_NAMES, string>;
+  await Promise.all([
+    assertSecureFile(paths.canonicalSource, 10 * 1024 * 1024),
+    assertSecureFile(paths.lecturerExceptions, 5 * 1024 * 1024),
+    assertSecureFile(paths.facultyLeaders, 5 * 1024 * 1024),
+    assertSecureFile(paths.testIdentities, 5 * 1024 * 1024),
+    assertSecureFile(paths.targetState, 5 * 1024 * 1024),
+    assertSecureFile(paths.secrets, 1024 * 1024),
+  ]);
+  const [contract, lecturerRaw, leadersRaw, testsRaw, stateRaw, secretsRaw] =
+    await Promise.all([
+      loadSourceContract(),
+      readJson(paths.lecturerExceptions),
+      readJson(paths.facultyLeaders),
+      readJson(paths.testIdentities),
+      readJson(paths.targetState),
+      readFile(paths.secrets, "utf8"),
+    ]);
+  const [lecturerExceptions, facultyLeaders, testIdentities, targetState] = [
+    parseInput(
+      lecturerExceptionFileSchema,
+      lecturerRaw,
+      "LECTURER_EXCEPTIONS_SCHEMA_INVALID",
+    ),
+    parseInput(
+      facultyLeaderFileSchema,
+      leadersRaw,
+      "FACULTY_LEADERS_SCHEMA_INVALID",
+    ),
+    parseInput(
+      testIdentityFileSchema,
+      testsRaw,
+      "TEST_IDENTITIES_SCHEMA_INVALID",
+    ),
+    parseInput(targetStateDraftSchema, stateRaw, "TARGET_STATE_SCHEMA_INVALID"),
+  ] as const;
+  const prepared = await prepareSourceFile(paths.canonicalSource, contract);
+  const expected = inspectExpectedLecturerExceptions(prepared);
+  const validated = validateOperatorInputs({
+    expected,
+    lecturerExceptions,
+    facultyLeaders,
+    testIdentities,
+    targetState,
+    secrets: parseSecretsFile(secretsRaw),
+  });
+  if (
+    validated.missingInputs.length > 0 ||
+    validated.blockerCodes.length > 0 ||
+    validated.conflictCodes.length > 0 ||
+    !validated.resolutions ||
+    !validated.manifest ||
+    !validated.state ||
+    !validated.secrets
+  ) {
+    const code =
+      validated.blockerCodes[0] ??
+      validated.missingInputs[0] ??
+      validated.conflictCodes[0] ??
+      "PRODUCTION_ROSTER_VALIDATION_BLOCKED";
+    throw new SafeProductionRosterWorkflowError(code, {
+      missingInputs: validated.missingInputs,
+      blockerCodes: validated.blockerCodes,
+      conflictCodes: validated.conflictCodes,
+      counts: {
+        emailExceptionCount: expected.nonVnu.length,
+        ambiguityCount: expected.ambiguousNames.length,
+        leaderRecordCount: facultyLeaders.records.filter(
+          ({ email, displayName, requirePasswordChange }) =>
+            email && displayName && requirePasswordChange !== null,
+        ).length,
+        testIdentityCount: [
+          testIdentities.lecturer.displayName &&
+            testIdentities.lecturer.lecturerUid,
+          testIdentities.leader.displayName,
+        ].filter(Boolean).length,
+        targetStateMode: targetState.targetMode,
+      },
+    });
+  }
+  const canonicalAudit = auditCanonicalPersonnel(
+    prepared,
+    validated.resolutions,
+  );
+  const roster = buildProductionRoster({
+    canonicalAudit,
+    manifest: validated.manifest,
+    environment: validated.secrets,
+  });
+  const blocker = roster.issues.find(({ severity }) => severity === "BLOCKER");
+  if (blocker) throw new SafeProductionRosterWorkflowError(blocker.code);
+  return {
+    roster,
+    manifest: validated.manifest,
+    state: validated.state,
+    secrets: validated.secrets,
+    emailExceptionCount: expected.nonVnu.length,
+    ambiguityCount: expected.ambiguousNames.length,
+  };
 }
 
 export async function runProductionRosterWorkflow(input: {
@@ -43,105 +173,11 @@ export async function runProductionRosterWorkflow(input: {
     return blockedReport(input.mode, ["PHASE7_SECURE_DIRECTORY"], [], []);
   }
   try {
-    const secureDirectory = await assertSecureDirectory(input.secureDirectory);
-    const paths = Object.fromEntries(
-      Object.entries(PHASE7_SECURE_FILE_NAMES).map(([key, fileName]) => [
-        key,
-        join(secureDirectory, fileName),
-      ]),
-    ) as Record<keyof typeof PHASE7_SECURE_FILE_NAMES, string>;
-    await Promise.all([
-      assertSecureFile(paths.canonicalSource, 10 * 1024 * 1024),
-      assertSecureFile(paths.lecturerExceptions, 5 * 1024 * 1024),
-      assertSecureFile(paths.facultyLeaders, 5 * 1024 * 1024),
-      assertSecureFile(paths.testIdentities, 5 * 1024 * 1024),
-      assertSecureFile(paths.targetState, 5 * 1024 * 1024),
-      assertSecureFile(paths.secrets, 1024 * 1024),
-    ]);
-    const [contract, lecturerRaw, leadersRaw, testsRaw, stateRaw, secretsRaw] =
-      await Promise.all([
-        loadSourceContract(),
-        readJson(paths.lecturerExceptions),
-        readJson(paths.facultyLeaders),
-        readJson(paths.testIdentities),
-        readJson(paths.targetState),
-        readFile(paths.secrets, "utf8"),
-      ]);
-    const [lecturerExceptions, facultyLeaders, testIdentities, targetState] = [
-      parseInput(
-        lecturerExceptionFileSchema,
-        lecturerRaw,
-        "LECTURER_EXCEPTIONS_SCHEMA_INVALID",
-      ),
-      parseInput(
-        facultyLeaderFileSchema,
-        leadersRaw,
-        "FACULTY_LEADERS_SCHEMA_INVALID",
-      ),
-      parseInput(
-        testIdentityFileSchema,
-        testsRaw,
-        "TEST_IDENTITIES_SCHEMA_INVALID",
-      ),
-      parseInput(
-        targetStateDraftSchema,
-        stateRaw,
-        "TARGET_STATE_SCHEMA_INVALID",
-      ),
-    ] as const;
-    const prepared = await prepareSourceFile(paths.canonicalSource, contract);
-    const expected = inspectExpectedLecturerExceptions(prepared);
-    const validated = validateOperatorInputs({
-      expected,
-      lecturerExceptions,
-      facultyLeaders,
-      testIdentities,
-      targetState,
-      secrets: parseSecretsFile(secretsRaw),
-    });
-    if (
-      validated.missingInputs.length > 0 ||
-      validated.blockerCodes.length > 0 ||
-      validated.conflictCodes.length > 0 ||
-      !validated.resolutions ||
-      !validated.manifest ||
-      !validated.state ||
-      !validated.secrets
-    ) {
-      return blockedReport(
-        input.mode,
-        validated.missingInputs,
-        validated.blockerCodes,
-        validated.conflictCodes,
-        {
-          emailExceptionCount: expected.nonVnu.length,
-          ambiguityCount: expected.ambiguousNames.length,
-          leaderRecordCount: facultyLeaders.records.filter(
-            ({ email, displayName, requirePasswordChange }) =>
-              email && displayName && requirePasswordChange !== null,
-          ).length,
-          testIdentityCount: [
-            testIdentities.lecturer.displayName &&
-              testIdentities.lecturer.lecturerUid,
-            testIdentities.leader.displayName,
-          ].filter(Boolean).length,
-          targetStateMode: targetState.targetMode,
-        },
-      );
-    }
-
-    const canonicalAudit = auditCanonicalPersonnel(
-      prepared,
-      validated.resolutions,
-    );
-    const roster = buildProductionRoster({
-      canonicalAudit,
-      manifest: validated.manifest,
-      environment: validated.secrets,
-    });
+    const loaded = await loadValidatedProductionRoster(input.secureDirectory);
+    const { roster } = loaded;
     const comparison = compareProductionIdentityState({
       roster,
-      state: validated.state,
+      state: loaded.state,
       mode: input.mode === "RECONCILE" ? "RECONCILE" : "DRY_RUN",
     });
     const issues = mergeIssues([...roster.issues, ...comparison.issues]);
@@ -149,7 +185,7 @@ export async function runProductionRosterWorkflow(input: {
       .filter(({ severity }) => severity === "BLOCKER")
       .reduce((total, issue) => total + issue.count, 0);
     const stateEmails = new Set(
-      validated.state.identities.map(({ email }) => email),
+      loaded.state.identities.map(({ email }) => email),
     );
     const creates = roster.identities.filter(
       ({ normalizedEmail }) => !stateEmails.has(normalizedEmail),
@@ -158,10 +194,10 @@ export async function runProductionRosterWorkflow(input: {
       report: [
         `MODE=${input.mode}`,
         `STATUS=${blockerCount === 0 ? "PASS" : "BLOCKED"}`,
-        `TARGET_STATE_MODE=${validated.state.targetMode}`,
+        `TARGET_STATE_MODE=${loaded.state.targetMode}`,
         `MANIFEST_SHA256=${roster.rosterSha256}`,
-        `LECTURER_EXCEPTION_COUNT=${expected.nonVnu.length}`,
-        `AMBIGUITY_GROUP_COUNT=${expected.ambiguousNames.length}`,
+        `LECTURER_EXCEPTION_COUNT=${loaded.emailExceptionCount}`,
+        `AMBIGUITY_GROUP_COUNT=${loaded.ambiguityCount}`,
         `LEADER_RECORD_COUNT=${roster.counts.facultyLeader}`,
         `TEST_IDENTITY_COUNT=${roster.counts.testIdentity}`,
         `CREATE_COUNT=${comparison.createPlannedCount}`,
@@ -182,6 +218,18 @@ export async function runProductionRosterWorkflow(input: {
       exitCode: blockerCount === 0 ? 0 : 2,
     };
   } catch (error) {
+    if (
+      error instanceof SafeProductionRosterWorkflowError &&
+      error.validation
+    ) {
+      return blockedReport(
+        input.mode,
+        error.validation.missingInputs,
+        error.validation.blockerCodes,
+        error.validation.conflictCodes,
+        error.validation.counts,
+      );
+    }
     const code =
       error instanceof SafeProductionRosterWorkflowError
         ? error.code

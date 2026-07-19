@@ -7,16 +7,16 @@
 
 ## 1. Scope and safety boundary
 
-The Phase 7 identity commands are offline, read-only checks. They do not import
-the application database client, open a database connection, create an account,
-or write a roster/report. Both commands consume operator-controlled files
-outside the repository and emit only aggregate counts, checksums and stable
-issue codes.
+The Phase 7 roster build, validation, dry-run and reconciliation commands are
+offline, read-only checks. They do not import the application database client,
+open a database connection, create an account, or write a roster/report. They
+consume operator-controlled files outside the repository and emit only
+aggregate counts, checksums and stable issue codes.
 
 ```text
 PRODUCTION_CONNECTIONS=0
 PRODUCTION_WRITES=0
-PROVISIONING_APPLY=NOT_IMPLEMENTED_BY_THESE_COMMANDS
+PROVISIONING_APPLY=SEPARATELY_GUARDED_COMMAND
 ROSTER_OUTPUT=FORBIDDEN
 CREDENTIAL_OUTPUT=FORBIDDEN
 ```
@@ -143,5 +143,27 @@ ROSTER_VALUES_OUTPUT=0
 CREDENTIAL_VALUES_OUTPUT=0
 ```
 
-Only `STATUS=PASS` with `BLOCKER_COUNT=0` is eligible for a later, separately
-authorized provisioning decision. This workstream contains no apply command.
+Only `STATUS=PASS` with zero blockers and conflicts is eligible for the
+separately authorized apply command:
+
+```bash
+pnpm phase7:apply-production-identities -- \
+  --target-database=ueb_core_prod \
+  --authorization-reference=PROVISION_START_AND_CUTOVER_PRODUCTION_PHASE7_2026-07-19 \
+  --change-window-start=<ISO_8601_WITH_TIMEZONE> \
+  --change-window-end=<ISO_8601_WITH_TIMEZONE> \
+  --expected-git-sha=<EXACT_IMMUTABLE_IMAGE_SHA> \
+  --roster-manifest-sha=c622297ee3a0b31c6265b01973fa4589d8be949e9e720d9e04d6cd59be85f8b4 \
+  --canonical-checksum=e276a144f5f8accb4ed6c6d2a6d7ec38a862d2e84467cb5fe43d342a95d7e972 \
+  --confirm-production-identity-apply
+```
+
+The command reads `PHASE7_SECURE_DIRECTORY` and
+`PHASE7_PROVISIONING_DATABASE_URL` only from the secure operator environment.
+It refuses owner/runtime fallback, requires the exact dedicated production
+database and provisioner role, and revalidates the secure roster before opening
+the database transaction. All 254 identities, credentials, profiles, roles,
+scopes and redacted audit evidence are created in one `Serializable`
+transaction. An exact rerun is a `NOOP`; a partial or conflicting target fails
+closed. The output contains counts and stable codes only, never roster values,
+passwords, hashes, URLs or internal user IDs.
