@@ -94,8 +94,12 @@ interface EventRow {
   readonly result_version_no: number | null;
 }
 
-const UNIT_A = "Phase 4 Submit Unit A";
-const UNIT_B = "Phase 4 Submit Unit B";
+const UNIT_A = "Khoa KTPT";
+const UNIT_A_DISPLAY = "Khoa Kinh tế phát triển";
+const UNIT_B = "Viện QTKD";
+const UNIT_B_DISPLAY = "Viện Quản trị kinh doanh";
+const AMBIGUOUS_UNIT = "Phase 4 ambiguous unit";
+const INACTIVE_UNIT = "Phase 4 inactive unit";
 const IDENTITY_A = {
   ten_giang_vien: "Lecturer A",
   ma_so_can_bo: "P4-A",
@@ -295,28 +299,77 @@ describe.sequential("Phase 4 isolated lecturer row submission service", () => {
     expect((await event(createSubmissionId)).payload).not.toHaveProperty("stt");
   });
 
-  it("16. resolves CREATE_NEW approval unit from all latest lecturer rows", async () => {
+  it("16. resolves CREATE_NEW approval unit from the request", async () => {
     expect((await event(createSubmissionId)).approval_unit).toBe(UNIT_A);
   });
 
-  it("17. blocks CREATE_NEW when the lecturer has no current unit", async () => {
+  it("17. resolves a unique display name without existing lecturer rows", async () => {
     auth.principal = principal(noUnitLecturer);
+    const submissionId = randomUUID();
     await expect(
       submit.submitNewRow({
-        submissionId: randomUUID(),
-        editableFields: editableFields("no-unit"),
+        submissionId,
+        editableFields: editableFields("no-core", UNIT_A_DISPLAY),
       }),
-    ).rejects.toMatchObject({ code: "WORKFLOW_UNIT_UNRESOLVED" });
+    ).resolves.toMatchObject({ submissionType: "CREATE_NEW" });
+    expect(await event(submissionId)).toMatchObject({
+      approval_unit: UNIT_A,
+      event_type: "SUBMITTED",
+    });
+    expect(await event(submissionId)).toHaveProperty("payload.don_vi", UNIT_A);
   });
 
-  it("18. blocks CREATE_NEW when latest rows have multiple units", async () => {
+  it("18. resolves source value and unit code to the same active unit", async () => {
+    auth.principal = principal(noUnitLecturer);
+    for (const requestedUnit of [UNIT_A, "KTPT"]) {
+      const submissionId = randomUUID();
+      await submit.submitNewRow({
+        submissionId,
+        editableFields: editableFields("unit-alias", requestedUnit),
+      });
+      expect((await event(submissionId)).approval_unit).toBe(UNIT_A);
+    }
+  });
+
+  it("18a. request unit overrides ambiguous historical lecturer units", async () => {
     auth.principal = principal(multiUnitLecturer);
-    await expect(
-      submit.submitNewRow({
-        submissionId: randomUUID(),
-        editableFields: editableFields("multi-unit"),
-      }),
-    ).rejects.toMatchObject({ code: "WORKFLOW_UNIT_UNRESOLVED" });
+    const submissionId = randomUUID();
+    await submit.submitNewRow({
+      submissionId,
+      editableFields: editableFields("multi-unit", UNIT_A_DISPLAY),
+    });
+    expect((await event(submissionId)).approval_unit).toBe(UNIT_A);
+  });
+
+  it.each([
+    ["unknown", "Unknown production unit"],
+    ["ambiguous", AMBIGUOUS_UNIT],
+    ["inactive", INACTIVE_UNIT],
+  ])(
+    "18b. blocks CREATE_NEW for a %s unit without writing an event",
+    async (_label, unit) => {
+      auth.principal = principal(noUnitLecturer);
+      const submissionId = randomUUID();
+      await expect(
+        submit.submitNewRow({
+          submissionId,
+          editableFields: editableFields(`blocked-${_label}`, unit),
+        }),
+      ).rejects.toMatchObject({ code: "WORKFLOW_UNIT_UNRESOLVED" });
+      expect(await eventCount(submissionId)).toBe(0);
+    },
+  );
+
+  it("18c. keeps UPDATE_EXISTING approval-unit resolution unchanged", async () => {
+    const submissionId = randomUUID();
+    await submit.submitUpdatedRow(
+      updateInput(
+        recordsA[2]!,
+        submissionId,
+        editableFields("update-unit", UNIT_B_DISPLAY),
+      ),
+    );
+    expect((await event(submissionId)).approval_unit).toBe(UNIT_A);
   });
 
   it("19. rejects a client record UID in CREATE_NEW", async () => {
@@ -652,9 +705,12 @@ function updateInput(
   };
 }
 
-function editableFields(seed: string): EditableBusinessFields {
+function editableFields(
+  seed: string,
+  requestedUnit = UNIT_A,
+): EditableBusinessFields {
   return {
-    don_vi_phu_trach_hoc_phan: `${seed}-owner-unit`,
+    don_vi_phu_trach_hoc_phan: requestedUnit,
     bo_mon_phu_trach_hoc_phan: `${seed}-department`,
     khoi_kien_thuc: seed.length,
     ma_hoc_phan: `${seed}-course`,
@@ -684,10 +740,25 @@ async function seedFixtures(): Promise<void> {
   const unitBId = randomUUID();
   await owner.query(
     `INSERT INTO public.organization_unit
-       (id, unit_key, source_value, display_name)
-     VALUES ($1::uuid, 'phase4-submit-unit-a', $2, $2),
-            ($3::uuid, 'phase4-submit-unit-b', $4, $4)`,
-    [unitAId, UNIT_A, unitBId, UNIT_B],
+       (id, unit_key, source_value, display_name, is_active)
+     VALUES ($1::uuid, 'KTPT', $2, $3, true),
+            ($4::uuid, 'QTKD', $5, $6, true),
+            ($7::uuid, 'phase4-ambiguous-a', 'Phase 4 ambiguous source A', $8, true),
+            ($9::uuid, 'phase4-ambiguous-b', $8, 'Phase 4 ambiguous display B', true),
+            ($10::uuid, 'phase4-inactive', 'Phase 4 inactive source', $11, false)`,
+    [
+      unitAId,
+      UNIT_A,
+      UNIT_A_DISPLAY,
+      unitBId,
+      UNIT_B,
+      UNIT_B_DISPLAY,
+      randomUUID(),
+      AMBIGUOUS_UNIT,
+      randomUUID(),
+      randomUUID(),
+      INACTIVE_UNIT,
+    ],
   );
   await owner.query(
     `INSERT INTO public.import_run (

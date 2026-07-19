@@ -270,6 +270,8 @@ async function insertCreateNew(
   );
   const { approvalUnit, serverDerivedFields } = await resolveCreateNewContext(
     transaction,
+    principal,
+    input.editableFields.don_vi_phu_trach_hoc_phan,
     latestRows,
   );
   const payload = buildCreateNewPayload(
@@ -304,25 +306,58 @@ async function resolveExistingApprovalUnit(
 
 async function resolveCreateNewContext(
   transaction: WorkflowTransaction,
+  principal: LecturerPrincipal,
+  requestedUnit: string | null,
   latestRows: readonly LatestWorkflowCoreRow[],
 ): Promise<{
   approvalUnit: string;
   serverDerivedFields: CreateNewServerDerivedFields;
 }> {
-  if (latestRows.length === 0) {
+  const normalizedUnit = requestedUnit?.normalize("NFC").trim();
+  if (!normalizedUnit) {
     throw new WorkflowError("WORKFLOW_UNIT_UNRESOLVED");
   }
 
-  if (latestRows.some(({ approvalUnit }) => approvalUnit === null)) {
+  const units = await transaction.organizationUnit.findMany({
+    where: {
+      isActive: true,
+      OR: [
+        { displayName: normalizedUnit },
+        { sourceValue: normalizedUnit },
+        { unitKey: normalizedUnit },
+      ],
+    },
+    select: { sourceValue: true },
+  });
+  if (units.length !== 1) {
     throw new WorkflowError("WORKFLOW_UNIT_UNRESOLVED");
   }
-  const units = new Set(latestRows.map(({ approvalUnit }) => approvalUnit));
-  if (units.size !== 1) {
-    throw new WorkflowError("WORKFLOW_UNIT_UNRESOLVED");
-  }
-  const approvalUnit = [...units][0]!;
-  if (!(await isActiveApprovalUnit(transaction, approvalUnit))) {
-    throw new WorkflowError("WORKFLOW_UNIT_UNRESOLVED");
+  const approvalUnit = units[0]!.sourceValue;
+
+  if (latestRows.length === 0) {
+    const profile = await transaction.accessProfile.findFirst({
+      where: {
+        userId: principal.userId,
+        lecturerUid: principal.lecturerUid,
+        status: "ACTIVE",
+      },
+      select: {
+        user: { select: { name: true, email: true } },
+      },
+    });
+    if (!profile) {
+      throw new WorkflowError("WORKFLOW_UNIT_UNRESOLVED");
+    }
+    return {
+      approvalUnit,
+      serverDerivedFields: {
+        ten_giang_vien: profile.user.name,
+        ma_so_can_bo: null,
+        email_tai_khoan_vnu: profile.user.email,
+        bo_mon: null,
+        don_vi: approvalUnit,
+      },
+    };
   }
 
   const fieldNames = [

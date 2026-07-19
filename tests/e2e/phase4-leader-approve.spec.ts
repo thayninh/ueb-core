@@ -8,6 +8,7 @@ import { readPhase4LecturerPortalFixtures } from "../../scripts/phase-4/lib/lect
 
 const fixture = readPhase4LecturerPortalFixtures(process.env);
 const urls = readPhase4LecturerPortalDatabaseUrls(process.env);
+const UNIT_A = "Phase 4 E2E Unit A";
 
 let owner: Client;
 let initialCoreCount: number;
@@ -155,6 +156,7 @@ test.describe.serial("Phase 4 leader approval UI", () => {
   }) => {
     await login(page, fixture.lecturerAEmail);
     await page.goto("/lecturer/rows/new");
+    await page.getByLabel("Đơn vị phụ trách học phần").fill(UNIT_A);
     await page.getByLabel("Khối kiến thức").fill("4");
     await page.getByLabel("Mã học phần").fill("P4-APPROVED-NEW");
     await page.getByLabel("Tên học phần").fill("Học phần mới đã phê duyệt");
