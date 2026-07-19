@@ -167,3 +167,29 @@ scopes and redacted audit evidence are created in one `Serializable`
 transaction. An exact rerun is a `NOOP`; a partial or conflicting target fails
 closed. The output contains counts and stable codes only, never roster values,
 passwords, hashes, URLs or internal user IDs.
+
+## 7. Operator tmpfs secret delivery
+
+The host secure directory remains mode `0700` and every allowlisted file
+remains mode `0600`. It is mounted read-only at
+`/mnt/ueb-core-secrets`; a root-only entrypoint copies exactly the six contract
+files into a container tmpfs at `/run/ueb-core-secrets`, changes the copies to
+the `operator` user with mode `0400`, and then replaces itself with the Phase 7
+command under the non-root `operator` user. The tmpfs is destroyed with the
+container.
+
+The entrypoint refuses direct `PHASE7_SECURE_DIRECTORY` injection, writable
+source mounts, missing or unexpected files, symlinks, hardlinks, unsafe modes,
+non-tmpfs targets and tmpfs mounts without `nosuid,nodev,noexec`.
+
+The required container options are:
+
+```text
+--env UEB_CORE_STAGE_PHASE7_SECRETS=1
+--mount type=bind,source=<HOST_SECURE_DIRECTORY>,target=/mnt/ueb-core-secrets,readonly
+--tmpfs /run/ueb-core-secrets:rw,noexec,nosuid,nodev,size=16m,mode=0700
+```
+
+Secret values are never passed as command-line arguments or printed. Root runs
+only the staging guard and copy; database and provisioning logic always runs as
+`operator`.

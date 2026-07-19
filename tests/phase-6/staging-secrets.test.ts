@@ -181,10 +181,15 @@ describe("Phase 6 operator image and Compose isolation", () => {
   });
 
   it("copies an allowlisted operator source set without runtime exposure", async () => {
-    const dockerfile = await readFile("Dockerfile.operator", "utf8");
+    const [dockerfile, entrypoint] = await Promise.all([
+      readFile("Dockerfile.operator", "utf8"),
+      readFile("operator/secure-entrypoint.sh", "utf8"),
+    ]);
     expect(dockerfile).toContain("FROM node:24-bookworm-slim");
     expect(dockerfile).toContain("FROM postgres:18.4-bookworm");
-    expect(dockerfile).toContain("USER operator");
+    expect(dockerfile).toContain("USER root");
+    expect(dockerfile).toContain('ENTRYPOINT ["operator-secure-entrypoint"]');
+    expect(entrypoint).toContain('exec gosu "$operator_user" "$@"');
     expect(dockerfile).not.toMatch(/^EXPOSE\s/mu);
     expect(dockerfile).not.toMatch(/^COPY\s+\.\s+\./mu);
     expect(dockerfile).not.toMatch(

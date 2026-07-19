@@ -293,6 +293,69 @@ describe("Phase 7 executable production guards", () => {
     expect(dockerfile).not.toMatch(/COPY\s+.*\.git/u);
   });
 
+  it("stages the exact production secret allowlist into tmpfs before dropping privileges", async () => {
+    const [entrypoint, dockerfile] = await Promise.all([
+      readFile("operator/secure-entrypoint.sh", "utf8"),
+      readFile("Dockerfile.operator", "utf8"),
+    ]);
+    await expect(
+      execFileAsync("sh", ["-n", "operator/secure-entrypoint.sh"]),
+    ).resolves.toBeDefined();
+
+    for (const fileName of [
+      "CSDLCore_chuan_hoa_PostgreSQL.xlsx",
+      "lecturer-exceptions.json",
+      "faculty-leaders.json",
+      "test-identities.json",
+      "production-target-state.json",
+      "phase7-secrets.env",
+    ]) {
+      expect(entrypoint).toContain(`\"${fileName}\"`);
+    }
+    expect(entrypoint).toContain('source_directory="/mnt/ueb-core-secrets"');
+    expect(entrypoint).toContain('target_directory="/run/ueb-core-secrets"');
+    expect(entrypoint).toContain('= "700"');
+    expect(entrypoint).toContain('= "600"');
+    expect(entrypoint).toContain("-m 0400");
+    expect(entrypoint).toContain('chmod 0500 "$target_directory"');
+    expect(entrypoint).toContain('require_mount_option "$source_options" "ro"');
+    expect(entrypoint).toContain('= "tmpfs"');
+    expect(entrypoint).toContain(
+      'require_mount_option "$target_options" "noexec"',
+    );
+    expect(entrypoint).toContain("OPERATOR_SECRET_FILE_SYMLINK_FORBIDDEN");
+    expect(entrypoint).toContain("OPERATOR_SECRET_FILE_HARDLINK_FORBIDDEN");
+    expect(entrypoint).toContain(
+      "OPERATOR_SECRET_SOURCE_CONTAINS_UNEXPECTED_ENTRY",
+    );
+    expect(entrypoint).toContain('exec gosu "$operator_user" "$@"');
+    expect(entrypoint).toContain("SECRET_LEAKAGE=0");
+    expect(entrypoint).toContain("DATABASE_CONNECTIONS=0");
+    expect(entrypoint).toContain("DATABASE_MUTATIONS=0");
+
+    expect(dockerfile).toContain(
+      "operator/secure-entrypoint.sh /usr/local/bin/operator-secure-entrypoint",
+    );
+    expect(dockerfile).toContain("USER root");
+    expect(dockerfile).toContain('ENTRYPOINT ["operator-secure-entrypoint"]');
+    expect(dockerfile).not.toContain("USER operator");
+  });
+
+  it("does not stage secret values in the image or command manifest", async () => {
+    const [entrypoint, dockerfile, manifest] = await Promise.all([
+      readFile("operator/secure-entrypoint.sh", "utf8"),
+      readFile("Dockerfile.operator", "utf8"),
+      readFile("operator/package.json", "utf8"),
+    ]);
+    const combined = `${entrypoint}\n${dockerfile}\n${manifest}`;
+    expect(combined).not.toMatch(/GMAIL_APP_PASSWORD=/u);
+    expect(combined).not.toMatch(
+      /PRODUCTION_(?:OWNER|RUNTIME|PROVISIONER)_PASSWORD=/u,
+    );
+    expect(combined).not.toMatch(/postgres(?:ql)?:\/\/[^\s]+:[^\s]+@/u);
+    expect(dockerfile).not.toMatch(/COPY\s+.*(?:\.env|\.xlsx)/u);
+  });
+
   it("packages the complete external source closure for identity apply", async () => {
     const [identitySource, dockerfile] = await Promise.all([
       readFile("scripts/phase-7/lib/production-identity.ts", "utf8"),
