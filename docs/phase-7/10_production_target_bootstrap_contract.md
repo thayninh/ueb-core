@@ -144,10 +144,13 @@ never deletes a backup and never provisions identities.
 
 `phase7:seed-production-organization-units` is the only Phase 7 command that
 may populate the production `organization_unit` inventory. It requires the
-exact `ueb_core_prod` database, the authorization reference
-`SEED_PRODUCTION_ORGANIZATION_UNITS_ONLY_PHASE7_2026-07-19`, an explicit
-confirmation, an embedded source SHA match and an active timezone-qualified
-change window of at most two hours.
+exact `ueb_core_prod` database, the authorization action
+`SEED_PRODUCTION_ORGANIZATION_UNITS_ONLY_PHASE7`, a separate non-empty
+authorization reference of at most 128 characters, an explicit confirmation,
+an embedded source SHA match and an active timezone-qualified change window of
+at most four hours. The action is date-independent; dates may appear in the
+reference as operator evidence but are not inferred from or appended to the
+action.
 
 The command uses the existing Prisma `OrganizationUnit` model in a serializable
 transaction. An empty inventory creates exactly these records; the canonical

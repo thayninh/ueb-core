@@ -19,7 +19,59 @@ const gitSha = "a".repeat(40);
 const approvedInventory = PRODUCTION_ORGANIZATION_UNIT_SEED_CONTRACT.inventory;
 
 describe("Phase 7 guarded production organization unit seed", () => {
-  it("requires exact confirmation and active two-hour-or-shorter window", async () => {
+  it("separates the exact action from the operator reference", () => {
+    const current = parseProductionOrganizationUnitSeedCommand(baseArguments());
+    const anotherDate = parseProductionOrganizationUnitSeedCommand(
+      replace(
+        baseArguments(),
+        "--authorization-reference=",
+        "--authorization-reference=PHASE7_UNIT_SEED_APPROVAL_2027-01-15",
+      ),
+    );
+
+    expect(current.authorizationAction).toBe(
+      "SEED_PRODUCTION_ORGANIZATION_UNITS_ONLY_PHASE7",
+    );
+    expect(anotherDate.authorizationReference).toBe(
+      "PHASE7_UNIT_SEED_APPROVAL_2027-01-15",
+    );
+  });
+
+  it("requires exact action, bounded reference, confirmation and a four-hour-or-shorter window", () => {
+    expect(() =>
+      parseProductionOrganizationUnitSeedCommand(
+        replace(
+          baseArguments(),
+          "--authorization-action=",
+          "--authorization-action=SEED_SOMETHING_ELSE",
+        ),
+      ),
+    ).toThrow(/PRODUCTION_UNIT_SEED_AUTHORIZATION_ACTION_MISMATCH/u);
+    expect(() =>
+      parseProductionOrganizationUnitSeedCommand(
+        replace(
+          baseArguments(),
+          "--authorization-reference=",
+          "--authorization-reference=",
+        ),
+      ),
+    ).toThrow(/PRODUCTION_UNIT_SEED_AUTHORIZATION_REFERENCE_INVALID/u);
+    expect(() =>
+      parseProductionOrganizationUnitSeedCommand(
+        baseArguments().filter(
+          (argument) => !argument.startsWith("--authorization-reference="),
+        ),
+      ),
+    ).toThrow(/PRODUCTION_UNIT_SEED_ARGUMENTS_INVALID/u);
+    expect(() =>
+      parseProductionOrganizationUnitSeedCommand(
+        replace(
+          baseArguments(),
+          "--authorization-reference=",
+          `--authorization-reference=${"a".repeat(129)}`,
+        ),
+      ),
+    ).toThrow(/PRODUCTION_UNIT_SEED_AUTHORIZATION_REFERENCE_INVALID/u);
     expect(() =>
       parseProductionOrganizationUnitSeedCommand(
         baseArguments().filter(
@@ -33,20 +85,42 @@ describe("Phase 7 guarded production organization unit seed", () => {
         replace(
           baseArguments(),
           "--change-window-end=",
-          "--change-window-end=2026-07-19T03:00:01+07:00",
+          "--change-window-end=2026-07-20T05:00:01+07:00",
         ),
       ),
-    ).toThrow(/PRODUCTION_UNIT_SEED_CHANGE_WINDOW_INVALID/u);
+    ).toThrow(/PRODUCTION_CHANGE_WINDOW_INVALID/u);
+    expect(() =>
+      parseProductionOrganizationUnitSeedCommand(
+        replace(
+          baseArguments(),
+          "--change-window-start=",
+          "--change-window-start=2026-07-20T01:00:00",
+        ),
+      ),
+    ).toThrow(/PRODUCTION_CHANGE_WINDOW_INVALID/u);
+  });
 
+  it("blocks future and expired windows before a database transaction", async () => {
     const database = fakeDatabase();
+    const command = parseProductionOrganizationUnitSeedCommand(baseArguments());
     await expect(
       runProductionOrganizationUnitSeed({
-        command: parseProductionOrganizationUnitSeedCommand(baseArguments()),
-        now: new Date("2026-07-19T00:59:59+07:00"),
+        command,
+        now: new Date("2026-07-20T00:59:59+07:00"),
         sourceSha: async () => gitSha,
         database,
       }),
     ).rejects.toThrow(/PRODUCTION_CHANGE_WINDOW_NOT_STARTED/u);
+    expect(database.transactionCount()).toBe(0);
+
+    await expect(
+      runProductionOrganizationUnitSeed({
+        command,
+        now: new Date("2026-07-20T04:00:01+07:00"),
+        sourceSha: async () => gitSha,
+        database,
+      }),
+    ).rejects.toThrow(/PRODUCTION_CHANGE_WINDOW_EXPIRED/u);
     expect(database.transactionCount()).toBe(0);
   });
 
@@ -144,7 +218,7 @@ describe("Phase 7 guarded production organization unit seed", () => {
     const database = fakeDatabase();
     const result = await runProductionOrganizationUnitSeed({
       command: parseProductionOrganizationUnitSeedCommand(baseArguments()),
-      now: new Date("2026-07-19T02:00:00+07:00"),
+      now: new Date("2026-07-20T02:00:00+07:00"),
       sourceSha: async () => gitSha,
       database,
     });
@@ -170,9 +244,10 @@ describe("Phase 7 guarded production organization unit seed", () => {
 function baseArguments(): string[] {
   return [
     "--target-database=ueb_core_prod",
-    "--authorization-reference=SEED_PRODUCTION_ORGANIZATION_UNITS_ONLY_PHASE7_2026-07-19",
-    "--change-window-start=2026-07-19T01:00:00+07:00",
-    "--change-window-end=2026-07-19T03:00:00+07:00",
+    "--authorization-action=SEED_PRODUCTION_ORGANIZATION_UNITS_ONLY_PHASE7",
+    "--authorization-reference=PHASE7_UNIT_SEED_APPROVAL_2026-07-20",
+    "--change-window-start=2026-07-20T01:00:00+07:00",
+    "--change-window-end=2026-07-20T04:00:00+07:00",
     `--expected-git-sha=${gitSha}`,
     "--confirm-production-organization-unit-seed",
   ];

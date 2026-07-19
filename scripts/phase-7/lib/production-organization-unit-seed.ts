@@ -15,8 +15,8 @@ import {
 export const PRODUCTION_ORGANIZATION_UNIT_SEED_CONTRACT = {
   database: PRODUCTION_EXECUTOR_CONTRACT.database,
   ownerRole: PRODUCTION_EXECUTOR_CONTRACT.ownerRole,
-  authorization: "SEED_PRODUCTION_ORGANIZATION_UNITS_ONLY_PHASE7_2026-07-19",
-  maximumWindowMilliseconds: 2 * 60 * 60 * 1_000,
+  authorizationAction: "SEED_PRODUCTION_ORGANIZATION_UNITS_ONLY_PHASE7",
+  maximumWindowMilliseconds: 4 * 60 * 60 * 1_000,
   inventory: [
     {
       unitKey: "KTPT",
@@ -66,6 +66,7 @@ export interface ProductionOrganizationUnit {
 
 export interface ProductionOrganizationUnitSeedCommand {
   readonly targetDatabase: string;
+  readonly authorizationAction: string;
   readonly authorizationReference: string;
   readonly windowStart: string;
   readonly windowEnd: string;
@@ -102,6 +103,7 @@ export class SafeProductionOrganizationUnitSeedError extends Error {
 
 const VALUE_PREFIXES = [
   "--target-database=",
+  "--authorization-action=",
   "--authorization-reference=",
   "--change-window-start=",
   "--change-window-end=",
@@ -138,6 +140,7 @@ export function parseProductionOrganizationUnitSeedCommand(
     args.find((argument) => argument.startsWith(prefix))!.slice(prefix.length);
   const command: ProductionOrganizationUnitSeedCommand = {
     targetDatabase: value("--target-database="),
+    authorizationAction: value("--authorization-action="),
     authorizationReference: value("--authorization-reference="),
     windowStart: value("--change-window-start="),
     windowEnd: value("--change-window-end="),
@@ -159,11 +162,22 @@ export function assertProductionOrganizationUnitSeedContract(
     );
   }
   if (
-    command.authorizationReference !==
-    PRODUCTION_ORGANIZATION_UNIT_SEED_CONTRACT.authorization
+    command.authorizationAction !==
+    PRODUCTION_ORGANIZATION_UNIT_SEED_CONTRACT.authorizationAction
   ) {
     throw new SafeProductionOrganizationUnitSeedError(
-      "PRODUCTION_UNIT_SEED_AUTHORIZATION_REQUIRED",
+      "PRODUCTION_UNIT_SEED_AUTHORIZATION_ACTION_MISMATCH",
+    );
+  }
+  const reference = command.authorizationReference.trim();
+  if (
+    reference.length === 0 ||
+    reference.length > 128 ||
+    reference !== command.authorizationReference ||
+    /[\r\n]/u.test(reference)
+  ) {
+    throw new SafeProductionOrganizationUnitSeedError(
+      "PRODUCTION_UNIT_SEED_AUTHORIZATION_REFERENCE_INVALID",
     );
   }
   if (!GIT_SHA.test(command.expectedGitSha)) {
