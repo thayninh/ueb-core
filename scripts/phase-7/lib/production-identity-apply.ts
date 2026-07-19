@@ -101,13 +101,120 @@ export interface ProductionIdentityApplyDatabase {
   close(): Promise<void>;
 }
 
+export interface SafeProductionIdentityDiagnostic {
+  readonly phase?:
+    | "TRANSACTION_START"
+    | "PRE_APPLY_READ"
+    | "CREATE_IDENTITY"
+    | "POST_APPLY_READ"
+    | "POST_APPLY_RECONCILIATION";
+  readonly sanitizedErrorCode?: string;
+  readonly postgresSqlstate?: string;
+  readonly objectName?: string;
+  readonly failedIdentityIndex?: number;
+  readonly failedIdentityCount?: number;
+  readonly transactionRolledBack?: boolean;
+}
+
 export class SafeProductionIdentityApplyError extends Error {
   constructor(
     readonly code: string,
     readonly mutationPossible = false,
+    readonly diagnostic: SafeProductionIdentityDiagnostic = {},
   ) {
     super(code);
   }
+}
+
+const SAFE_DATABASE_OBJECTS = new Map<string, string>([
+  ["Auth_user", "auth_user"],
+  ["Auth_account", "auth_account"],
+  ["AccessProfile", "access_profile"],
+  ["RoleAssignment", "role_assignment"],
+  ["OrganizationUnit", "organization_unit"],
+  ["UnitScopeAssignment", "unit_scope_assignment"],
+  ["Auth_session", "auth_session"],
+  ["AuthAuditEvent", "auth_audit_event"],
+  ["auth_user", "auth_user"],
+  ["auth_account", "auth_account"],
+  ["access_profile", "access_profile"],
+  ["role_assignment", "role_assignment"],
+  ["organization_unit", "organization_unit"],
+  ["unit_scope_assignment", "unit_scope_assignment"],
+  ["auth_session", "auth_session"],
+  ["auth_audit_event", "auth_audit_event"],
+]);
+
+function safeDatabaseDiagnostic(
+  error: unknown,
+  objectName?: string,
+): Pick<
+  SafeProductionIdentityDiagnostic,
+  "sanitizedErrorCode" | "postgresSqlstate" | "objectName"
+> {
+  const values = collectSafeErrorFields(error);
+  const normalizedObject =
+    (objectName ? SAFE_DATABASE_OBJECTS.get(objectName) : undefined) ??
+    values.objects
+      .map((candidate) => SAFE_DATABASE_OBJECTS.get(candidate))
+      .find((candidate) => candidate !== undefined);
+  return {
+    sanitizedErrorCode:
+      values.codes.find((code) => /^P\d{4}$/u.test(code)) ??
+      values.codes.find((code) => /^[A-Z][A-Z0-9_]{2,63}$/u.test(code)),
+    postgresSqlstate: values.sqlstates.find((code) =>
+      /^[0-9A-Z]{5}$/u.test(code),
+    ),
+    objectName: normalizedObject,
+  };
+}
+
+function collectSafeErrorFields(error: unknown): {
+  readonly codes: string[];
+  readonly sqlstates: string[];
+  readonly objects: string[];
+} {
+  const codes: string[] = [];
+  const sqlstates: string[] = [];
+  const objects: string[] = [];
+  const visited = new Set<object>();
+  const visit = (value: unknown, depth: number): void => {
+    if (
+      depth > 5 ||
+      typeof value !== "object" ||
+      value === null ||
+      visited.has(value)
+    ) {
+      return;
+    }
+    visited.add(value);
+    for (const [key, candidate] of Object.entries(value)) {
+      if (typeof candidate === "string") {
+        if (key === "code") codes.push(candidate);
+        if (["sqlstate", "sqlState", "originalCode"].includes(key)) {
+          sqlstates.push(candidate);
+        }
+        if (["modelName", "table", "tableName"].includes(key)) {
+          objects.push(candidate);
+        }
+      } else {
+        visit(candidate, depth + 1);
+      }
+    }
+  };
+  visit(error, 0);
+  return { codes, sqlstates, objects };
+}
+
+function databaseOperationError(
+  error: unknown,
+  objectName: string,
+): SafeProductionIdentityApplyError {
+  return new SafeProductionIdentityApplyError(
+    "PRODUCTION_IDENTITY_DATABASE_OPERATION_FAILED",
+    true,
+    safeDatabaseDiagnostic(error, objectName),
+  );
 }
 
 const VALUE_PREFIXES = [
@@ -246,8 +353,14 @@ export async function applyProductionIdentitiesAtomically(input: {
       "PRODUCTION_IDENTITY_PASSWORD_PREPARATION_MISMATCH",
     );
   }
+  let phase: NonNullable<SafeProductionIdentityDiagnostic["phase"]> =
+    "TRANSACTION_START";
+  let transactionStarted = false;
+  let failedIdentityIndex: number | undefined;
   try {
     return await input.database.serializable(async (transaction) => {
+      transactionStarted = true;
+      phase = "PRE_APPLY_READ";
       const before = await transaction.readState({
         rosterManifestSha: input.command.rosterManifestSha,
       });
@@ -256,7 +369,9 @@ export async function applyProductionIdentitiesAtomically(input: {
         state: before,
       });
       if (plan === "CREATE") {
-        for (const prepared of input.prepared) {
+        for (const [index, prepared] of input.prepared.entries()) {
+          phase = "CREATE_IDENTITY";
+          failedIdentityIndex = index + 1;
           const unitId =
             prepared.identity.identityType === "FACULTY_LEADER"
               ? before.activeUnitIdsByCode.get(prepared.identity.unitCode)
@@ -273,9 +388,12 @@ export async function applyProductionIdentitiesAtomically(input: {
           });
         }
       }
+      phase = "POST_APPLY_READ";
+      failedIdentityIndex = undefined;
       const after = await transaction.readState({
         rosterManifestSha: input.command.rosterManifestSha,
       });
+      phase = "POST_APPLY_RECONCILIATION";
       if (
         planProductionIdentityApply({ roster: input.roster, state: after }) !==
         "NOOP"
@@ -288,13 +406,22 @@ export async function applyProductionIdentitiesAtomically(input: {
       return { mode: plan === "CREATE" ? "CREATED" : "NOOP", state: after };
     });
   } catch (error) {
-    if (error instanceof SafeProductionIdentityApplyError) {
-      throw new SafeProductionIdentityApplyError(error.code, false);
-    }
-    throw new SafeProductionIdentityApplyError(
-      "PRODUCTION_IDENTITY_TRANSACTION_ROLLED_BACK",
-      false,
-    );
+    const safeError =
+      error instanceof SafeProductionIdentityApplyError
+        ? error
+        : new SafeProductionIdentityApplyError(
+            "PRODUCTION_IDENTITY_TRANSACTION_ROLLED_BACK",
+            false,
+            safeDatabaseDiagnostic(error),
+          );
+    throw new SafeProductionIdentityApplyError(safeError.code, false, {
+      ...safeError.diagnostic,
+      phase,
+      failedIdentityIndex,
+      failedIdentityCount:
+        failedIdentityIndex === undefined ? undefined : input.prepared.length,
+      transactionRolledBack: transactionStarted,
+    });
   }
 }
 
@@ -408,9 +535,27 @@ export async function runProductionIdentityApply(input: {
 export function formatProductionIdentityApplyFailure(error: unknown): string {
   const safe =
     error instanceof SafeProductionIdentityApplyError ? error : undefined;
+  const diagnostic = safe?.diagnostic;
   return [
     "PRODUCTION_IDENTITY_APPLY=BLOCKED",
     `ERROR_CODE=${safe?.code ?? "PRODUCTION_IDENTITY_APPLY_FAILED"}`,
+    `FAILED_PHASE=${diagnostic?.phase ?? "NOT_AVAILABLE"}`,
+    `SANITIZED_ERROR_CODE=${diagnostic?.sanitizedErrorCode ?? "NOT_AVAILABLE"}`,
+    `POSTGRES_SQLSTATE=${diagnostic?.postgresSqlstate ?? "NOT_AVAILABLE"}`,
+    `SAFE_OBJECT_NAME=${diagnostic?.objectName ?? "NOT_AVAILABLE"}`,
+    `FAILED_IDENTITY_INDEX_OR_COUNT=${
+      diagnostic?.failedIdentityIndex === undefined ||
+      diagnostic.failedIdentityCount === undefined
+        ? "NOT_AVAILABLE"
+        : `${diagnostic.failedIdentityIndex}/${diagnostic.failedIdentityCount}`
+    }`,
+    `TRANSACTION_ROLLED_BACK=${
+      diagnostic?.transactionRolledBack === true
+        ? "YES"
+        : diagnostic?.transactionRolledBack === false
+          ? "NO"
+          : "NOT_AVAILABLE"
+    }`,
     "AUTH_USER_COUNT=0",
     "BLOCK_COUNT=1",
     "CONFLICT_COUNT=0",
@@ -664,75 +809,99 @@ function createPrismaApplyTransaction(
           : identity.identityType === "FACULTY_LEADER"
             ? BusinessRole.FACULTY_LEADER
             : BusinessRole.ADMIN;
-      await transaction.auth_user.create({
-        data: {
-          id: userId,
-          email: identity.normalizedEmail,
-          emailVerified: false,
-          name: identity.displayName,
-        },
-      });
-      await transaction.auth_account.create({
-        data: {
-          id: randomUUID(),
-          accountId: userId,
-          providerId: "credential",
-          userId,
-          password: passwordHash,
-        },
-      });
-      await transaction.accessProfile.create({
-        data: {
-          id: randomUUID(),
-          userId,
-          lecturerUid:
-            identity.identityType === "LECTURER" ? identity.lecturerUid : null,
-          status: AccessProfileStatus.ACTIVE,
-          mustChangePassword: identity.requirePasswordChange,
-          createdBy: userId,
-        },
-      });
-      await transaction.roleAssignment.create({
-        data: {
-          id: randomUUID(),
-          userId,
-          role,
-          grantedBy: userId,
-        },
-      });
-      if (unitId) {
-        await transaction.unitScopeAssignment.create({
+      const write = async <T>(
+        objectName: string,
+        operation: () => Promise<T>,
+      ): Promise<T> => {
+        try {
+          return await operation();
+        } catch (error) {
+          throw databaseOperationError(error, objectName);
+        }
+      };
+      await write("auth_user", () =>
+        transaction.auth_user.create({
+          data: {
+            id: userId,
+            email: identity.normalizedEmail,
+            emailVerified: false,
+            name: identity.displayName,
+          },
+        }),
+      );
+      await write("auth_account", () =>
+        transaction.auth_account.create({
+          data: {
+            id: randomUUID(),
+            accountId: userId,
+            providerId: "credential",
+            userId,
+            password: passwordHash,
+          },
+        }),
+      );
+      await write("access_profile", () =>
+        transaction.accessProfile.create({
           data: {
             id: randomUUID(),
             userId,
-            organizationUnitId: unitId,
+            lecturerUid:
+              identity.identityType === "LECTURER"
+                ? identity.lecturerUid
+                : null,
+            status: AccessProfileStatus.ACTIVE,
+            mustChangePassword: identity.requirePasswordChange,
+            createdBy: userId,
+          },
+        }),
+      );
+      await write("role_assignment", () =>
+        transaction.roleAssignment.create({
+          data: {
+            id: randomUUID(),
+            userId,
+            role,
             grantedBy: userId,
           },
-        });
+        }),
+      );
+      if (unitId) {
+        await write("unit_scope_assignment", () =>
+          transaction.unitScopeAssignment.create({
+            data: {
+              id: randomUUID(),
+              userId,
+              organizationUnitId: unitId,
+              grantedBy: userId,
+            },
+          }),
+        );
       }
-      await transaction.authAuditEvent.create({
-        data: {
-          id: randomUUID(),
-          eventType: "PROVISIONING_BATCH_RECONCILED",
-          outcome: "SUCCESS",
-          actorUserId: null,
-          targetUserId: userId,
-          identifierHash: null,
-          metadata: {
-            phase7RosterManifestSha: command.rosterManifestSha,
-            phase7AuthorizationReference: command.authorizationReference,
-            provisioningStatus: "CREATED",
-            identityType: identity.identityType,
-            testIdentity: identity.testIdentity,
-            requirePasswordChange: identity.requirePasswordChange,
-            unitCode:
-              identity.identityType === "FACULTY_LEADER"
-                ? identity.unitCode
-                : null,
-            grantProvenance: "SELF_BOOTSTRAP",
+      await write("auth_audit_event", () =>
+        transaction.authAuditEvent.create({
+          data: {
+            id: randomUUID(),
+            eventType: "PROVISIONING_BATCH_RECONCILED",
+            outcome: "SUCCESS",
+            actorUserId: null,
+            targetUserId: userId,
+            identifierHash: null,
+            metadata: {
+              phase7RosterManifestSha: command.rosterManifestSha,
+              phase7AuthorizationReference: command.authorizationReference,
+              provisioningStatus: "CREATED",
+              identityType: identity.identityType,
+              testIdentity: identity.testIdentity,
+              requirePasswordChange: identity.requirePasswordChange,
+              unitCode:
+                identity.identityType === "FACULTY_LEADER"
+                  ? identity.unitCode
+                  : null,
+              grantProvenance: "SELF_BOOTSTRAP",
+            },
           },
-        },
-      });
+        }),
+      );
     },
   };
 }
