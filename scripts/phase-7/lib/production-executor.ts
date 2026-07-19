@@ -19,6 +19,7 @@ import {
   APP_RUNTIME_MANAGED_IDENTITY_TABLES,
   PROVISIONING_TABLE_PRIVILEGES,
 } from "../../phase-5/lib/provisioning-role";
+import { withTemporaryOwnerSetRole } from "../../phase-6/lib/temporary-owner-set-role";
 import { prepareSourceFile } from "../../phase-2/lib/row-parser";
 import { loadSourceContract } from "../../phase-2/lib/source-contract";
 
@@ -567,6 +568,14 @@ async function bootstrapProduction(
     connectionString: connections.bootstrap,
     application_name: "ueb-core-phase7-production-bootstrap",
   });
+  let databaseOwner: string | undefined;
+  let ownerMembership:
+    | {
+        readonly canSetBeforeOperation: true;
+        readonly membershipRevoked: true;
+        readonly canSetAfterOperation: false;
+      }
+    | undefined;
   await maintenance.connect();
   try {
     await assertBootstrapRole(maintenance, connections.bootstrapUser);
@@ -586,19 +595,69 @@ async function bootstrapProduction(
     }
     await createRestrictedRole(maintenance, command.ownerRole, passwords.owner);
     try {
-      await maintenance.query(
-        `CREATE DATABASE ${quoteIdentifier(command.targetDatabase)} OWNER ${quoteIdentifier(command.ownerRole)} TEMPLATE template0`,
-      );
+      ownerMembership = await withTemporaryOwnerSetRole({
+        client: maintenance,
+        bootstrapRole: connections.bootstrapUser,
+        ownerRole: command.ownerRole,
+        forbiddenRoles: [command.runtimeRole, command.provisionerRole],
+        operation: async () => {
+          await maintenance.query(
+            `CREATE DATABASE ${quoteIdentifier(command.targetDatabase)} OWNER ${quoteIdentifier(command.ownerRole)} TEMPLATE template0`,
+          );
+        },
+      });
     } catch (error) {
-      await maintenance
-        .query(`DROP ROLE ${quoteIdentifier(command.ownerRole)}`)
-        .catch(() => undefined);
+      const databaseCreated = await databaseExists(
+        maintenance,
+        command.targetDatabase,
+      ).catch(() => true);
+      if (!databaseCreated) {
+        await maintenance.query("RESET ROLE").catch(() => undefined);
+        await maintenance
+          .query(
+            `REVOKE ${quoteIdentifier(command.ownerRole)} FROM ${quoteIdentifier(connections.bootstrapUser)}`,
+          )
+          .catch(() => undefined);
+        await maintenance
+          .query(`DROP ROLE ${quoteIdentifier(command.ownerRole)}`)
+          .catch(() => undefined);
+        const ownerRoleResidue = await roleExists(
+          maintenance,
+          command.ownerRole,
+        ).catch(() => true);
+        if (ownerRoleResidue) {
+          throw new SafeProductionExecutorError(
+            "PRODUCTION_DATABASE_CREATE_CLEANUP_FAILED",
+            true,
+            {
+              phase: "PRODUCTION_DATABASE_CREATE_CLEANUP",
+              objectType: "ROLE",
+              objectName: safeDiagnosticObjectName(command.ownerRole),
+            },
+          );
+        }
+      }
       throw new SafeProductionExecutorError(
         "PRODUCTION_DATABASE_CREATE_FAILED",
-        true,
+        databaseCreated,
         {
           phase: "PRODUCTION_DATABASE_CREATE",
           ...readSafePostgresDiagnostic(error),
+          objectType: "DATABASE",
+          objectName: safeDiagnosticObjectName(command.targetDatabase),
+        },
+      );
+    }
+    databaseOwner = await readNamedDatabaseOwner(
+      maintenance,
+      command.targetDatabase,
+    );
+    if (databaseOwner !== command.ownerRole) {
+      throw new SafeProductionExecutorError(
+        "PRODUCTION_DATABASE_OWNER_INVALID",
+        true,
+        {
+          phase: "PRODUCTION_DATABASE_CREATE",
           objectType: "DATABASE",
           objectName: safeDiagnosticObjectName(command.targetDatabase),
         },
@@ -666,6 +725,10 @@ async function bootstrapProduction(
   assertProductionState(report, true);
   return [
     "PRODUCTION_DATABASE_CREATED=YES",
+    `DATABASE_OWNER=${databaseOwner}`,
+    `BOOTSTRAP_CAN_SET_OWNER_BEFORE_CREATE=${ownerMembership?.canSetBeforeOperation ? "YES" : "NO"}`,
+    `TEMPORARY_MEMBERSHIP_REVOKED=${ownerMembership?.membershipRevoked ? "YES" : "NO"}`,
+    `BOOTSTRAP_CAN_SET_OWNER_AFTER_CREATE=${ownerMembership?.canSetAfterOperation ? "YES" : "NO"}`,
     `MIGRATIONS_APPLIED=${report.migrations}`,
     `CANONICAL_IMPORT_ROW_COUNT=${report.coreRows}`,
     "ROLE_SEPARATION=PASS",
@@ -1449,6 +1512,19 @@ async function roleExists(client: ClientBase, role: string): Promise<boolean> {
       )
     ).rows[0]?.exists === true
   );
+}
+
+async function readNamedDatabaseOwner(
+  client: ClientBase,
+  database: string,
+): Promise<string | undefined> {
+  return (
+    await client.query<{ owner: string }>(
+      `SELECT pg_get_userbyid(datdba) AS owner
+       FROM pg_database WHERE datname = $1`,
+      [database],
+    )
+  ).rows[0]?.owner;
 }
 
 function withDatabase(value: string, database: string): string {

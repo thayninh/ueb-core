@@ -269,6 +269,26 @@ describe("Phase 7 executable production guards", () => {
     expect(dockerfile).not.toMatch(/COPY\s+.*\.git/u);
   });
 
+  it("wires production database creation through temporary owner membership", async () => {
+    const source = await readFile(
+      "scripts/phase-7/lib/production-executor.ts",
+      "utf8",
+    );
+    expect(source).toContain("withTemporaryOwnerSetRole({");
+    expect(source).toContain(
+      "BOOTSTRAP_CAN_SET_OWNER_BEFORE_CREATE=${ownerMembership?.canSetBeforeOperation",
+    );
+    expect(source).toContain(
+      "TEMPORARY_MEMBERSHIP_REVOKED=${ownerMembership?.membershipRevoked",
+    );
+    expect(source).toContain(
+      "BOOTSTRAP_CAN_SET_OWNER_AFTER_CREATE=${ownerMembership?.canSetAfterOperation",
+    );
+    expect(source).toContain("PRODUCTION_DATABASE_CREATE_CLEANUP_FAILED");
+    expect(source).toContain("const databaseCreated = await databaseExists(");
+    expect(source).not.toMatch(/WITH ADMIN TRUE/u);
+  });
+
   it("redacted preflight output has no supplied credential material", async () => {
     const result = await runProductionExecutor({
       command: parseProductionExecutorCommand(
