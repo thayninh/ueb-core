@@ -1,31 +1,30 @@
 import { pathToFileURL } from "node:url";
 
 import {
-  parseProductionTargetCommand,
-  parseProductionTargetMode,
-  runProductionTargetPlan,
-  SafeProductionTargetError,
-} from "./lib/production-target-contract";
+  parseProductionExecutorCommand,
+  parseProductionExecutorMode,
+  runProductionExecutor,
+  SafeProductionExecutorError,
+} from "./lib/production-executor";
 
 async function main(): Promise<void> {
   try {
-    const mode = parseProductionTargetMode(process.argv[2]);
-    const command = parseProductionTargetCommand(mode, process.argv.slice(3));
-    const result = await runProductionTargetPlan({ command });
+    const mode = parseProductionExecutorMode(process.argv[2]);
+    const command = parseProductionExecutorCommand(mode, process.argv.slice(3));
+    const result = await runProductionExecutor({ command });
     if (result.exitCode === 0) console.log(result.report);
     else console.error(result.report);
     process.exitCode = result.exitCode;
   } catch (error) {
-    const code =
-      error instanceof SafeProductionTargetError
-        ? error.code
-        : "PRODUCTION_TARGET_PLAN_FAILED";
+    const safeError =
+      error instanceof SafeProductionExecutorError ? error : undefined;
+    const code = safeError?.code ?? "PRODUCTION_EXECUTOR_FAILED";
     console.error(
       [
-        "PLAN_STATUS=BLOCKED",
+        "PRODUCTION_EXECUTOR=BLOCKED",
         `ERROR_CODE=${code}`,
-        "DATABASE_CONNECTIONS=0",
-        "DATABASE_MUTATIONS=0",
+        `DATABASE_CONNECTIONS=${safeError?.mutationPossible ? "REDACTED" : "0"}`,
+        `DATABASE_MUTATIONS=${safeError?.mutationPossible ? "UNKNOWN_RECONCILIATION_REQUIRED" : "0"}`,
         "PRODUCTION_DEPLOYMENT=NOT_PERFORMED",
         "PRODUCTION_PROVISIONING=NOT_PERFORMED",
       ].join("\n"),

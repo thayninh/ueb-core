@@ -4,6 +4,8 @@ FROM node:24-bookworm-slim AS node-runtime
 
 FROM postgres:18.4-bookworm AS operator
 
+ARG UEB_CORE_SOURCE_GIT_SHA
+
 ENV PNPM_HOME="/pnpm"
 ENV PATH="${PNPM_HOME}:${PATH}"
 ENV NODE_ENV="production"
@@ -23,13 +25,23 @@ RUN pnpm install --frozen-lockfile --prod=false
 
 COPY --chown=operator:operator prisma.config.ts tsconfig.json ./
 COPY --chown=operator:operator prisma ./prisma
+COPY --chown=operator:operator config/phase-2 ./config/phase-2
+COPY --chown=operator:operator scripts/phase-2 ./scripts/phase-2
 COPY --chown=operator:operator scripts/phase-3/grant-auth-runtime-permissions.ts ./scripts/phase-3/grant-auth-runtime-permissions.ts
 COPY --chown=operator:operator scripts/phase-4/grant-workflow-runtime-permissions.ts ./scripts/phase-4/grant-workflow-runtime-permissions.ts
 COPY --chown=operator:operator scripts/phase-5/lib/provisioning-role.ts ./scripts/phase-5/lib/provisioning-role.ts
 COPY --chown=operator:operator scripts/phase-6 ./scripts/phase-6
+COPY --chown=operator:operator scripts/phase-7 ./scripts/phase-7
 
-RUN pnpm exec prisma generate \
-  && chown -R operator:operator /operator /pnpm
+RUN case "${UEB_CORE_SOURCE_GIT_SHA}" in \
+      [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;; \
+      *) echo "UEB_CORE_SOURCE_GIT_SHA must be an exact lowercase 40-character Git SHA" >&2; exit 2 ;; \
+    esac \
+  && pnpm exec prisma generate \
+  && chown -R operator:operator /operator /pnpm \
+  && printf '%s\n' "${UEB_CORE_SOURCE_GIT_SHA}" > /operator/.source-git-sha \
+  && chown root:root /operator/.source-git-sha \
+  && chmod 0444 /operator/.source-git-sha
 
 USER operator
 

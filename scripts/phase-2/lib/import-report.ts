@@ -139,7 +139,8 @@ export async function writePhase2AuditReport(
   kind: PipelineReportKind,
   report: unknown,
   generatedAt = new Date(),
-  auditRoot = resolve("infra", "audit", "phase-2"),
+  auditRoot = process.env.PHASE2_AUDIT_ROOT ??
+    resolve("infra", "audit", "phase-2"),
 ): Promise<string> {
   const timestamp = generatedAt
     .toISOString()
@@ -148,10 +149,11 @@ export async function writePhase2AuditReport(
     .replace(".", "");
   const directory = join(auditRoot, timestamp);
   const reportPath = join(directory, `${kind}.json`);
-  await mkdir(directory, { recursive: true });
+  await mkdir(directory, { recursive: true, mode: 0o700 });
   await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, {
     encoding: "utf8",
     flag: "wx",
+    mode: 0o600,
   });
   return reportPath;
 }

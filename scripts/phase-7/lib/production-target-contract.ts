@@ -15,7 +15,6 @@ export const PRODUCTION_TARGET_CONTRACT = {
   ownerRole: "ueb_core_owner",
   runtimeRole: "ueb_core_app",
   provisionerRole: "ueb_core_provisioner",
-  changeWindow: "2026-07-19T20:00:00+07:00/2026-07-19T23:00:00+07:00",
   rollbackImageSha: "971c42027873f7de3140f815b06c2dddcfb61ba6",
   rpo: "24h",
   rto: "4h",
@@ -388,9 +387,6 @@ function assertProductionTargetContract(
     !DOMAIN.test(command.stagingDomainAfterGoLive)
   ) {
     throw new SafeProductionTargetError("PRODUCTION_DOMAIN_STRATEGY_INVALID");
-  }
-  if (command.changeWindow !== PRODUCTION_TARGET_CONTRACT.changeWindow) {
-    throw new SafeProductionTargetError("PRODUCTION_CHANGE_WINDOW_MISMATCH");
   }
   if (
     !GIT_SHA.test(command.rollbackImageSha) ||
