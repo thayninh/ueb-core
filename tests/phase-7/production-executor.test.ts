@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   assertProductionDatabase,
   assertProductionRestoreDatabase,
+  assertProductionRuntimeAclState,
   assertSourceFingerprintUnchanged,
   assertWindowState,
   grantProductionPasswordChangePrivileges,
@@ -124,6 +125,48 @@ describe("Phase 7 executable production guards", () => {
     expect(source).toContain(
       "has_table_privilege($1, 'public.access_profile', 'UPDATE')",
     );
+  });
+
+  it("accepts the post-provision identity count for ACL reconciliation", () => {
+    expect(() =>
+      assertProductionRuntimeAclState({
+        databaseOwner: "ueb_core_owner",
+        migrations: 8,
+        failedMigrations: 0,
+        coreRows: 2_497,
+        workflowEvents: 0,
+        importRuns: 1,
+        authUsers: 254,
+        sessions: 2,
+        runtimeSafe: true,
+        provisionerSafe: true,
+        runtimeAclSafe: true,
+        provisionerAclSafe: true,
+        rlsCoreVisible: 0,
+        rlsWorkflowVisible: 0,
+      }),
+    ).not.toThrow();
+  });
+
+  it("rejects a pre-provision identity count for ACL reconciliation", () => {
+    expect(() =>
+      assertProductionRuntimeAclState({
+        databaseOwner: "ueb_core_owner",
+        migrations: 8,
+        failedMigrations: 0,
+        coreRows: 2_497,
+        workflowEvents: 0,
+        importRuns: 1,
+        authUsers: 0,
+        sessions: 0,
+        runtimeSafe: true,
+        provisionerSafe: true,
+        runtimeAclSafe: true,
+        provisionerAclSafe: true,
+        rlsCoreVisible: 0,
+        rlsWorkflowVisible: 0,
+      }),
+    ).toThrow(/PRODUCTION_RUNTIME_ACL_STATE_MISMATCH/u);
   });
 
   it("accepts only the exact dedicated production database", () => {

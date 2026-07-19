@@ -794,7 +794,7 @@ async function reconcileProductionRuntimeAcl(
   const connections = readProductionConnections(environment, command, false);
   await reconcileProductionProvisioner(connections.owner, command);
   const report = await readProductionState(connections, command);
-  assertProductionState(report, true);
+  assertProductionRuntimeAclState(report);
   return [
     "ACL_RECONCILIATION=PASS",
     "AUTH_ACCOUNT_COLUMN_UPDATE=PASSWORD_UPDATED_AT_ONLY",
@@ -804,6 +804,30 @@ async function reconcileProductionRuntimeAcl(
     "RLS_DEFAULT_DENY=PASS",
     "DATABASE_MUTATIONS=ACL_ONLY",
   ];
+}
+
+export function assertProductionRuntimeAclState(state: ProductionState): void {
+  if (
+    state.databaseOwner !== PRODUCTION_EXECUTOR_CONTRACT.ownerRole ||
+    state.migrations !== PRODUCTION_EXECUTOR_CONTRACT.migrationCount ||
+    state.failedMigrations !== 0 ||
+    state.coreRows !== PRODUCTION_EXECUTOR_CONTRACT.canonicalRowCount ||
+    state.workflowEvents !== 0 ||
+    state.importRuns !== 1 ||
+    state.authUsers !== PRODUCTION_EXECUTOR_CONTRACT.expectedIdentityCount ||
+    !state.runtimeSafe ||
+    !state.provisionerSafe ||
+    !state.runtimeAclSafe ||
+    !state.provisionerAclSafe ||
+    state.rlsCoreVisible !== 0 ||
+    state.rlsWorkflowVisible !== 0
+  ) {
+    throw new SafeProductionExecutorError(
+      "PRODUCTION_RUNTIME_ACL_STATE_MISMATCH",
+      true,
+      { phase: "PRODUCTION_RUNTIME_ACL_RECONCILIATION" },
+    );
+  }
 }
 
 async function reconcileProduction(
@@ -1330,7 +1354,7 @@ function readRolePasswords(
   return result as { owner: string; runtime: string; provisioner: string };
 }
 
-interface ProductionState {
+export interface ProductionState {
   readonly databaseOwner: string;
   readonly migrations: number;
   readonly failedMigrations: number;
