@@ -111,6 +111,7 @@ describe("Phase 7 guarded production identity apply", () => {
         database,
       }),
     ).rejects.toThrow(/PRODUCTION_IDENTITY_DRY_RUN_OR_RECONCILIATION_BLOCKED/u);
+    expect(loadRoster).toHaveBeenCalledWith("/secure", "RUNTIME_STAGED");
     expect(database.transactionCount()).toBe(0);
   });
 

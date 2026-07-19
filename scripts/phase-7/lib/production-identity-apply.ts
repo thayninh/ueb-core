@@ -467,6 +467,7 @@ export async function runProductionIdentityApply(input: {
   try {
     loaded = await (input.loadRoster ?? loadValidatedProductionRoster)(
       secureDirectory,
+      "RUNTIME_STAGED",
     );
   } catch {
     throw new SafeProductionIdentityApplyError(

@@ -1,5 +1,5 @@
 import { lstat, readFile, realpath } from "node:fs/promises";
-import { isAbsolute, join, sep } from "node:path";
+import { dirname, isAbsolute, join, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { prepareSourceFile } from "../phase-2/lib/row-parser";
@@ -55,10 +55,54 @@ export interface LoadedProductionRoster {
   readonly ambiguityCount: number;
 }
 
+export type ProductionSecureInputDelivery = "HOST" | "RUNTIME_STAGED";
+
+export const PRODUCTION_SECURE_INPUT_CONTRACT = {
+  HOST: { directoryMode: 0o700, fileMode: 0o600 },
+  RUNTIME_STAGED: { directoryMode: 0o500, fileMode: 0o400 },
+} as const;
+
+interface ProductionSecureInputMetadata {
+  readonly mode: number;
+  readonly uid: number;
+  readonly gid: number;
+  readonly isFile: boolean;
+  readonly isDirectory: boolean;
+  readonly isSymbolicLink: boolean;
+  readonly linkCount: number;
+}
+
+export function matchesProductionSecureInputMetadata(input: {
+  readonly metadata: ProductionSecureInputMetadata;
+  readonly delivery: ProductionSecureInputDelivery;
+  readonly kind: "DIRECTORY" | "FILE";
+  readonly expectedUid: number;
+  readonly expectedGid: number;
+}): boolean {
+  const contract = PRODUCTION_SECURE_INPUT_CONTRACT[input.delivery];
+  const expectedMode =
+    input.kind === "DIRECTORY" ? contract.directoryMode : contract.fileMode;
+  const expectedKind =
+    input.kind === "DIRECTORY"
+      ? input.metadata.isDirectory
+      : input.metadata.isFile && input.metadata.linkCount === 1;
+  return (
+    expectedKind &&
+    !input.metadata.isSymbolicLink &&
+    (input.metadata.mode & 0o777) === expectedMode &&
+    input.metadata.uid === input.expectedUid &&
+    input.metadata.gid === input.expectedGid
+  );
+}
+
 export async function loadValidatedProductionRoster(
   secureDirectoryInput: string,
+  delivery: ProductionSecureInputDelivery = "HOST",
 ): Promise<LoadedProductionRoster> {
-  const secureDirectory = await assertSecureDirectory(secureDirectoryInput);
+  const secureDirectory = await assertSecureDirectory(
+    secureDirectoryInput,
+    delivery,
+  );
   const paths = Object.fromEntries(
     Object.entries(PHASE7_SECURE_FILE_NAMES).map(([key, fileName]) => [
       key,
@@ -66,12 +110,37 @@ export async function loadValidatedProductionRoster(
     ]),
   ) as Record<keyof typeof PHASE7_SECURE_FILE_NAMES, string>;
   await Promise.all([
-    assertSecureFile(paths.canonicalSource, 10 * 1024 * 1024),
-    assertSecureFile(paths.lecturerExceptions, 5 * 1024 * 1024),
-    assertSecureFile(paths.facultyLeaders, 5 * 1024 * 1024),
-    assertSecureFile(paths.testIdentities, 5 * 1024 * 1024),
-    assertSecureFile(paths.targetState, 5 * 1024 * 1024),
-    assertSecureFile(paths.secrets, 1024 * 1024),
+    assertSecureFile(
+      paths.canonicalSource,
+      10 * 1024 * 1024,
+      delivery,
+      secureDirectory,
+    ),
+    assertSecureFile(
+      paths.lecturerExceptions,
+      5 * 1024 * 1024,
+      delivery,
+      secureDirectory,
+    ),
+    assertSecureFile(
+      paths.facultyLeaders,
+      5 * 1024 * 1024,
+      delivery,
+      secureDirectory,
+    ),
+    assertSecureFile(
+      paths.testIdentities,
+      5 * 1024 * 1024,
+      delivery,
+      secureDirectory,
+    ),
+    assertSecureFile(
+      paths.targetState,
+      5 * 1024 * 1024,
+      delivery,
+      secureDirectory,
+    ),
+    assertSecureFile(paths.secrets, 1024 * 1024, delivery, secureDirectory),
   ]);
   const [contract, lecturerRaw, leadersRaw, testsRaw, stateRaw, secretsRaw] =
     await Promise.all([
@@ -252,7 +321,10 @@ export async function runProductionRosterWorkflow(input: {
   }
 }
 
-async function assertSecureDirectory(path: string): Promise<string> {
+export async function assertSecureDirectory(
+  path: string,
+  delivery: ProductionSecureInputDelivery,
+): Promise<string> {
   if (!isAbsolute(path)) {
     throw new SafeProductionRosterWorkflowError(
       "SECURE_DIRECTORY_GUARD_FAILED",
@@ -264,10 +336,26 @@ async function assertSecureDirectory(path: string): Promise<string> {
       realpath(path),
       realpath(process.cwd()),
     ]);
+    const expectedUid = process.getuid?.();
+    const expectedGid = process.getgid?.();
     if (
-      metadata.isSymbolicLink() ||
-      !metadata.isDirectory() ||
-      (metadata.mode & 0o777) !== 0o700 ||
+      expectedUid === undefined ||
+      expectedGid === undefined ||
+      !matchesProductionSecureInputMetadata({
+        metadata: {
+          mode: metadata.mode,
+          uid: metadata.uid,
+          gid: metadata.gid,
+          isFile: metadata.isFile(),
+          isDirectory: metadata.isDirectory(),
+          isSymbolicLink: metadata.isSymbolicLink(),
+          linkCount: metadata.nlink,
+        },
+        delivery,
+        kind: "DIRECTORY",
+        expectedUid,
+        expectedGid,
+      }) ||
       resolved === workspace ||
       resolved.startsWith(`${workspace}${sep}`)
     ) {
@@ -284,16 +372,38 @@ async function assertSecureDirectory(path: string): Promise<string> {
   }
 }
 
-async function assertSecureFile(
+export async function assertSecureFile(
   path: string,
   maximumBytes: number,
+  delivery: ProductionSecureInputDelivery,
+  secureDirectory: string,
 ): Promise<void> {
   try {
-    const metadata = await lstat(path);
+    const [metadata, resolved] = await Promise.all([
+      lstat(path),
+      realpath(path),
+    ]);
+    const expectedUid = process.getuid?.();
+    const expectedGid = process.getgid?.();
     if (
-      metadata.isSymbolicLink() ||
-      !metadata.isFile() ||
-      (metadata.mode & 0o777) !== 0o600 ||
+      expectedUid === undefined ||
+      expectedGid === undefined ||
+      !matchesProductionSecureInputMetadata({
+        metadata: {
+          mode: metadata.mode,
+          uid: metadata.uid,
+          gid: metadata.gid,
+          isFile: metadata.isFile(),
+          isDirectory: metadata.isDirectory(),
+          isSymbolicLink: metadata.isSymbolicLink(),
+          linkCount: metadata.nlink,
+        },
+        delivery,
+        kind: "FILE",
+        expectedUid,
+        expectedGid,
+      }) ||
+      dirname(resolved) !== secureDirectory ||
       metadata.size > maximumBytes
     ) {
       throw new SafeProductionRosterWorkflowError("SECURE_FILE_GUARD_FAILED");
