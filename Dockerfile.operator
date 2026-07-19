@@ -33,6 +33,7 @@ COPY --chown=operator:operator scripts/phase-5/lib/provisioning-role.ts ./script
 COPY --chown=operator:operator scripts/phase-6 ./scripts/phase-6
 COPY --chown=operator:operator scripts/phase-7 ./scripts/phase-7
 COPY --chown=operator:operator src/lib/auth/provisioning-policy.ts ./src/lib/auth/provisioning-policy.ts
+COPY --chown=root:root operator/secure-entrypoint.sh /usr/local/bin/operator-secure-entrypoint
 
 RUN case "${UEB_CORE_SOURCE_GIT_SHA}" in \
       [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;; \
@@ -42,9 +43,10 @@ RUN case "${UEB_CORE_SOURCE_GIT_SHA}" in \
   && chown -R operator:operator /operator /pnpm \
   && printf '%s\n' "${UEB_CORE_SOURCE_GIT_SHA}" > /operator/.source-git-sha \
   && chown root:root /operator/.source-git-sha \
-  && chmod 0444 /operator/.source-git-sha
+  && chmod 0444 /operator/.source-git-sha \
+  && chmod 0555 /usr/local/bin/operator-secure-entrypoint
 
-USER operator
+USER root
 
-ENTRYPOINT []
+ENTRYPOINT ["operator-secure-entrypoint"]
 CMD ["pnpm", "--version"]
