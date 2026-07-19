@@ -111,9 +111,19 @@ Unknown/duplicate inputs and confirmation plus `--dry-run` are rejected.
 7. Verify zero workflow, auth and session rows before identity provisioning.
 8. Create a custom-format backup, checksum and catalog; copy only a verified
    archive to the approved off-host directory.
-9. Restore to a new marked `ueb_core_prod_restore_*` database, verify counts and
-   fingerprint, then use the separate guarded cleanup command.
+9. Restore to a new marked `ueb_core_prod_restore_*` database. PostgreSQL 18
+   restore creation and cleanup use the same temporary owner membership as
+   target bootstrap: exact `SET` capability only, no admin option, followed by
+   `RESET ROLE`, revoke and a negative capability check on success or failure.
+   The executor verifies the restored counts and fingerprint and proves the
+   source production fingerprint did not change before guarded cleanup.
 10. Reconcile the exact roster SHA read-only against the empty identity target.
+
+The identity reconciliation reads lecturer mappings from the existing
+`access_profile.lecturer_uid` column. There is no separate
+`lecturer_user_mapping` table. The test-identity marker remains immutable roster
+metadata; the empty-target plan therefore expects two marked test identities to
+be created later without writing during reconciliation.
 
 The executor never drops `ueb_core_prod`, never retries a partial apply blindly,
 never deletes a backup and never provisions identities.

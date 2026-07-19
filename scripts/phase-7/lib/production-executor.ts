@@ -43,6 +43,7 @@ export const PRODUCTION_EXECUTOR_CONTRACT = {
   rollbackImageSha: "971c42027873f7de3140f815b06c2dddcfb61ba6",
   maximumWindowMilliseconds: 4 * 60 * 60 * 1000,
   expectedIdentityCount: 254,
+  expectedTestIdentityCount: 2,
 } as const;
 
 export type ProductionExecutorMode =
@@ -765,34 +766,63 @@ async function reconcileProduction(
     "ueb-core-phase7-roster-reconcile",
   );
   try {
-    const counts = await owner.query<{
-      users: number;
-      accounts: number;
-      roles: number;
-      scopes: number;
-      mappings: number;
-    }>(`SELECT
-      (SELECT count(*)::integer FROM auth_user) AS users,
-      (SELECT count(*)::integer FROM auth_account) AS accounts,
-      (SELECT count(*)::integer FROM role_assignment) AS roles,
-      (SELECT count(*)::integer FROM unit_scope_assignment) AS scopes,
-      (SELECT count(*)::integer FROM lecturer_user_mapping) AS mappings`);
-    const row = counts.rows[0];
-    if (!row || Object.values(row).some((count) => count !== 0)) {
-      throw new SafeProductionExecutorError(
-        "PRODUCTION_IDENTITY_TARGET_NOT_EMPTY",
+    await owner.query("BEGIN TRANSACTION READ ONLY");
+    try {
+      const report = await reconcileEmptyProductionIdentityTarget(
+        owner,
+        command,
       );
+      await owner.query("COMMIT");
+      return report;
+    } catch (error) {
+      await owner.query("ROLLBACK").catch(() => undefined);
+      throw error;
     }
-    return [
-      "ROSTER_RECONCILIATION=PASS",
-      `ROSTER_MANIFEST_SHA256=${command.rosterManifestSha}`,
-      `EXPECTED_IDENTITY_CREATE_COUNT=${PRODUCTION_EXECUTOR_CONTRACT.expectedIdentityCount}`,
-      "CURRENT_IDENTITY_COUNT=0",
-      "DATABASE_WRITES=0",
-    ];
   } finally {
     await owner.end().catch(() => undefined);
   }
+}
+
+export async function reconcileEmptyProductionIdentityTarget(
+  client: ClientBase,
+  command: ProductionExecutorCommand,
+): Promise<readonly string[]> {
+  const counts = await client.query<{
+    users: number;
+    accounts: number;
+    profiles: number;
+    roles: number;
+    scopes: number;
+    lecturer_mappings: number;
+    forced_password_profiles: number;
+    audit_events: number;
+  }>(`SELECT
+    (SELECT count(*)::integer FROM auth_user) AS users,
+    (SELECT count(*)::integer FROM auth_account) AS accounts,
+    (SELECT count(*)::integer FROM access_profile) AS profiles,
+    (SELECT count(*)::integer FROM role_assignment) AS roles,
+    (SELECT count(*)::integer FROM unit_scope_assignment) AS scopes,
+    (SELECT count(*)::integer FROM access_profile WHERE lecturer_uid IS NOT NULL) AS lecturer_mappings,
+    (SELECT count(*)::integer FROM access_profile WHERE must_change_password) AS forced_password_profiles,
+    (SELECT count(*)::integer FROM auth_audit_event) AS audit_events`);
+  const row = counts.rows[0];
+  if (!row || Object.values(row).some((count) => count !== 0)) {
+    throw new SafeProductionExecutorError(
+      "PRODUCTION_IDENTITY_TARGET_NOT_EMPTY",
+    );
+  }
+  return [
+    "ROSTER_RECONCILIATION=PASS",
+    `ROSTER_MANIFEST_SHA256=${command.rosterManifestSha}`,
+    `EXPECTED_IDENTITY_CREATE_COUNT=${PRODUCTION_EXECUTOR_CONTRACT.expectedIdentityCount}`,
+    `EXPECTED_TEST_IDENTITY_CREATE_COUNT=${PRODUCTION_EXECUTOR_CONTRACT.expectedTestIdentityCount}`,
+    "LECTURER_MAPPING_MODEL=access_profile.lecturer_uid",
+    "TEST_IDENTITY_MARKER_SOURCE=ROSTER_MANIFEST",
+    "CURRENT_IDENTITY_COUNT=0",
+    "ROSTER_BLOCK_COUNT=0",
+    "ROSTER_CONFLICT_COUNT=0",
+    "DATABASE_WRITES=0",
+  ];
 }
 
 async function backupProduction(
@@ -870,23 +900,30 @@ async function restoreProduction(
   );
   const backup = command.backupPath!;
   await verifyBackupChecksum(backup);
+  const sourceStateBefore = await readProductionState(
+    connections,
+    sourceCommand,
+  );
+  assertProductionState(sourceStateBefore, true);
+  const sourceFingerprintBefore = fingerprintState(sourceStateBefore);
   const maintenance = await connect(
     connections.bootstrap,
     "ueb-core-phase7-production-restore-create",
   );
+  let ownerMembership:
+    | {
+        readonly canSetBeforeOperation: true;
+        readonly membershipRevoked: true;
+        readonly canSetAfterOperation: false;
+      }
+    | undefined;
   try {
     await assertBootstrapRole(maintenance, connections.bootstrapUser);
-    if (await databaseExists(maintenance, command.targetDatabase)) {
-      throw new SafeProductionExecutorError(
-        "PRODUCTION_RESTORE_ALREADY_EXISTS",
-      );
-    }
-    await maintenance.query(
-      `CREATE DATABASE ${quoteIdentifier(command.targetDatabase)} OWNER ${quoteIdentifier(command.ownerRole)} TEMPLATE template0`,
-    );
-    await maintenance.query(
-      `COMMENT ON DATABASE ${quoteIdentifier(command.targetDatabase)} IS '${PRODUCTION_EXECUTOR_CONTRACT.restoreMarker}'`,
-    );
+    ownerMembership = await createGuardedProductionRestoreDatabase({
+      client: maintenance,
+      command,
+      bootstrapRole: connections.bootstrapUser,
+    });
   } finally {
     await maintenance.end().catch(() => undefined);
   }
@@ -917,12 +954,95 @@ async function restoreProduction(
   };
   const report = await readProductionState(restoredConnections, command);
   assertProductionState(report, false);
+  const sourceStateAfter = await readProductionState(
+    connections,
+    sourceCommand,
+  );
+  assertProductionState(sourceStateAfter, true);
+  assertSourceFingerprintUnchanged(
+    sourceFingerprintBefore,
+    fingerprintState(sourceStateAfter),
+  );
   return [
     "RESTORE_REHEARSAL=PASS",
+    `RESTORE_BOOTSTRAP_CAN_SET_OWNER_BEFORE_CREATE=${ownerMembership?.canSetBeforeOperation ? "YES" : "NO"}`,
+    `RESTORE_TEMPORARY_MEMBERSHIP_REVOKED=${ownerMembership?.membershipRevoked ? "YES" : "NO"}`,
+    `RESTORE_BOOTSTRAP_CAN_SET_OWNER_AFTER_CREATE=${ownerMembership?.canSetAfterOperation ? "YES" : "NO"}`,
     `RESTORE_CORE_ROW_COUNT=${report.coreRows}`,
     `RESTORE_MIGRATION_COUNT=${report.migrations}`,
     `RESTORE_FINGERPRINT=${fingerprintState(report)}`,
+    "SOURCE_PRODUCTION_FINGERPRINT_UNCHANGED=YES",
   ];
+}
+
+export async function createGuardedProductionRestoreDatabase(input: {
+  readonly client: ClientBase;
+  readonly command: ProductionExecutorCommand;
+  readonly bootstrapRole: string;
+}): Promise<{
+  readonly canSetBeforeOperation: true;
+  readonly membershipRevoked: true;
+  readonly canSetAfterOperation: false;
+}> {
+  if (await databaseExists(input.client, input.command.targetDatabase)) {
+    throw new SafeProductionExecutorError("PRODUCTION_RESTORE_ALREADY_EXISTS");
+  }
+  try {
+    const membership = await withTemporaryOwnerSetRole({
+      client: input.client,
+      bootstrapRole: input.bootstrapRole,
+      ownerRole: input.command.ownerRole,
+      forbiddenRoles: [
+        input.command.runtimeRole,
+        input.command.provisionerRole,
+      ],
+      operation: async () => {
+        await input.client.query(
+          `CREATE DATABASE ${quoteIdentifier(input.command.targetDatabase)} OWNER ${quoteIdentifier(input.command.ownerRole)} TEMPLATE template0`,
+        );
+        await input.client.query(
+          `COMMENT ON DATABASE ${quoteIdentifier(input.command.targetDatabase)} IS '${PRODUCTION_EXECUTOR_CONTRACT.restoreMarker}'`,
+        );
+      },
+    });
+    return {
+      canSetBeforeOperation: membership.canSetBeforeOperation,
+      membershipRevoked: membership.membershipRevoked,
+      canSetAfterOperation: membership.canSetAfterOperation,
+    };
+  } catch (error) {
+    const restoreExists = await databaseExists(
+      input.client,
+      input.command.targetDatabase,
+    ).catch(() => true);
+    throw new SafeProductionExecutorError(
+      "PRODUCTION_RESTORE_CREATE_FAILED",
+      restoreExists,
+      {
+        phase: "PRODUCTION_RESTORE_DATABASE_CREATE",
+        ...readSafePostgresDiagnostic(error),
+        objectType: "DATABASE",
+        objectName: safeDiagnosticObjectName(input.command.targetDatabase),
+      },
+    );
+  }
+}
+
+export function assertSourceFingerprintUnchanged(
+  before: string,
+  after: string,
+): void {
+  if (before !== after) {
+    throw new SafeProductionExecutorError(
+      "SOURCE_PRODUCTION_FINGERPRINT_CHANGED",
+      true,
+      {
+        phase: "PRODUCTION_RESTORE_SOURCE_VERIFY",
+        objectType: "DATABASE",
+        objectName: PRODUCTION_EXECUTOR_CONTRACT.database,
+      },
+    );
+  }
 }
 
 async function cleanupProductionRestore(
@@ -961,10 +1081,23 @@ async function cleanupProductionRestore(
         "PRODUCTION_RESTORE_CLEANUP_GUARD_FAILED",
       );
     }
-    await maintenance.query(
-      `DROP DATABASE ${quoteIdentifier(command.targetDatabase)}`,
-    );
-    return ["RESTORE_CLEANUP=PASS", "SOURCE_PRODUCTION_DATABASE=UNCHANGED"];
+    const membership = await withTemporaryOwnerSetRole({
+      client: maintenance,
+      bootstrapRole: connections.bootstrapUser,
+      ownerRole: command.ownerRole,
+      forbiddenRoles: [command.runtimeRole, command.provisionerRole],
+      operation: async () => {
+        await maintenance.query(
+          `DROP DATABASE ${quoteIdentifier(command.targetDatabase)}`,
+        );
+      },
+    });
+    return [
+      "RESTORE_CLEANUP=PASS",
+      `RESTORE_CLEANUP_MEMBERSHIP_REVOKED=${membership.membershipRevoked ? "YES" : "NO"}`,
+      `RESTORE_CLEANUP_CAN_SET_OWNER_AFTER_DROP=${membership.canSetAfterOperation ? "YES" : "NO"}`,
+      "SOURCE_PRODUCTION_DATABASE=UNCHANGED",
+    ];
   } finally {
     await maintenance.end().catch(() => undefined);
   }

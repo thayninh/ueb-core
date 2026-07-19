@@ -7,15 +7,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
+import type { ClientBase } from "pg";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   assertProductionDatabase,
+  assertProductionRestoreDatabase,
+  assertSourceFingerprintUnchanged,
   assertWindowState,
   parseOperatorWindow,
   parseProductionExecutorCommand,
   PRODUCTION_EXECUTOR_CONTRACT,
   readEmbeddedSourceSha,
+  reconcileEmptyProductionIdentityTarget,
   runProductionExecutor,
   SafeProductionExecutorError,
   type ProductionExecutionAdapter,
@@ -287,6 +291,107 @@ describe("Phase 7 executable production guards", () => {
     expect(source).toContain("PRODUCTION_DATABASE_CREATE_CLEANUP_FAILED");
     expect(source).toContain("const databaseCreated = await databaseExists(");
     expect(source).not.toMatch(/WITH ADMIN TRUE/u);
+  });
+
+  it("rejects unsafe production restore targets", () => {
+    expect(() =>
+      assertProductionRestoreDatabase(
+        "ueb_core_prod_restore_3fae396_regression",
+      ),
+    ).not.toThrow();
+    for (const target of [
+      "ueb_core_prod",
+      "ueb_core",
+      "ueb_core_staging",
+      "ueb_core_uat_phase5",
+      "ueb_core_prod_restore_",
+      "ueb_core_prod_restore_UNSAFE",
+    ]) {
+      expect(() => assertProductionRestoreDatabase(target)).toThrow(
+        /PRODUCTION_RESTORE_DATABASE_FORBIDDEN/u,
+      );
+    }
+  });
+
+  it("reconciles an empty identity target using the actual access-profile mapping", async () => {
+    const query = vi.fn(async (statement: string) => ({
+      rows: [
+        {
+          users: 0,
+          accounts: 0,
+          profiles: 0,
+          roles: 0,
+          scopes: 0,
+          lecturer_mappings: 0,
+          forced_password_profiles: 0,
+          audit_events: 0,
+        },
+      ],
+      statement,
+    }));
+    const command = parseProductionExecutorCommand(
+      "RECONCILE_IDENTITIES",
+      baseArguments("RECONCILE_IDENTITIES"),
+    );
+
+    const report = await reconcileEmptyProductionIdentityTarget(
+      { query } as unknown as ClientBase,
+      command,
+    );
+    const sql = String(query.mock.calls[0]?.[0]);
+
+    expect(sql).toContain("FROM access_profile");
+    expect(sql).toContain("lecturer_uid IS NOT NULL");
+    expect(sql).toContain("must_change_password");
+    expect(sql).not.toContain("lecturer_user_mapping");
+    expect(sql).not.toMatch(/\b(?:INSERT|UPDATE|DELETE|TRUNCATE)\b/iu);
+    expect(report).toContain("ROSTER_RECONCILIATION=PASS");
+    expect(report).toContain("EXPECTED_IDENTITY_CREATE_COUNT=254");
+    expect(report).toContain("EXPECTED_TEST_IDENTITY_CREATE_COUNT=2");
+    expect(report).toContain(
+      "LECTURER_MAPPING_MODEL=access_profile.lecturer_uid",
+    );
+    expect(report).toContain("TEST_IDENTITY_MARKER_SOURCE=ROSTER_MANIFEST");
+    expect(report).toContain("ROSTER_BLOCK_COUNT=0");
+    expect(report).toContain("ROSTER_CONFLICT_COUNT=0");
+    expect(report).toContain("DATABASE_WRITES=0");
+  });
+
+  it("fails closed when any identity residue exists", async () => {
+    const query = vi.fn(async () => ({
+      rows: [
+        {
+          users: 0,
+          accounts: 0,
+          profiles: 1,
+          roles: 0,
+          scopes: 0,
+          lecturer_mappings: 1,
+          forced_password_profiles: 1,
+          audit_events: 0,
+        },
+      ],
+    }));
+    const command = parseProductionExecutorCommand(
+      "RECONCILE_IDENTITIES",
+      baseArguments("RECONCILE_IDENTITIES"),
+    );
+
+    await expect(
+      reconcileEmptyProductionIdentityTarget(
+        { query } as unknown as ClientBase,
+        command,
+      ),
+    ).rejects.toThrow(/PRODUCTION_IDENTITY_TARGET_NOT_EMPTY/u);
+  });
+
+  it("proves the source production fingerprint remains unchanged", () => {
+    expect(() =>
+      assertSourceFingerprintUnchanged("before", "before"),
+    ).not.toThrow();
+    expect(() => assertSourceFingerprintUnchanged("before", "after")).toThrow(
+      /SOURCE_PRODUCTION_FINGERPRINT_CHANGED/u,
+    );
   });
 
   it("redacted preflight output has no supplied credential material", async () => {
