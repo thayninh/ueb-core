@@ -58,6 +58,21 @@ describe("Phase 7 guarded production identity apply", () => {
     ).toThrow(/PRODUCTION_IDENTITY_IMMUTABLE_INPUT_MISMATCH/u);
   });
 
+  it("accepts only the explicitly approved retry authorization", () => {
+    expect(() =>
+      parseProductionIdentityApplyCommand(baseArguments()),
+    ).not.toThrow();
+    expect(() =>
+      parseProductionIdentityApplyCommand(
+        replace(
+          baseArguments(),
+          "--authorization-reference=",
+          "--authorization-reference=PROVISION_START_AND_CUTOVER_PRODUCTION_PHASE7_2026-07-19",
+        ),
+      ),
+    ).toThrow(/PRODUCTION_IDENTITY_AUTHORIZATION_REQUIRED/u);
+  });
+
   it("blocks malformed and inactive change windows before database access", async () => {
     expect(() =>
       parseProductionIdentityApplyCommand(

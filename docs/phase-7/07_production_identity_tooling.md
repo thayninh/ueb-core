@@ -149,7 +149,7 @@ separately authorized apply command:
 ```bash
 pnpm phase7:apply-production-identities -- \
   --target-database=ueb_core_prod \
-  --authorization-reference=PROVISION_START_AND_CUTOVER_PRODUCTION_PHASE7_2026-07-19 \
+  --authorization-reference=RETRY_PRODUCTION_IDENTITY_PROVISIONING_AND_CONTINUE_GO_LIVE_PHASE7_2026-07-19 \
   --change-window-start=<ISO_8601_WITH_TIMEZONE> \
   --change-window-end=<ISO_8601_WITH_TIMEZONE> \
   --expected-git-sha=<EXACT_IMMUTABLE_IMAGE_SHA> \

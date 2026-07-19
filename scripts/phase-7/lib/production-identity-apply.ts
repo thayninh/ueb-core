@@ -25,7 +25,8 @@ import { loadValidatedProductionRoster } from "../production-roster-workflow";
 export const PRODUCTION_IDENTITY_APPLY_CONTRACT = {
   database: PRODUCTION_EXECUTOR_CONTRACT.database,
   provisionerRole: PRODUCTION_EXECUTOR_CONTRACT.provisionerRole,
-  authorization: "PROVISION_START_AND_CUTOVER_PRODUCTION_PHASE7_2026-07-19",
+  authorization:
+    "RETRY_PRODUCTION_IDENTITY_PROVISIONING_AND_CONTINUE_GO_LIVE_PHASE7_2026-07-19",
   rosterManifestSha: PRODUCTION_EXECUTOR_CONTRACT.rosterManifestSha,
   canonicalChecksum: PRODUCTION_EXECUTOR_CONTRACT.canonicalChecksum,
   expectedGitShaPattern: /^[a-f0-9]{40}$/u,
