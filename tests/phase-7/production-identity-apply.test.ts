@@ -101,7 +101,19 @@ describe("Phase 7 guarded production identity apply", () => {
 
   it("rolls back the complete batch on one create failure", async () => {
     const roster = productionRoster();
-    const database = fakeDatabase({ failAtCreate: 18 });
+    const database = fakeDatabase({
+      failAtCreate: 18,
+      failure: Object.assign(
+        new Error(`postgresql://user:${passwordValue}@host/database`),
+        {
+          code: "P2004",
+          meta: {
+            modelName: "Auth_user",
+            driverAdapterError: { cause: { originalCode: "42501" } },
+          },
+        },
+      ),
+    });
     const error = await applyProductionIdentitiesAtomically({
       database,
       command: parseProductionIdentityApplyCommand(baseArguments()),
@@ -115,7 +127,47 @@ describe("Phase 7 guarded production identity apply", () => {
     expect(formatProductionIdentityApplyFailure(error)).toContain(
       "DATABASE_MUTATIONS=0",
     );
+    const report = formatProductionIdentityApplyFailure(error);
+    expect(report).toContain("FAILED_PHASE=CREATE_IDENTITY");
+    expect(report).toContain("SANITIZED_ERROR_CODE=P2004");
+    expect(report).toContain("POSTGRES_SQLSTATE=42501");
+    expect(report).toContain("SAFE_OBJECT_NAME=auth_user");
+    expect(report).toContain("FAILED_IDENTITY_INDEX_OR_COUNT=18/254");
+    expect(report).toContain("TRANSACTION_ROLLED_BACK=YES");
+    expect(report).not.toContain(passwordValue);
+    expect(report).not.toContain("postgresql://");
     expect(database.committedState().identities).toHaveLength(0);
+  });
+
+  it("reports a pre-transaction failure without claiming rollback or leaking an unsafe object", async () => {
+    const roster = productionRoster();
+    const database: ProductionIdentityApplyDatabase = {
+      async serializable() {
+        throw Object.assign(new Error(`secret=${passwordValue}`), {
+          code: "P1001",
+          meta: {
+            modelName: "SensitiveRosterPerson",
+            driverAdapterError: { cause: { originalCode: "08001" } },
+          },
+        });
+      },
+      async close() {},
+    };
+    const error = await applyProductionIdentitiesAtomically({
+      database,
+      command: parseProductionIdentityApplyCommand(baseArguments()),
+      roster,
+      prepared: prepare(roster),
+    }).catch((caught: unknown) => caught);
+    const report = formatProductionIdentityApplyFailure(error);
+    expect(report).toContain("FAILED_PHASE=TRANSACTION_START");
+    expect(report).toContain("SANITIZED_ERROR_CODE=P1001");
+    expect(report).toContain("POSTGRES_SQLSTATE=08001");
+    expect(report).toContain("SAFE_OBJECT_NAME=NOT_AVAILABLE");
+    expect(report).toContain("FAILED_IDENTITY_INDEX_OR_COUNT=NOT_AVAILABLE");
+    expect(report).toContain("TRANSACTION_ROLLED_BACK=NO");
+    expect(report).not.toContain(passwordValue);
+    expect(report).not.toContain("SensitiveRosterPerson");
   });
 
   it("creates all expected identities atomically and reruns as an idempotent NOOP", async () => {
@@ -326,7 +378,10 @@ function uuid(value: number): string {
 }
 
 function fakeDatabase(
-  options: { readonly failAtCreate?: number } = {},
+  options: {
+    readonly failAtCreate?: number;
+    readonly failure?: unknown;
+  } = {},
 ): ProductionIdentityApplyDatabase & {
   committedState(): ProductionIdentityStateSnapshot;
   transactionCount(): number;
@@ -353,7 +408,9 @@ function fakeDatabase(
         },
         async createIdentity({ prepared, unitId }) {
           creates += 1;
-          if (options.failAtCreate === creates) throw new Error("injected");
+          if (options.failAtCreate === creates) {
+            throw options.failure ?? new Error("injected");
+          }
           const identity = prepared.identity;
           const userId = uuid(10_000 + creates);
           const activeUnitCodes =
