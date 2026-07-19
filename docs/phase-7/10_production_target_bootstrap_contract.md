@@ -80,6 +80,7 @@ phase7:bootstrap-production-target
 phase7:verify-production-target
 phase7:reconcile-production-identities
 phase7:apply-production-identities
+phase7:seed-production-organization-units
 phase7:backup-production-target
 phase7:restore-production-rehearsal
 phase7:cleanup-production-restore
@@ -139,7 +140,34 @@ be created later without writing during reconciliation.
 The executor never drops `ueb_core_prod`, never retries a partial apply blindly,
 never deletes a backup and never provisions identities.
 
-## 8. Operator image contract
+## 8. Guarded production organization-unit seed
+
+`phase7:seed-production-organization-units` is the only Phase 7 command that
+may populate the production `organization_unit` inventory. It requires the
+exact `ueb_core_prod` database, the authorization reference
+`SEED_PRODUCTION_ORGANIZATION_UNITS_ONLY_PHASE7_2026-07-19`, an explicit
+confirmation, an embedded source SHA match and an active timezone-qualified
+change window of at most two hours.
+
+The command uses the existing Prisma `OrganizationUnit` model in a serializable
+transaction. An empty inventory creates exactly these records; the canonical
+source value remains the abbreviated value used by RLS while the stable key and
+display name follow the approved production contract:
+
+| Unit key | Canonical source value | Display name |
+| --- | --- | --- |
+| `KTPT` | `Khoa KTPT` | Khoa Kinh tế phát triển |
+| `QTKD` | `Viện QTKD` | Viện Quản trị kinh doanh |
+| `KTKDQT` | `Khoa KT&KDQT` | Khoa Kinh tế và Kinh doanh quốc tế |
+| `KTCT` | `Khoa KTCT` | Khoa Kinh tế chính trị |
+| `TCNH` | `Khoa TCNH` | Khoa Tài chính - Ngân hàng |
+| `KTKT` | `Khoa KTKT` | Khoa Kế toán - Kiểm toán |
+
+An exact existing inventory is an idempotent no-op. Missing, extra, inactive,
+renamed or duplicate records block the entire transaction; the command never
+repairs conflicts or provisions an identity.
+
+## 9. Operator image contract
 
 The operator image contains Node 24, PostgreSQL client tools, Prisma schema and
 all eight migrations, Phase 2 canonical import code and contract, Phase 3/4 ACL
@@ -154,7 +182,7 @@ embedded value with `--expected-git-sha` and fail closed when the file is
 missing, malformed or different. The operator image contains neither the Git
 binary nor `.git` metadata.
 
-## 9. Failure and hard-stop policy
+## 10. Failure and hard-stop policy
 
 Before target creation, invalid source/evidence/window/artifacts produce zero
 database mutations. A failed database creation attempts to remove the newly

@@ -31,6 +31,7 @@
     "phase7:verify-production-target": "tsx scripts/phase-7/production-target.ts verify",
     "phase7:reconcile-production-identities": "tsx scripts/phase-7/production-target.ts reconcile-identities",
     "phase7:apply-production-identities": "tsx scripts/phase-7/apply-production-identities.ts",
+    "phase7:seed-production-organization-units": "tsx scripts/phase-7/seed-production-organization-units.ts",
     "phase7:backup-production-target": "tsx scripts/phase-7/production-target.ts backup",
     "phase7:restore-production-rehearsal": "tsx scripts/phase-7/production-target.ts restore",
     "phase7:cleanup-production-restore": "tsx scripts/phase-7/production-target.ts cleanup-restore"
