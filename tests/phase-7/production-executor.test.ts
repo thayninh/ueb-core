@@ -17,9 +17,11 @@ import {
   PRODUCTION_EXECUTOR_CONTRACT,
   readEmbeddedSourceSha,
   runProductionExecutor,
+  SafeProductionExecutorError,
   type ProductionExecutionAdapter,
   type ProductionExecutorMode,
 } from "../../scripts/phase-7/lib/production-executor";
+import { formatProductionExecutorFailure } from "../../scripts/phase-7/production-target";
 
 const gitSha = "a".repeat(40);
 const execFileAsync = promisify(execFile);
@@ -166,6 +168,66 @@ describe("Phase 7 executable production guards", () => {
     expect(result.report).toContain("APP_START=NOT_PERFORMED");
     expect(result.report).toContain("CADDY_CHANGE=NOT_PERFORMED");
     expect(result.report).toContain("IDENTITY_PROVISIONING=NOT_PERFORMED");
+  });
+
+  it("preserves a safe pre-mutation phase and error code", async () => {
+    const adapter = adapterMock();
+    vi.mocked(adapter.bootstrap).mockRejectedValueOnce(
+      new SafeProductionExecutorError("SOURCE_FILENAME_MISMATCH", false, {
+        phase: "CANONICAL_SOURCE_PRECHECK",
+        objectType: "SOURCE_FILE",
+        objectName: "canonical.xlsx",
+      }),
+    );
+
+    const error = await runProductionExecutor({
+      command: parseProductionExecutorCommand(
+        "BOOTSTRAP",
+        baseArguments("BOOTSTRAP"),
+      ),
+      environment: {},
+      now: new Date("2026-07-18T18:30:00Z"),
+      sourceSha: async () => gitSha,
+      adapter,
+    }).catch((caught: unknown) => caught);
+
+    const report = formatProductionExecutorFailure(error);
+    expect(report).toContain("FAILED_PHASE=CANONICAL_SOURCE_PRECHECK");
+    expect(report).toContain("ERROR_CODE=SOURCE_FILENAME_MISMATCH");
+    expect(report).toContain("SAFE_OBJECT_TYPE=SOURCE_FILE");
+    expect(report).toContain("SAFE_OBJECT_NAME=canonical.xlsx");
+    expect(report).toContain("DATABASE_CONNECTIONS=0");
+    expect(report).toContain("DATABASE_MUTATIONS=0");
+  });
+
+  it("exposes only safe PostgreSQL diagnostics for unexpected failures", async () => {
+    const adapter = adapterMock();
+    vi.mocked(adapter.bootstrap).mockRejectedValueOnce({
+      code: "42501",
+      table: "safe_table",
+      message: "password=must-not-leak postgresql://must-not-leak",
+    });
+
+    const error = await runProductionExecutor({
+      command: parseProductionExecutorCommand(
+        "BOOTSTRAP",
+        baseArguments("BOOTSTRAP"),
+      ),
+      environment: {},
+      now: new Date("2026-07-18T18:30:00Z"),
+      sourceSha: async () => gitSha,
+      adapter,
+    }).catch((caught: unknown) => caught);
+
+    const report = formatProductionExecutorFailure(error);
+    expect(report).toContain("FAILED_PHASE=PRODUCTION_BOOTSTRAP");
+    expect(report).toContain(
+      "ERROR_CODE=PRODUCTION_OPERATION_FAILED_RECONCILIATION_REQUIRED",
+    );
+    expect(report).toContain("POSTGRES_SQLSTATE=42501");
+    expect(report).toContain("SAFE_OBJECT_TYPE=TABLE");
+    expect(report).toContain("SAFE_OBJECT_NAME=safe_table");
+    expect(report).not.toMatch(/must-not-leak|password=|postgresql:\/\//iu);
   });
 
   it("fails closed when dry-run is given database credentials", async () => {

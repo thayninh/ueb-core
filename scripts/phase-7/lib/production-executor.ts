@@ -10,7 +10,7 @@ import {
   readFile,
   writeFile,
 } from "node:fs/promises";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { basename, isAbsolute, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 
 import { Client, type ClientBase } from "pg";
@@ -95,10 +95,18 @@ export interface ProductionExecutionAdapter {
   ): Promise<readonly string[]>;
 }
 
+export interface SafeProductionDiagnostic {
+  readonly phase?: string;
+  readonly postgresSqlstate?: string;
+  readonly objectType?: string;
+  readonly objectName?: string;
+}
+
 export class SafeProductionExecutorError extends Error {
   constructor(
     readonly code: string,
     readonly mutationPossible = false,
+    readonly diagnostic: SafeProductionDiagnostic = {},
   ) {
     super(code);
   }
@@ -417,10 +425,23 @@ export async function runProductionExecutor(input: {
   let operationLines: readonly string[];
   try {
     operationLines = await executeAdapter(command, adapter);
-  } catch {
+  } catch (error) {
+    if (error instanceof SafeProductionExecutorError) {
+      if (error.diagnostic.phase) throw error;
+      throw new SafeProductionExecutorError(
+        error.code,
+        error.mutationPossible || mutation,
+        { phase: productionExecutionPhase(command.mode) },
+      );
+    }
+    const postgresDiagnostic = readSafePostgresDiagnostic(error);
     throw new SafeProductionExecutorError(
       "PRODUCTION_OPERATION_FAILED_RECONCILIATION_REQUIRED",
       true,
+      {
+        phase: productionExecutionPhase(command.mode),
+        ...postgresDiagnostic,
+      },
     );
   }
   return {
@@ -449,6 +470,48 @@ function executeAdapter(
   throw new SafeProductionExecutorError("PRODUCTION_EXECUTOR_MODE_INVALID");
 }
 
+function productionExecutionPhase(mode: ProductionExecutorMode): string {
+  if (mode === "BOOTSTRAP") return "PRODUCTION_BOOTSTRAP";
+  if (mode === "VERIFY") return "PRODUCTION_VERIFY";
+  if (mode === "RECONCILE_IDENTITIES")
+    return "PRODUCTION_IDENTITY_RECONCILIATION";
+  if (mode === "BACKUP") return "PRODUCTION_BACKUP";
+  if (mode === "RESTORE") return "PRODUCTION_RESTORE_REHEARSAL";
+  if (mode === "CLEANUP_RESTORE") return "PRODUCTION_RESTORE_CLEANUP";
+  return "PRODUCTION_PREFLIGHT";
+}
+
+function readSafePostgresDiagnostic(error: unknown): SafeProductionDiagnostic {
+  if (!error || typeof error !== "object") return {};
+  const candidate = error as Record<string, unknown>;
+  const postgresSqlstate =
+    typeof candidate.code === "string" && /^[0-9A-Z]{5}$/u.test(candidate.code)
+      ? candidate.code
+      : undefined;
+  const objectCandidates = [
+    ["TABLE", candidate.table],
+    ["CONSTRAINT", candidate.constraint],
+    ["COLUMN", candidate.column],
+    ["SCHEMA", candidate.schema],
+  ] as const;
+  const object = objectCandidates.find(
+    ([, value]) => typeof value === "string" && value.length > 0,
+  );
+  return {
+    ...(postgresSqlstate ? { postgresSqlstate } : {}),
+    ...(object
+      ? {
+          objectType: object[0],
+          objectName: safeDiagnosticObjectName(object[1] as string),
+        }
+      : {}),
+  };
+}
+
+function safeDiagnosticObjectName(value: string): string {
+  return /^[a-zA-Z0-9_.-]{1,128}$/u.test(value) ? value : "REDACTED";
+}
+
 export function createProductionExecutionAdapter(
   environment: Readonly<Record<string, string | undefined>>,
 ): ProductionExecutionAdapter {
@@ -475,7 +538,25 @@ async function bootstrapProduction(
     prepared.rows.length !== PRODUCTION_EXECUTOR_CONTRACT.canonicalRowCount ||
     prepared.violations.length !== 0
   ) {
-    throw new SafeProductionExecutorError("CANONICAL_SOURCE_PRECHECK_FAILED");
+    const violationCodes = [
+      ...new Set(prepared.violations.map((violation) => violation.code)),
+    ];
+    const safeViolationCode =
+      violationCodes.length === 1 &&
+      /^[A-Z][A-Z0-9_]{0,127}$/u.test(violationCodes[0]!)
+        ? violationCodes[0]
+        : undefined;
+    throw new SafeProductionExecutorError(
+      safeViolationCode ?? "CANONICAL_SOURCE_PRECHECK_FAILED",
+      false,
+      {
+        phase: "CANONICAL_SOURCE_PRECHECK",
+        objectType: "SOURCE_FILE",
+        objectName: safeDiagnosticObjectName(
+          basename(command.canonicalSource!),
+        ),
+      },
+    );
   }
   await mkdir(command.canonicalAuditDirectory!, {
     recursive: true,
@@ -508,12 +589,19 @@ async function bootstrapProduction(
       await maintenance.query(
         `CREATE DATABASE ${quoteIdentifier(command.targetDatabase)} OWNER ${quoteIdentifier(command.ownerRole)} TEMPLATE template0`,
       );
-    } catch {
+    } catch (error) {
       await maintenance
         .query(`DROP ROLE ${quoteIdentifier(command.ownerRole)}`)
         .catch(() => undefined);
       throw new SafeProductionExecutorError(
         "PRODUCTION_DATABASE_CREATE_FAILED",
+        true,
+        {
+          phase: "PRODUCTION_DATABASE_CREATE",
+          ...readSafePostgresDiagnostic(error),
+          objectType: "DATABASE",
+          objectName: safeDiagnosticObjectName(command.targetDatabase),
+        },
       );
     }
     await createRestrictedRole(
