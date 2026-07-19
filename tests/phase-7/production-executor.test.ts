@@ -272,6 +272,7 @@ describe("Phase 7 executable production guards", () => {
       "phase7:bootstrap-production-target",
       "phase7:verify-production-target",
       "phase7:reconcile-production-identities",
+      "phase7:apply-production-identities",
       "phase7:backup-production-target",
       "phase7:restore-production-rehearsal",
       "phase7:cleanup-production-restore",

@@ -82,17 +82,22 @@ The dry-run is read-only and produces redacted aggregate evidence. It validates:
 
 ### 4.2 Batch apply
 
-Apply uses bounded, restartable batches with an opaque run ID and idempotency
-key. Each batch is transactional, records aggregate created/unchanged/failed
-counts and stops on the first unexplained mismatch. Database provisioning uses
-the dedicated non-owner provisioner identity; application runtime and migration
-owner credentials are not fallbacks.
+Apply uses the immutable roster SHA as its idempotency key. The approved
+production roster is a single bounded batch of 254 identities and is committed
+in one `Serializable`, all-or-nothing transaction. It records only aggregate
+created/unchanged/failed counts and stops on the first unexplained mismatch.
+Database provisioning uses the dedicated non-owner provisioner identity;
+application runtime and migration owner credentials are not fallbacks.
 
 Account creation writes the explicit forced-change flag in the same identity
-transaction. Provisioning audit metadata records only whether password change
-is required and never contains credential material. Current lecturer
-provisioning passes `true`; local bootstrap admin passes `false`. No production
-provisioning is executed by this implementation change.
+transaction. Because the approved roster contains no ADMIN identity, the
+schema-supported initial provenance is self-bootstrap for `created_by` and
+`granted_by`; the database provisioner remains the guarded execution identity.
+Provisioning audit metadata records the roster SHA, opaque authorization
+reference, identity class, test marker and whether password change is required;
+it never contains email, name, lecturer UID or credential material. Current
+lecturer and leader provisioning requires `true`. Implementation of the command
+does not itself authorize or execute production provisioning.
 
 ### 4.3 Reconciliation
 

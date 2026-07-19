@@ -30,12 +30,15 @@
     "phase7:bootstrap-production-target": "tsx scripts/phase-7/production-target.ts bootstrap",
     "phase7:verify-production-target": "tsx scripts/phase-7/production-target.ts verify",
     "phase7:reconcile-production-identities": "tsx scripts/phase-7/production-target.ts reconcile-identities",
+    "phase7:apply-production-identities": "tsx scripts/phase-7/apply-production-identities.ts",
     "phase7:backup-production-target": "tsx scripts/phase-7/production-target.ts backup",
     "phase7:restore-production-rehearsal": "tsx scripts/phase-7/production-target.ts restore",
     "phase7:cleanup-production-restore": "tsx scripts/phase-7/production-target.ts cleanup-restore"
   },
   "dependencies": {
+    "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
+    "better-auth": "^1.6.23",
     "dotenv": "^17.4.2",
     "exceljs": "^4.4.0",
     "pg": "^8.22.0",
