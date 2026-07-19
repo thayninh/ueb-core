@@ -182,6 +182,20 @@ The entrypoint refuses direct `PHASE7_SECURE_DIRECTORY` injection, writable
 source mounts, missing or unexpected files, symlinks, hardlinks, unsafe modes,
 non-tmpfs targets and tmpfs mounts without `nosuid,nodev,noexec`.
 
+The roster loader keeps these as two explicit, non-interchangeable contracts:
+
+```text
+HOST_SECURE_INPUT_MODE=0600
+RUNTIME_STAGED_SECRET_MODE=0400
+```
+
+Host-side roster commands accept only the `HOST` contract: directory mode
+`0700` and file mode `0600`. Production identity apply explicitly selects the
+`RUNTIME_STAGED` contract: an operator-owned directory with mode `0500` and
+operator-owned files with mode `0400`. Neither path accepts the other mode,
+group/other permissions, a different owner, symlinks, hardlinks or resolved
+paths outside the guarded directory.
+
 The required container options are:
 
 ```text
