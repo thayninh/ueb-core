@@ -25,6 +25,7 @@ import { loadSourceContract } from "../../phase-2/lib/source-contract";
 
 const execFileAsync = promisify(execFile);
 const OPERATOR_SOURCE_SHA_PATH = "/operator/.source-git-sha";
+const COLUMN_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]{0,62}$/u;
 
 export const PRODUCTION_EXECUTOR_CONTRACT = {
   database: "ueb_core_prod",
@@ -46,10 +47,16 @@ export const PRODUCTION_EXECUTOR_CONTRACT = {
   expectedTestIdentityCount: 2,
 } as const;
 
+export const PRODUCTION_RUNTIME_PASSWORD_CHANGE_COLUMN_PRIVILEGES = {
+  auth_account: ["password", "updatedAt"],
+  access_profile: ["must_change_password", "password_changed_at", "updated_at"],
+} as const;
+
 export type ProductionExecutorMode =
   | "PREFLIGHT"
   | "BOOTSTRAP"
   | "VERIFY"
+  | "RECONCILE_RUNTIME_ACL"
   | "RECONCILE_IDENTITIES"
   | "BACKUP"
   | "RESTORE"
@@ -90,6 +97,9 @@ export interface ProductionExecutorResult {
 export interface ProductionExecutionAdapter {
   bootstrap(command: ProductionExecutorCommand): Promise<readonly string[]>;
   verify(command: ProductionExecutorCommand): Promise<readonly string[]>;
+  reconcileRuntimeAcl(
+    command: ProductionExecutorCommand,
+  ): Promise<readonly string[]>;
   reconcile(command: ProductionExecutorCommand): Promise<readonly string[]>;
   backup(command: ProductionExecutorCommand): Promise<readonly string[]>;
   restore(command: ProductionExecutorCommand): Promise<readonly string[]>;
@@ -122,6 +132,7 @@ const CONFIRMATIONS: Readonly<Record<ProductionExecutorMode, string>> = {
   PREFLIGHT: "--confirm-production-preflight",
   BOOTSTRAP: "--confirm-create-production-target",
   VERIFY: "--confirm-production-verify",
+  RECONCILE_RUNTIME_ACL: "--confirm-production-runtime-acl-reconciliation",
   RECONCILE_IDENTITIES: "--confirm-production-identity-reconciliation",
   BACKUP: "--confirm-production-backup",
   RESTORE: "--confirm-production-restore-rehearsal",
@@ -153,6 +164,7 @@ const MODE_PREFIXES: Readonly<
   PREFLIGHT: [],
   BOOTSTRAP: ["--canonical-source=", "--canonical-audit-directory="],
   VERIFY: [],
+  RECONCILE_RUNTIME_ACL: [],
   RECONCILE_IDENTITIES: [],
   BACKUP: ["--backup=", "--off-host-directory="],
   RESTORE: ["--source-database=", "--backup="],
@@ -165,6 +177,7 @@ export function parseProductionExecutorMode(
   if (value === "preflight") return "PREFLIGHT";
   if (value === "bootstrap") return "BOOTSTRAP";
   if (value === "verify") return "VERIFY";
+  if (value === "reconcile-runtime-acl") return "RECONCILE_RUNTIME_ACL";
   if (value === "reconcile-identities") return "RECONCILE_IDENTITIES";
   if (value === "backup") return "BACKUP";
   if (value === "restore") return "RESTORE";
@@ -475,6 +488,8 @@ function executeAdapter(
 ): Promise<readonly string[]> {
   if (command.mode === "BOOTSTRAP") return adapter.bootstrap(command);
   if (command.mode === "VERIFY") return adapter.verify(command);
+  if (command.mode === "RECONCILE_RUNTIME_ACL")
+    return adapter.reconcileRuntimeAcl(command);
   if (command.mode === "RECONCILE_IDENTITIES")
     return adapter.reconcile(command);
   if (command.mode === "BACKUP") return adapter.backup(command);
@@ -487,6 +502,8 @@ function executeAdapter(
 function productionExecutionPhase(mode: ProductionExecutorMode): string {
   if (mode === "BOOTSTRAP") return "PRODUCTION_BOOTSTRAP";
   if (mode === "VERIFY") return "PRODUCTION_VERIFY";
+  if (mode === "RECONCILE_RUNTIME_ACL")
+    return "PRODUCTION_RUNTIME_ACL_RECONCILIATION";
   if (mode === "RECONCILE_IDENTITIES")
     return "PRODUCTION_IDENTITY_RECONCILIATION";
   if (mode === "BACKUP") return "PRODUCTION_BACKUP";
@@ -532,6 +549,8 @@ export function createProductionExecutionAdapter(
   return {
     bootstrap: (command) => bootstrapProduction(command, environment),
     verify: (command) => verifyProduction(command, environment),
+    reconcileRuntimeAcl: (command) =>
+      reconcileProductionRuntimeAcl(command, environment),
     reconcile: (command) => reconcileProduction(command, environment),
     backup: (command) => backupProduction(command, environment),
     restore: (command) => restoreProduction(command, environment),
@@ -765,6 +784,25 @@ async function verifyProduction(
     "RLS_DEFAULT_DENY=PASS",
     "DATABASE_WRITES=0",
     "SECURITY_VERIFY=PASS",
+  ];
+}
+
+async function reconcileProductionRuntimeAcl(
+  command: ProductionExecutorCommand,
+  environment: Readonly<Record<string, string | undefined>>,
+): Promise<readonly string[]> {
+  const connections = readProductionConnections(environment, command, false);
+  await reconcileProductionProvisioner(connections.owner, command);
+  const report = await readProductionState(connections, command);
+  assertProductionState(report, true);
+  return [
+    "ACL_RECONCILIATION=PASS",
+    "AUTH_ACCOUNT_COLUMN_UPDATE=PASSWORD_UPDATED_AT_ONLY",
+    "ACCESS_PROFILE_COLUMN_UPDATE=MUST_CHANGE_PASSWORD_PASSWORD_CHANGED_AT_UPDATED_AT_ONLY",
+    "TABLE_WIDE_UPDATE=NO",
+    "NEGATIVE_PRIVILEGES=PASS",
+    "RLS_DEFAULT_DENY=PASS",
+    "DATABASE_MUTATIONS=ACL_ONLY",
   ];
 }
 
@@ -1360,7 +1398,37 @@ async function readProductionState(
             has_table_privilege($1, 'public.ueb_core_data', 'TRUNCATE') OR
             has_table_privilege($1, 'public.workflow_event', 'UPDATE') OR
             has_table_privilege($1, 'public.workflow_event', 'DELETE') OR
-            has_table_privilege($1, 'public.workflow_event', 'TRUNCATE')
+            has_table_privilege($1, 'public.workflow_event', 'TRUNCATE') OR
+            has_table_privilege($1, 'public.auth_account', 'UPDATE') OR
+            has_table_privilege($1, 'public.access_profile', 'UPDATE')
+          ) AND
+          has_column_privilege($1, 'public.auth_account', 'password', 'UPDATE') AND
+          has_column_privilege($1, 'public.auth_account', 'updatedAt', 'UPDATE') AND
+          has_column_privilege($1, 'public.access_profile', 'must_change_password', 'UPDATE') AND
+          has_column_privilege($1, 'public.access_profile', 'password_changed_at', 'UPDATE') AND
+          has_column_privilege($1, 'public.access_profile', 'updated_at', 'UPDATE') AND
+          NOT EXISTS (
+            SELECT 1
+            FROM information_schema.columns AS runtime_column
+            WHERE runtime_column.table_schema = 'public'
+              AND runtime_column.table_name IN ('auth_account', 'access_profile')
+              AND has_column_privilege(
+                $1,
+                format('%I.%I', runtime_column.table_schema, runtime_column.table_name),
+                runtime_column.column_name,
+                'UPDATE'
+              )
+              AND NOT (
+                (runtime_column.table_name = 'auth_account'
+                  AND runtime_column.column_name IN ('password', 'updatedAt'))
+                OR
+                (runtime_column.table_name = 'access_profile'
+                  AND runtime_column.column_name IN (
+                    'must_change_password',
+                    'password_changed_at',
+                    'updated_at'
+                  ))
+              )
           ) AS runtime_safe,
           NOT (
             has_table_privilege($2, 'public.ueb_core_data', 'INSERT') OR
@@ -1470,12 +1538,27 @@ async function reconcileProductionProvisioner(
         `GRANT SELECT ON TABLE public.${quoteIdentifier(table)} TO ${runtime}`,
       );
     }
+    await grantProductionPasswordChangePrivileges(client, runtime);
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;
   } finally {
     await client.end().catch(() => undefined);
+  }
+}
+
+export async function grantProductionPasswordChangePrivileges(
+  client: Pick<ClientBase, "query">,
+  runtimeRoleIdentifier: string,
+): Promise<void> {
+  for (const [table, columns] of Object.entries(
+    PRODUCTION_RUNTIME_PASSWORD_CHANGE_COLUMN_PRIVILEGES,
+  )) {
+    const columnIdentifiers = columns.map(quoteColumnIdentifier).join(", ");
+    await client.query(
+      `GRANT UPDATE (${columnIdentifiers}) ON TABLE public.${quoteIdentifier(table)} TO ${runtimeRoleIdentifier}`,
+    );
   }
 }
 
@@ -1683,6 +1766,13 @@ function assertExternalPath(path: string): string {
 
 function quoteIdentifier(value: string): string {
   if (!IDENTIFIER.test(value)) {
+    throw new SafeProductionExecutorError("PRODUCTION_IDENTIFIER_INVALID");
+  }
+  return `"${value}"`;
+}
+
+function quoteColumnIdentifier(value: string): string {
+  if (!COLUMN_IDENTIFIER.test(value)) {
     throw new SafeProductionExecutorError("PRODUCTION_IDENTIFIER_INVALID");
   }
   return `"${value}"`;

@@ -29,6 +29,7 @@
     "phase7:preflight-production-target": "tsx scripts/phase-7/production-target.ts preflight",
     "phase7:bootstrap-production-target": "tsx scripts/phase-7/production-target.ts bootstrap",
     "phase7:verify-production-target": "tsx scripts/phase-7/production-target.ts verify",
+    "phase7:reconcile-production-runtime-acl": "tsx scripts/phase-7/production-target.ts reconcile-runtime-acl",
     "phase7:reconcile-production-identities": "tsx scripts/phase-7/production-target.ts reconcile-identities",
     "phase7:apply-production-identities": "tsx scripts/phase-7/apply-production-identities.ts",
     "phase7:seed-production-organization-units": "tsx scripts/phase-7/seed-production-organization-units.ts",

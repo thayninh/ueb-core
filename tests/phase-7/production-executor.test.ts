@@ -15,9 +15,11 @@ import {
   assertProductionRestoreDatabase,
   assertSourceFingerprintUnchanged,
   assertWindowState,
+  grantProductionPasswordChangePrivileges,
   parseOperatorWindow,
   parseProductionExecutorCommand,
   PRODUCTION_EXECUTOR_CONTRACT,
+  PRODUCTION_RUNTIME_PASSWORD_CHANGE_COLUMN_PRIVILEGES,
   readEmbeddedSourceSha,
   reconcileEmptyProductionIdentityTarget,
   runProductionExecutor,
@@ -72,6 +74,58 @@ afterEach(async () => {
 });
 
 describe("Phase 7 executable production guards", () => {
+  it("preserves only the runtime column updates required by forced password change", async () => {
+    const statements: string[] = [];
+    const query = vi.fn(async (statement: string) => {
+      statements.push(statement);
+      return { rows: [] };
+    });
+
+    await grantProductionPasswordChangePrivileges(
+      { query } as unknown as Pick<ClientBase, "query">,
+      '"ueb_core_app"',
+    );
+
+    expect(PRODUCTION_RUNTIME_PASSWORD_CHANGE_COLUMN_PRIVILEGES).toEqual({
+      auth_account: ["password", "updatedAt"],
+      access_profile: [
+        "must_change_password",
+        "password_changed_at",
+        "updated_at",
+      ],
+    });
+    expect(statements).toEqual([
+      'GRANT UPDATE ("password", "updatedAt") ON TABLE public."auth_account" TO "ueb_core_app"',
+      'GRANT UPDATE ("must_change_password", "password_changed_at", "updated_at") ON TABLE public."access_profile" TO "ueb_core_app"',
+    ]);
+    expect(statements.join("\n")).not.toMatch(/GRANT UPDATE ON TABLE/iu);
+  });
+
+  it("verifies the exact password-change column ACL instead of broad table update", async () => {
+    const source = await readFile(
+      join(process.cwd(), "scripts/phase-7/lib/production-executor.ts"),
+      "utf8",
+    );
+
+    for (const column of [
+      "auth_account', 'password",
+      "auth_account', 'updatedAt",
+      "access_profile', 'must_change_password",
+      "access_profile', 'password_changed_at",
+      "access_profile', 'updated_at",
+    ]) {
+      expect(source).toContain(
+        `has_column_privilege($1, 'public.${column}', 'UPDATE')`,
+      );
+    }
+    expect(source).toContain(
+      "has_table_privilege($1, 'public.auth_account', 'UPDATE')",
+    );
+    expect(source).toContain(
+      "has_table_privilege($1, 'public.access_profile', 'UPDATE')",
+    );
+  });
+
   it("accepts only the exact dedicated production database", () => {
     expect(() => assertProductionDatabase("ueb_core_prod")).not.toThrow();
     for (const target of [
@@ -271,6 +325,7 @@ describe("Phase 7 executable production guards", () => {
       "phase7:preflight-production-target",
       "phase7:bootstrap-production-target",
       "phase7:verify-production-target",
+      "phase7:reconcile-production-runtime-acl",
       "phase7:reconcile-production-identities",
       "phase7:apply-production-identities",
       "phase7:seed-production-organization-units",
@@ -601,6 +656,7 @@ function baseArguments(mode: ProductionExecutorMode, dryRun = false): string[] {
     PREFLIGHT: "--confirm-production-preflight",
     BOOTSTRAP: "--confirm-create-production-target",
     VERIFY: "--confirm-production-verify",
+    RECONCILE_RUNTIME_ACL: "--confirm-production-runtime-acl-reconciliation",
     RECONCILE_IDENTITIES: "--confirm-production-identity-reconciliation",
     BACKUP: "--confirm-production-backup",
     RESTORE: "--confirm-production-restore-rehearsal",
@@ -661,6 +717,7 @@ function adapterMock(): ProductionExecutionAdapter {
   return {
     bootstrap: vi.fn(async () => []),
     verify: vi.fn(async () => []),
+    reconcileRuntimeAcl: vi.fn(async () => []),
     reconcile: vi.fn(async () => []),
     backup: vi.fn(async () => []),
     restore: vi.fn(async () => []),
