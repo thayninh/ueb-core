@@ -78,6 +78,7 @@ export interface ProductionExecutorCommand {
   readonly canonicalAuditDirectory?: string;
   readonly backupPath?: string;
   readonly offHostDirectory?: string;
+  readonly confirmKnownUnmarkedRestoreResidue?: boolean;
   readonly dryRun: boolean;
 }
 
@@ -126,6 +127,8 @@ const CONFIRMATIONS: Readonly<Record<ProductionExecutorMode, string>> = {
   RESTORE: "--confirm-production-restore-rehearsal",
   CLEANUP_RESTORE: "--confirm-cleanup-production-restore",
 };
+const CONFIRM_KNOWN_UNMARKED_RESTORE_RESIDUE =
+  "--confirm-known-unmarked-restore-residue";
 const COMMON_PREFIXES = [
   "--target-database=",
   "--authorization-reference=",
@@ -183,6 +186,9 @@ export function parseProductionExecutorCommand(
   const allowedExact = new Set([
     confirmation,
     ...(mode === "BOOTSTRAP" ? ["--dry-run"] : []),
+    ...(mode === "CLEANUP_RESTORE"
+      ? [CONFIRM_KNOWN_UNMARKED_RESTORE_RESIDUE]
+      : []),
   ]);
   if (
     args.some(
@@ -195,6 +201,9 @@ export function parseProductionExecutorCommand(
         args.filter((argument) => argument.startsWith(prefix)).length !== 1,
     ) ||
     args.filter((argument) => argument === confirmation).length > 1 ||
+    args.filter(
+      (argument) => argument === CONFIRM_KNOWN_UNMARKED_RESTORE_RESIDUE,
+    ).length > 1 ||
     (dryRun && args.includes(confirmation)) ||
     (!dryRun &&
       args.filter((argument) => argument === confirmation).length !== 1)
@@ -242,6 +251,9 @@ export function parseProductionExecutorCommand(
     offHostDirectory: optional("--off-host-directory=")
       ? assertExternalPath(optional("--off-host-directory=")!)
       : undefined,
+    confirmKnownUnmarkedRestoreResidue: args.includes(
+      CONFIRM_KNOWN_UNMARKED_RESTORE_RESIDUE,
+    ),
     dryRun,
   };
   assertProductionExecutorContract(command);
@@ -998,6 +1010,9 @@ export async function createGuardedProductionRestoreDatabase(input: {
       ],
       operation: async () => {
         await input.client.query(
+          `SET ROLE ${quoteIdentifier(input.command.ownerRole)}`,
+        );
+        await input.client.query(
           `CREATE DATABASE ${quoteIdentifier(input.command.targetDatabase)} OWNER ${quoteIdentifier(input.command.ownerRole)} TEMPLATE template0`,
         );
         await input.client.query(
@@ -1063,44 +1078,111 @@ async function cleanupProductionRestore(
     const state = await maintenance.query<{
       marker: string | null;
       connections: number;
+      owner_role: string;
     }>(
       `SELECT description.description AS marker,
+         owner_role.rolname AS owner_role,
          (SELECT count(*)::integer FROM pg_stat_activity WHERE datname = database.datname) AS connections
        FROM pg_database database
+       JOIN pg_roles owner_role ON owner_role.oid = database.datdba
        LEFT JOIN pg_shdescription description ON description.objoid = database.oid
        WHERE database.datname = $1`,
       [command.targetDatabase],
     );
     const row = state.rows[0];
-    if (
-      !row ||
-      row.marker !== PRODUCTION_EXECUTOR_CONTRACT.restoreMarker ||
-      row.connections !== 0
-    ) {
-      throw new SafeProductionExecutorError(
-        "PRODUCTION_RESTORE_CLEANUP_GUARD_FAILED",
-      );
-    }
-    const membership = await withTemporaryOwnerSetRole({
+    const membership = await dropGuardedProductionRestoreDatabase({
       client: maintenance,
+      command,
       bootstrapRole: connections.bootstrapUser,
-      ownerRole: command.ownerRole,
-      forbiddenRoles: [command.runtimeRole, command.provisionerRole],
-      operation: async () => {
-        await maintenance.query(
-          `DROP DATABASE ${quoteIdentifier(command.targetDatabase)}`,
-        );
-      },
+      state: row,
     });
     return [
       "RESTORE_CLEANUP=PASS",
       `RESTORE_CLEANUP_MEMBERSHIP_REVOKED=${membership.membershipRevoked ? "YES" : "NO"}`,
       `RESTORE_CLEANUP_CAN_SET_OWNER_AFTER_DROP=${membership.canSetAfterOperation ? "YES" : "NO"}`,
+      "RESTORE_TARGET_EXISTS_AFTER=NO",
       "SOURCE_PRODUCTION_DATABASE=UNCHANGED",
     ];
   } finally {
     await maintenance.end().catch(() => undefined);
   }
+}
+
+export interface ProductionRestoreCleanupState {
+  readonly marker: string | null;
+  readonly connections: number;
+  readonly owner_role: string;
+}
+
+export function assertProductionRestoreCleanupState(
+  command: ProductionExecutorCommand,
+  state: ProductionRestoreCleanupState | undefined,
+): void {
+  assertProductionRestoreDatabase(command.targetDatabase);
+  if (
+    command.sourceDatabase !== PRODUCTION_EXECUTOR_CONTRACT.database ||
+    command.sourceDatabase === command.targetDatabase ||
+    !state ||
+    state.owner_role !== command.ownerRole ||
+    state.connections !== 0
+  ) {
+    throw new SafeProductionExecutorError(
+      "PRODUCTION_RESTORE_CLEANUP_GUARD_FAILED",
+    );
+  }
+  const markedRestore =
+    state.marker === PRODUCTION_EXECUTOR_CONTRACT.restoreMarker;
+  const acknowledgedKnownResidue =
+    state.marker === null &&
+    command.confirmKnownUnmarkedRestoreResidue === true;
+  if (!markedRestore && !acknowledgedKnownResidue) {
+    throw new SafeProductionExecutorError(
+      "PRODUCTION_RESTORE_CLEANUP_GUARD_FAILED",
+    );
+  }
+}
+
+export async function dropGuardedProductionRestoreDatabase(input: {
+  readonly client: ClientBase;
+  readonly command: ProductionExecutorCommand;
+  readonly bootstrapRole: string;
+  readonly state: ProductionRestoreCleanupState | undefined;
+}): Promise<{
+  readonly canSetBeforeOperation: true;
+  readonly membershipRevoked: true;
+  readonly canSetAfterOperation: false;
+}> {
+  assertProductionRestoreCleanupState(input.command, input.state);
+  const membership = await withTemporaryOwnerSetRole({
+    client: input.client,
+    bootstrapRole: input.bootstrapRole,
+    ownerRole: input.command.ownerRole,
+    forbiddenRoles: [input.command.runtimeRole, input.command.provisionerRole],
+    operation: async () => {
+      await input.client.query(
+        `SET ROLE ${quoteIdentifier(input.command.ownerRole)}`,
+      );
+      await input.client.query(
+        `DROP DATABASE ${quoteIdentifier(input.command.targetDatabase)}`,
+      );
+    },
+  });
+  if (await databaseExists(input.client, input.command.targetDatabase)) {
+    throw new SafeProductionExecutorError(
+      "PRODUCTION_RESTORE_CLEANUP_TARGET_STILL_EXISTS",
+      true,
+      {
+        phase: "PRODUCTION_RESTORE_CLEANUP_VERIFY",
+        objectType: "DATABASE",
+        objectName: safeDiagnosticObjectName(input.command.targetDatabase),
+      },
+    );
+  }
+  return {
+    canSetBeforeOperation: membership.canSetBeforeOperation,
+    membershipRevoked: membership.membershipRevoked,
+    canSetAfterOperation: membership.canSetAfterOperation,
+  };
 }
 
 interface ProductionConnections {

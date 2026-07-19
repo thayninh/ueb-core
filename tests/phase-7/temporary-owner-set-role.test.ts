@@ -5,7 +5,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import { withTemporaryOwnerSetRole } from "../../scripts/phase-6/lib/temporary-owner-set-role";
 import {
+  assertProductionRestoreCleanupState,
   createGuardedProductionRestoreDatabase,
+  dropGuardedProductionRestoreDatabase,
   PRODUCTION_EXECUTOR_CONTRACT,
   type ProductionExecutorCommand,
   SafeProductionExecutorError,
@@ -100,7 +102,54 @@ describe("Phase 7 temporary production-owner SET ROLE membership", () => {
     expect(state.statements().join("\n")).toContain(
       `COMMENT ON DATABASE "ueb_core_prod_restore_regression" IS '${PRODUCTION_EXECUTOR_CONTRACT.restoreMarker}'`,
     );
+    const statements = state.statements();
+    expect(statements.indexOf(`SET ROLE "${OWNER}"`)).toBeLessThan(
+      statements.indexOf(
+        'CREATE DATABASE "ueb_core_prod_restore_regression" OWNER "ueb_core_owner_test" TEMPLATE template0',
+      ),
+    );
+    expect(
+      statements.indexOf(
+        `COMMENT ON DATABASE "ueb_core_prod_restore_regression" IS '${PRODUCTION_EXECUTOR_CONTRACT.restoreMarker}'`,
+      ),
+    ).toBeLessThan(statements.indexOf("RESET ROLE"));
     expect(state.statements().join("\n")).not.toContain("ADMIN TRUE");
+  });
+
+  it("reproduces SQLSTATE 42501 when COMMENT runs without SET ROLE", async () => {
+    const state = fakeMembershipClient({
+      trackDatabase: true,
+      initialDatabaseExists: true,
+    });
+
+    await expect(
+      state.client.query(
+        `COMMENT ON DATABASE "ueb_core_prod_restore_regression" IS '${PRODUCTION_EXECUTOR_CONTRACT.restoreMarker}'`,
+      ),
+    ).rejects.toMatchObject({ code: "42501" });
+  });
+
+  it("resets owner role and revokes membership after COMMENT failure", async () => {
+    const state = fakeMembershipClient({
+      trackDatabase: true,
+      failDatabaseComment: true,
+    });
+
+    const error = await createGuardedProductionRestoreDatabase({
+      client: state.client,
+      bootstrapRole: BOOTSTRAP,
+      command: restoreCommand(),
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({
+      code: "PRODUCTION_RESTORE_CREATE_FAILED",
+      mutationPossible: true,
+      diagnostic: { postgresSqlstate: "42501" },
+    });
+    expect(state.databaseExists()).toBe(true);
+    expect(state.ownerRoleActive()).toBe(false);
+    expect(state.canSet()).toBe(false);
+    expect(state.resetCount()).toBe(1);
   });
 
   it("revokes membership and proves no restore residue after CREATE failure", async () => {
@@ -129,12 +178,76 @@ describe("Phase 7 temporary production-owner SET ROLE membership", () => {
     expect(state.resetCount()).toBe(1);
     expect(state.statements()).toContain("RESET ROLE");
   });
+
+  it("cleans a known unmarked restore residue with exact guarded owner context", async () => {
+    const state = fakeMembershipClient({
+      trackDatabase: true,
+      initialDatabaseExists: true,
+    });
+    const command = {
+      ...restoreCommand(),
+      mode: "CLEANUP_RESTORE" as const,
+      confirmKnownUnmarkedRestoreResidue: true,
+    };
+    const report = await dropGuardedProductionRestoreDatabase({
+      client: state.client,
+      command,
+      bootstrapRole: BOOTSTRAP,
+      state: { marker: null, connections: 0, owner_role: OWNER },
+    });
+
+    expect(report).toMatchObject({
+      membershipRevoked: true,
+      canSetAfterOperation: false,
+    });
+    expect(state.databaseExists()).toBe(false);
+    expect(state.ownerRoleActive()).toBe(false);
+    expect(state.canSet()).toBe(false);
+    expect(state.statements()).toContain(`SET ROLE "${OWNER}"`);
+    expect(state.statements()).toContain(
+      'DROP DATABASE "ueb_core_prod_restore_regression"',
+    );
+    expect(state.statements()).toContain("RESET ROLE");
+  });
+
+  it.each([
+    [
+      "missing acknowledgement",
+      restoreCommand(),
+      { marker: null, connections: 0, owner_role: OWNER },
+    ],
+    [
+      "wrong owner",
+      { ...restoreCommand(), confirmKnownUnmarkedRestoreResidue: true },
+      { marker: null, connections: 0, owner_role: "unexpected_owner" },
+    ],
+    [
+      "active connection",
+      { ...restoreCommand(), confirmKnownUnmarkedRestoreResidue: true },
+      { marker: null, connections: 1, owner_role: OWNER },
+    ],
+    [
+      "unsafe target",
+      {
+        ...restoreCommand(),
+        targetDatabase: PRODUCTION_EXECUTOR_CONTRACT.database,
+        confirmKnownUnmarkedRestoreResidue: true,
+      },
+      { marker: null, connections: 0, owner_role: OWNER },
+    ],
+  ])("blocks unmarked cleanup for %s", (_label, command, cleanupState) => {
+    expect(() =>
+      assertProductionRestoreCleanupState(command, cleanupState),
+    ).toThrow(SafeProductionExecutorError);
+  });
 });
 
 function fakeMembershipClient(
   input: {
     readonly trackDatabase?: boolean;
     readonly failDatabaseCreate?: boolean;
+    readonly failDatabaseComment?: boolean;
+    readonly initialDatabaseExists?: boolean;
   } = {},
 ): {
   readonly client: ClientBase;
@@ -143,9 +256,11 @@ function fakeMembershipClient(
   readonly resetCount: () => number;
   readonly statements: () => readonly string[];
   readonly databaseExists: () => boolean;
+  readonly ownerRoleActive: () => boolean;
 } {
   let membershipCanSet = false;
-  let restoreDatabaseExists = false;
+  let restoreDatabaseExists = input.initialDatabaseExists ?? false;
+  let ownerRoleActive = false;
   let resets = 0;
   const statements: string[] = [];
   const query = vi.fn(
@@ -177,6 +292,14 @@ function fakeMembershipClient(
       }
       if (statement === "RESET ROLE") {
         resets += 1;
+        ownerRoleActive = false;
+        return { rows: [] };
+      }
+      if (statement === `SET ROLE "${OWNER}"`) {
+        if (!membershipCanSet) {
+          throw Object.assign(new Error("set-role-denied"), { code: "42501" });
+        }
+        ownerRoleActive = true;
         return { rows: [] };
       }
       if (statement.includes("pg_has_role")) {
@@ -195,6 +318,20 @@ function fakeMembershipClient(
         return { rows: [] };
       }
       if (statement.startsWith("COMMENT ON DATABASE ")) {
+        if (!ownerRoleActive || input.failDatabaseComment) {
+          throw Object.assign(new Error("comment-owner-required"), {
+            code: "42501",
+          });
+        }
+        return { rows: [] };
+      }
+      if (statement.startsWith("DROP DATABASE ") && input.trackDatabase) {
+        if (!ownerRoleActive) {
+          throw Object.assign(new Error("drop-owner-required"), {
+            code: "42501",
+          });
+        }
+        restoreDatabaseExists = false;
         return { rows: [] };
       }
       throw new Error(`Unexpected test query: ${statement}`);
@@ -207,6 +344,7 @@ function fakeMembershipClient(
     resetCount: () => resets,
     statements: () => statements,
     databaseExists: () => restoreDatabaseExists,
+    ownerRoleActive: () => ownerRoleActive,
   };
 }
 

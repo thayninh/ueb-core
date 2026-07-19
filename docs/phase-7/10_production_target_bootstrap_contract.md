@@ -97,6 +97,13 @@ archive arguments. Mode-specific inputs are:
 - cleanup: exact source, marked disposable target, backup and
   `--confirm-cleanup-production-restore`.
 
+An unmarked disposable target is blocked by default. Cleanup may acknowledge
+`--confirm-known-unmarked-restore-residue` only after the exact target is known
+to have been created by the diagnosed
+`RESTORE_MARKER_COMMENT_PERMISSION_DENIED` failure. The executor still requires
+the production restore prefix, exact owner, zero active database connections,
+the separate source database, and the normal explicit cleanup confirmation.
+
 Unknown/duplicate inputs and confirmation plus `--dry-run` are rejected.
 
 ## 7. Executable order
@@ -114,6 +121,7 @@ Unknown/duplicate inputs and confirmation plus `--dry-run` are rejected.
 9. Restore to a new marked `ueb_core_prod_restore_*` database. PostgreSQL 18
    restore creation and cleanup use the same temporary owner membership as
    target bootstrap: exact `SET` capability only, no admin option, followed by
+   an explicit `SET ROLE` before every owner-only CREATE, COMMENT or DROP,
    `RESET ROLE`, revoke and a negative capability check on success or failure.
    The executor verifies the restored counts and fingerprint and proves the
    source production fingerprint did not change before guarded cleanup.

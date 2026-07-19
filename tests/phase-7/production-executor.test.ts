@@ -102,6 +102,20 @@ describe("Phase 7 executable production guards", () => {
     ).toThrow(/PRODUCTION_AUTHORIZATION_REQUIRED/u);
   });
 
+  it("accepts the unmarked-residue acknowledgement only for guarded cleanup", () => {
+    const cleanup = parseProductionExecutorCommand("CLEANUP_RESTORE", [
+      ...baseArguments("CLEANUP_RESTORE"),
+      "--confirm-known-unmarked-restore-residue",
+    ]);
+    expect(cleanup.confirmKnownUnmarkedRestoreResidue).toBe(true);
+    expect(() =>
+      parseProductionExecutorCommand("VERIFY", [
+        ...baseArguments("VERIFY"),
+        "--confirm-known-unmarked-restore-residue",
+      ]),
+    ).toThrow(/PRODUCTION_ARGUMENTS_INVALID/u);
+  });
+
   it("validates active window, rejects before, after and malformed values", () => {
     const command = parseProductionExecutorCommand(
       "PREFLIGHT",
@@ -521,6 +535,19 @@ function baseArguments(mode: ProductionExecutorMode, dryRun = false): string[] {
     args.push(
       `--canonical-source=${join(directory, "canonical.xlsx")}`,
       `--canonical-audit-directory=${join(directory, "audit")}`,
+    );
+  }
+  if (mode === "BACKUP") {
+    args.push(
+      `--backup=${join(directory, "production.dump")}`,
+      `--off-host-directory=${join(directory, "off-host")}`,
+    );
+  }
+  if (mode === "RESTORE" || mode === "CLEANUP_RESTORE") {
+    args[0] = "--target-database=ueb_core_prod_restore_regression";
+    args.push(
+      `--source-database=${PRODUCTION_EXECUTOR_CONTRACT.database}`,
+      `--backup=${join(directory, "production.dump")}`,
     );
   }
   args.push(dryRun ? "--dry-run" : confirmation[mode]);
