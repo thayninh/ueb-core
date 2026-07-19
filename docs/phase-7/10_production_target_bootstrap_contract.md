@@ -97,6 +97,13 @@ archive arguments. Mode-specific inputs are:
 - cleanup: exact source, marked disposable target, backup and
   `--confirm-cleanup-production-restore`.
 
+An unmarked disposable target is blocked by default. Cleanup may acknowledge
+`--confirm-known-unmarked-restore-residue` only after the exact target is known
+to have been created by the diagnosed
+`RESTORE_MARKER_COMMENT_PERMISSION_DENIED` failure. The executor still requires
+the production restore prefix, exact owner, zero active database connections,
+the separate source database, and the normal explicit cleanup confirmation.
+
 Unknown/duplicate inputs and confirmation plus `--dry-run` are rejected.
 
 ## 7. Executable order
@@ -111,9 +118,22 @@ Unknown/duplicate inputs and confirmation plus `--dry-run` are rejected.
 7. Verify zero workflow, auth and session rows before identity provisioning.
 8. Create a custom-format backup, checksum and catalog; copy only a verified
    archive to the approved off-host directory.
-9. Restore to a new marked `ueb_core_prod_restore_*` database, verify counts and
-   fingerprint, then use the separate guarded cleanup command.
+9. Restore to a new marked `ueb_core_prod_restore_*` database. PostgreSQL 18
+   restore creation and cleanup use the same temporary owner membership as
+   target bootstrap: exact `SET` capability only, no admin option, followed by
+   `CREATE DATABASE ... OWNER ...` as the CREATEDB bootstrap role, then an
+   explicit `SET ROLE` for owner-only COMMENT or DROP operations. The owner
+   remains NOCREATEDB. Every path performs `RESET ROLE`, revoke and a negative
+   capability check on success or failure.
+   The executor verifies the restored counts and fingerprint and proves the
+   source production fingerprint did not change before guarded cleanup.
 10. Reconcile the exact roster SHA read-only against the empty identity target.
+
+The identity reconciliation reads lecturer mappings from the existing
+`access_profile.lecturer_uid` column. There is no separate
+`lecturer_user_mapping` table. The test-identity marker remains immutable roster
+metadata; the empty-target plan therefore expects two marked test identities to
+be created later without writing during reconciliation.
 
 The executor never drops `ueb_core_prod`, never retries a partial apply blindly,
 never deletes a backup and never provisions identities.

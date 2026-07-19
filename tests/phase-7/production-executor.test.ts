@@ -7,19 +7,25 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
+import type { ClientBase } from "pg";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   assertProductionDatabase,
+  assertProductionRestoreDatabase,
+  assertSourceFingerprintUnchanged,
   assertWindowState,
   parseOperatorWindow,
   parseProductionExecutorCommand,
   PRODUCTION_EXECUTOR_CONTRACT,
   readEmbeddedSourceSha,
+  reconcileEmptyProductionIdentityTarget,
   runProductionExecutor,
+  SafeProductionExecutorError,
   type ProductionExecutionAdapter,
   type ProductionExecutorMode,
 } from "../../scripts/phase-7/lib/production-executor";
+import { formatProductionExecutorFailure } from "../../scripts/phase-7/production-target";
 
 const gitSha = "a".repeat(40);
 const execFileAsync = promisify(execFile);
@@ -96,6 +102,20 @@ describe("Phase 7 executable production guards", () => {
     ).toThrow(/PRODUCTION_AUTHORIZATION_REQUIRED/u);
   });
 
+  it("accepts the unmarked-residue acknowledgement only for guarded cleanup", () => {
+    const cleanup = parseProductionExecutorCommand("CLEANUP_RESTORE", [
+      ...baseArguments("CLEANUP_RESTORE"),
+      "--confirm-known-unmarked-restore-residue",
+    ]);
+    expect(cleanup.confirmKnownUnmarkedRestoreResidue).toBe(true);
+    expect(() =>
+      parseProductionExecutorCommand("VERIFY", [
+        ...baseArguments("VERIFY"),
+        "--confirm-known-unmarked-restore-residue",
+      ]),
+    ).toThrow(/PRODUCTION_ARGUMENTS_INVALID/u);
+  });
+
   it("validates active window, rejects before, after and malformed values", () => {
     const command = parseProductionExecutorCommand(
       "PREFLIGHT",
@@ -168,6 +188,66 @@ describe("Phase 7 executable production guards", () => {
     expect(result.report).toContain("IDENTITY_PROVISIONING=NOT_PERFORMED");
   });
 
+  it("preserves a safe pre-mutation phase and error code", async () => {
+    const adapter = adapterMock();
+    vi.mocked(adapter.bootstrap).mockRejectedValueOnce(
+      new SafeProductionExecutorError("SOURCE_FILENAME_MISMATCH", false, {
+        phase: "CANONICAL_SOURCE_PRECHECK",
+        objectType: "SOURCE_FILE",
+        objectName: "canonical.xlsx",
+      }),
+    );
+
+    const error = await runProductionExecutor({
+      command: parseProductionExecutorCommand(
+        "BOOTSTRAP",
+        baseArguments("BOOTSTRAP"),
+      ),
+      environment: {},
+      now: new Date("2026-07-18T18:30:00Z"),
+      sourceSha: async () => gitSha,
+      adapter,
+    }).catch((caught: unknown) => caught);
+
+    const report = formatProductionExecutorFailure(error);
+    expect(report).toContain("FAILED_PHASE=CANONICAL_SOURCE_PRECHECK");
+    expect(report).toContain("ERROR_CODE=SOURCE_FILENAME_MISMATCH");
+    expect(report).toContain("SAFE_OBJECT_TYPE=SOURCE_FILE");
+    expect(report).toContain("SAFE_OBJECT_NAME=canonical.xlsx");
+    expect(report).toContain("DATABASE_CONNECTIONS=0");
+    expect(report).toContain("DATABASE_MUTATIONS=0");
+  });
+
+  it("exposes only safe PostgreSQL diagnostics for unexpected failures", async () => {
+    const adapter = adapterMock();
+    vi.mocked(adapter.bootstrap).mockRejectedValueOnce({
+      code: "42501",
+      table: "safe_table",
+      message: "password=must-not-leak postgresql://must-not-leak",
+    });
+
+    const error = await runProductionExecutor({
+      command: parseProductionExecutorCommand(
+        "BOOTSTRAP",
+        baseArguments("BOOTSTRAP"),
+      ),
+      environment: {},
+      now: new Date("2026-07-18T18:30:00Z"),
+      sourceSha: async () => gitSha,
+      adapter,
+    }).catch((caught: unknown) => caught);
+
+    const report = formatProductionExecutorFailure(error);
+    expect(report).toContain("FAILED_PHASE=PRODUCTION_BOOTSTRAP");
+    expect(report).toContain(
+      "ERROR_CODE=PRODUCTION_OPERATION_FAILED_RECONCILIATION_REQUIRED",
+    );
+    expect(report).toContain("POSTGRES_SQLSTATE=42501");
+    expect(report).toContain("SAFE_OBJECT_TYPE=TABLE");
+    expect(report).toContain("SAFE_OBJECT_NAME=safe_table");
+    expect(report).not.toMatch(/must-not-leak|password=|postgresql:\/\//iu);
+  });
+
   it("fails closed when dry-run is given database credentials", async () => {
     await expect(
       runProductionExecutor({
@@ -205,6 +285,127 @@ describe("Phase 7 executable production guards", () => {
     expect(dockerfile).toContain("/operator/.source-git-sha");
     expect(dockerfile).not.toMatch(/(?:apt-get|apk).*(?:install).*\bgit\b/u);
     expect(dockerfile).not.toMatch(/COPY\s+.*\.git/u);
+  });
+
+  it("wires production database creation through temporary owner membership", async () => {
+    const source = await readFile(
+      "scripts/phase-7/lib/production-executor.ts",
+      "utf8",
+    );
+    expect(source).toContain("withTemporaryOwnerSetRole({");
+    expect(source).toContain(
+      "BOOTSTRAP_CAN_SET_OWNER_BEFORE_CREATE=${ownerMembership?.canSetBeforeOperation",
+    );
+    expect(source).toContain(
+      "TEMPORARY_MEMBERSHIP_REVOKED=${ownerMembership?.membershipRevoked",
+    );
+    expect(source).toContain(
+      "BOOTSTRAP_CAN_SET_OWNER_AFTER_CREATE=${ownerMembership?.canSetAfterOperation",
+    );
+    expect(source).toContain("PRODUCTION_DATABASE_CREATE_CLEANUP_FAILED");
+    expect(source).toContain("const databaseCreated = await databaseExists(");
+    expect(source).not.toMatch(/WITH ADMIN TRUE/u);
+  });
+
+  it("rejects unsafe production restore targets", () => {
+    expect(() =>
+      assertProductionRestoreDatabase(
+        "ueb_core_prod_restore_3fae396_regression",
+      ),
+    ).not.toThrow();
+    for (const target of [
+      "ueb_core_prod",
+      "ueb_core",
+      "ueb_core_staging",
+      "ueb_core_uat_phase5",
+      "ueb_core_prod_restore_",
+      "ueb_core_prod_restore_UNSAFE",
+    ]) {
+      expect(() => assertProductionRestoreDatabase(target)).toThrow(
+        /PRODUCTION_RESTORE_DATABASE_FORBIDDEN/u,
+      );
+    }
+  });
+
+  it("reconciles an empty identity target using the actual access-profile mapping", async () => {
+    const query = vi.fn(async (statement: string) => ({
+      rows: [
+        {
+          users: 0,
+          accounts: 0,
+          profiles: 0,
+          roles: 0,
+          scopes: 0,
+          lecturer_mappings: 0,
+          forced_password_profiles: 0,
+          audit_events: 0,
+        },
+      ],
+      statement,
+    }));
+    const command = parseProductionExecutorCommand(
+      "RECONCILE_IDENTITIES",
+      baseArguments("RECONCILE_IDENTITIES"),
+    );
+
+    const report = await reconcileEmptyProductionIdentityTarget(
+      { query } as unknown as ClientBase,
+      command,
+    );
+    const sql = String(query.mock.calls[0]?.[0]);
+
+    expect(sql).toContain("FROM access_profile");
+    expect(sql).toContain("lecturer_uid IS NOT NULL");
+    expect(sql).toContain("must_change_password");
+    expect(sql).not.toContain("lecturer_user_mapping");
+    expect(sql).not.toMatch(/\b(?:INSERT|UPDATE|DELETE|TRUNCATE)\b/iu);
+    expect(report).toContain("ROSTER_RECONCILIATION=PASS");
+    expect(report).toContain("EXPECTED_IDENTITY_CREATE_COUNT=254");
+    expect(report).toContain("EXPECTED_TEST_IDENTITY_CREATE_COUNT=2");
+    expect(report).toContain(
+      "LECTURER_MAPPING_MODEL=access_profile.lecturer_uid",
+    );
+    expect(report).toContain("TEST_IDENTITY_MARKER_SOURCE=ROSTER_MANIFEST");
+    expect(report).toContain("ROSTER_BLOCK_COUNT=0");
+    expect(report).toContain("ROSTER_CONFLICT_COUNT=0");
+    expect(report).toContain("DATABASE_WRITES=0");
+  });
+
+  it("fails closed when any identity residue exists", async () => {
+    const query = vi.fn(async () => ({
+      rows: [
+        {
+          users: 0,
+          accounts: 0,
+          profiles: 1,
+          roles: 0,
+          scopes: 0,
+          lecturer_mappings: 1,
+          forced_password_profiles: 1,
+          audit_events: 0,
+        },
+      ],
+    }));
+    const command = parseProductionExecutorCommand(
+      "RECONCILE_IDENTITIES",
+      baseArguments("RECONCILE_IDENTITIES"),
+    );
+
+    await expect(
+      reconcileEmptyProductionIdentityTarget(
+        { query } as unknown as ClientBase,
+        command,
+      ),
+    ).rejects.toThrow(/PRODUCTION_IDENTITY_TARGET_NOT_EMPTY/u);
+  });
+
+  it("proves the source production fingerprint remains unchanged", () => {
+    expect(() =>
+      assertSourceFingerprintUnchanged("before", "before"),
+    ).not.toThrow();
+    expect(() => assertSourceFingerprintUnchanged("before", "after")).toThrow(
+      /SOURCE_PRODUCTION_FINGERPRINT_CHANGED/u,
+    );
   });
 
   it("redacted preflight output has no supplied credential material", async () => {
@@ -334,6 +535,19 @@ function baseArguments(mode: ProductionExecutorMode, dryRun = false): string[] {
     args.push(
       `--canonical-source=${join(directory, "canonical.xlsx")}`,
       `--canonical-audit-directory=${join(directory, "audit")}`,
+    );
+  }
+  if (mode === "BACKUP") {
+    args.push(
+      `--backup=${join(directory, "production.dump")}`,
+      `--off-host-directory=${join(directory, "off-host")}`,
+    );
+  }
+  if (mode === "RESTORE" || mode === "CLEANUP_RESTORE") {
+    args[0] = "--target-database=ueb_core_prod_restore_regression";
+    args.push(
+      `--source-database=${PRODUCTION_EXECUTOR_CONTRACT.database}`,
+      `--backup=${join(directory, "production.dump")}`,
     );
   }
   args.push(dryRun ? "--dry-run" : confirmation[mode]);

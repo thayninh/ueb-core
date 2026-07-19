@@ -86,6 +86,7 @@ isolatedDescribe("PostgreSQL 18 staging database ownership", () => {
           `CREATE DATABASE "${DATABASE}" OWNER "${STAGING_OWNER_ROLE}"`,
         ),
       ).rejects.toMatchObject({ code: "42501" });
+      await expect(databaseExists(DATABASE)).resolves.toBe(false);
     } finally {
       await bootstrap.end();
     }
@@ -105,6 +106,7 @@ isolatedDescribe("PostgreSQL 18 staging database ownership", () => {
         }),
       ).rejects.toThrow("injected-create-failure");
       await expect(canBootstrapSetOwner(bootstrap)).resolves.toBe(false);
+      await expect(databaseExists(DATABASE)).resolves.toBe(false);
     } finally {
       await bootstrap.end();
     }

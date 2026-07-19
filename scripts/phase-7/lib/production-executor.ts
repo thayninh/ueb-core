@@ -10,7 +10,7 @@ import {
   readFile,
   writeFile,
 } from "node:fs/promises";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { basename, isAbsolute, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 
 import { Client, type ClientBase } from "pg";
@@ -19,6 +19,7 @@ import {
   APP_RUNTIME_MANAGED_IDENTITY_TABLES,
   PROVISIONING_TABLE_PRIVILEGES,
 } from "../../phase-5/lib/provisioning-role";
+import { withTemporaryOwnerSetRole } from "../../phase-6/lib/temporary-owner-set-role";
 import { prepareSourceFile } from "../../phase-2/lib/row-parser";
 import { loadSourceContract } from "../../phase-2/lib/source-contract";
 
@@ -42,6 +43,7 @@ export const PRODUCTION_EXECUTOR_CONTRACT = {
   rollbackImageSha: "971c42027873f7de3140f815b06c2dddcfb61ba6",
   maximumWindowMilliseconds: 4 * 60 * 60 * 1000,
   expectedIdentityCount: 254,
+  expectedTestIdentityCount: 2,
 } as const;
 
 export type ProductionExecutorMode =
@@ -76,6 +78,7 @@ export interface ProductionExecutorCommand {
   readonly canonicalAuditDirectory?: string;
   readonly backupPath?: string;
   readonly offHostDirectory?: string;
+  readonly confirmKnownUnmarkedRestoreResidue?: boolean;
   readonly dryRun: boolean;
 }
 
@@ -95,10 +98,18 @@ export interface ProductionExecutionAdapter {
   ): Promise<readonly string[]>;
 }
 
+export interface SafeProductionDiagnostic {
+  readonly phase?: string;
+  readonly postgresSqlstate?: string;
+  readonly objectType?: string;
+  readonly objectName?: string;
+}
+
 export class SafeProductionExecutorError extends Error {
   constructor(
     readonly code: string,
     readonly mutationPossible = false,
+    readonly diagnostic: SafeProductionDiagnostic = {},
   ) {
     super(code);
   }
@@ -116,6 +127,8 @@ const CONFIRMATIONS: Readonly<Record<ProductionExecutorMode, string>> = {
   RESTORE: "--confirm-production-restore-rehearsal",
   CLEANUP_RESTORE: "--confirm-cleanup-production-restore",
 };
+const CONFIRM_KNOWN_UNMARKED_RESTORE_RESIDUE =
+  "--confirm-known-unmarked-restore-residue";
 const COMMON_PREFIXES = [
   "--target-database=",
   "--authorization-reference=",
@@ -173,6 +186,9 @@ export function parseProductionExecutorCommand(
   const allowedExact = new Set([
     confirmation,
     ...(mode === "BOOTSTRAP" ? ["--dry-run"] : []),
+    ...(mode === "CLEANUP_RESTORE"
+      ? [CONFIRM_KNOWN_UNMARKED_RESTORE_RESIDUE]
+      : []),
   ]);
   if (
     args.some(
@@ -185,6 +201,9 @@ export function parseProductionExecutorCommand(
         args.filter((argument) => argument.startsWith(prefix)).length !== 1,
     ) ||
     args.filter((argument) => argument === confirmation).length > 1 ||
+    args.filter(
+      (argument) => argument === CONFIRM_KNOWN_UNMARKED_RESTORE_RESIDUE,
+    ).length > 1 ||
     (dryRun && args.includes(confirmation)) ||
     (!dryRun &&
       args.filter((argument) => argument === confirmation).length !== 1)
@@ -232,6 +251,9 @@ export function parseProductionExecutorCommand(
     offHostDirectory: optional("--off-host-directory=")
       ? assertExternalPath(optional("--off-host-directory=")!)
       : undefined,
+    confirmKnownUnmarkedRestoreResidue: args.includes(
+      CONFIRM_KNOWN_UNMARKED_RESTORE_RESIDUE,
+    ),
     dryRun,
   };
   assertProductionExecutorContract(command);
@@ -417,10 +439,23 @@ export async function runProductionExecutor(input: {
   let operationLines: readonly string[];
   try {
     operationLines = await executeAdapter(command, adapter);
-  } catch {
+  } catch (error) {
+    if (error instanceof SafeProductionExecutorError) {
+      if (error.diagnostic.phase) throw error;
+      throw new SafeProductionExecutorError(
+        error.code,
+        error.mutationPossible || mutation,
+        { phase: productionExecutionPhase(command.mode) },
+      );
+    }
+    const postgresDiagnostic = readSafePostgresDiagnostic(error);
     throw new SafeProductionExecutorError(
       "PRODUCTION_OPERATION_FAILED_RECONCILIATION_REQUIRED",
       true,
+      {
+        phase: productionExecutionPhase(command.mode),
+        ...postgresDiagnostic,
+      },
     );
   }
   return {
@@ -449,6 +484,48 @@ function executeAdapter(
   throw new SafeProductionExecutorError("PRODUCTION_EXECUTOR_MODE_INVALID");
 }
 
+function productionExecutionPhase(mode: ProductionExecutorMode): string {
+  if (mode === "BOOTSTRAP") return "PRODUCTION_BOOTSTRAP";
+  if (mode === "VERIFY") return "PRODUCTION_VERIFY";
+  if (mode === "RECONCILE_IDENTITIES")
+    return "PRODUCTION_IDENTITY_RECONCILIATION";
+  if (mode === "BACKUP") return "PRODUCTION_BACKUP";
+  if (mode === "RESTORE") return "PRODUCTION_RESTORE_REHEARSAL";
+  if (mode === "CLEANUP_RESTORE") return "PRODUCTION_RESTORE_CLEANUP";
+  return "PRODUCTION_PREFLIGHT";
+}
+
+function readSafePostgresDiagnostic(error: unknown): SafeProductionDiagnostic {
+  if (!error || typeof error !== "object") return {};
+  const candidate = error as Record<string, unknown>;
+  const postgresSqlstate =
+    typeof candidate.code === "string" && /^[0-9A-Z]{5}$/u.test(candidate.code)
+      ? candidate.code
+      : undefined;
+  const objectCandidates = [
+    ["TABLE", candidate.table],
+    ["CONSTRAINT", candidate.constraint],
+    ["COLUMN", candidate.column],
+    ["SCHEMA", candidate.schema],
+  ] as const;
+  const object = objectCandidates.find(
+    ([, value]) => typeof value === "string" && value.length > 0,
+  );
+  return {
+    ...(postgresSqlstate ? { postgresSqlstate } : {}),
+    ...(object
+      ? {
+          objectType: object[0],
+          objectName: safeDiagnosticObjectName(object[1] as string),
+        }
+      : {}),
+  };
+}
+
+function safeDiagnosticObjectName(value: string): string {
+  return /^[a-zA-Z0-9_.-]{1,128}$/u.test(value) ? value : "REDACTED";
+}
+
 export function createProductionExecutionAdapter(
   environment: Readonly<Record<string, string | undefined>>,
 ): ProductionExecutionAdapter {
@@ -475,7 +552,25 @@ async function bootstrapProduction(
     prepared.rows.length !== PRODUCTION_EXECUTOR_CONTRACT.canonicalRowCount ||
     prepared.violations.length !== 0
   ) {
-    throw new SafeProductionExecutorError("CANONICAL_SOURCE_PRECHECK_FAILED");
+    const violationCodes = [
+      ...new Set(prepared.violations.map((violation) => violation.code)),
+    ];
+    const safeViolationCode =
+      violationCodes.length === 1 &&
+      /^[A-Z][A-Z0-9_]{0,127}$/u.test(violationCodes[0]!)
+        ? violationCodes[0]
+        : undefined;
+    throw new SafeProductionExecutorError(
+      safeViolationCode ?? "CANONICAL_SOURCE_PRECHECK_FAILED",
+      false,
+      {
+        phase: "CANONICAL_SOURCE_PRECHECK",
+        objectType: "SOURCE_FILE",
+        objectName: safeDiagnosticObjectName(
+          basename(command.canonicalSource!),
+        ),
+      },
+    );
   }
   await mkdir(command.canonicalAuditDirectory!, {
     recursive: true,
@@ -486,6 +581,14 @@ async function bootstrapProduction(
     connectionString: connections.bootstrap,
     application_name: "ueb-core-phase7-production-bootstrap",
   });
+  let databaseOwner: string | undefined;
+  let ownerMembership:
+    | {
+        readonly canSetBeforeOperation: true;
+        readonly membershipRevoked: true;
+        readonly canSetAfterOperation: false;
+      }
+    | undefined;
   await maintenance.connect();
   try {
     await assertBootstrapRole(maintenance, connections.bootstrapUser);
@@ -505,15 +608,72 @@ async function bootstrapProduction(
     }
     await createRestrictedRole(maintenance, command.ownerRole, passwords.owner);
     try {
-      await maintenance.query(
-        `CREATE DATABASE ${quoteIdentifier(command.targetDatabase)} OWNER ${quoteIdentifier(command.ownerRole)} TEMPLATE template0`,
-      );
-    } catch {
-      await maintenance
-        .query(`DROP ROLE ${quoteIdentifier(command.ownerRole)}`)
-        .catch(() => undefined);
+      ownerMembership = await withTemporaryOwnerSetRole({
+        client: maintenance,
+        bootstrapRole: connections.bootstrapUser,
+        ownerRole: command.ownerRole,
+        forbiddenRoles: [command.runtimeRole, command.provisionerRole],
+        operation: async () => {
+          await maintenance.query(
+            `CREATE DATABASE ${quoteIdentifier(command.targetDatabase)} OWNER ${quoteIdentifier(command.ownerRole)} TEMPLATE template0`,
+          );
+        },
+      });
+    } catch (error) {
+      const databaseCreated = await databaseExists(
+        maintenance,
+        command.targetDatabase,
+      ).catch(() => true);
+      if (!databaseCreated) {
+        await maintenance.query("RESET ROLE").catch(() => undefined);
+        await maintenance
+          .query(
+            `REVOKE ${quoteIdentifier(command.ownerRole)} FROM ${quoteIdentifier(connections.bootstrapUser)}`,
+          )
+          .catch(() => undefined);
+        await maintenance
+          .query(`DROP ROLE ${quoteIdentifier(command.ownerRole)}`)
+          .catch(() => undefined);
+        const ownerRoleResidue = await roleExists(
+          maintenance,
+          command.ownerRole,
+        ).catch(() => true);
+        if (ownerRoleResidue) {
+          throw new SafeProductionExecutorError(
+            "PRODUCTION_DATABASE_CREATE_CLEANUP_FAILED",
+            true,
+            {
+              phase: "PRODUCTION_DATABASE_CREATE_CLEANUP",
+              objectType: "ROLE",
+              objectName: safeDiagnosticObjectName(command.ownerRole),
+            },
+          );
+        }
+      }
       throw new SafeProductionExecutorError(
         "PRODUCTION_DATABASE_CREATE_FAILED",
+        databaseCreated,
+        {
+          phase: "PRODUCTION_DATABASE_CREATE",
+          ...readSafePostgresDiagnostic(error),
+          objectType: "DATABASE",
+          objectName: safeDiagnosticObjectName(command.targetDatabase),
+        },
+      );
+    }
+    databaseOwner = await readNamedDatabaseOwner(
+      maintenance,
+      command.targetDatabase,
+    );
+    if (databaseOwner !== command.ownerRole) {
+      throw new SafeProductionExecutorError(
+        "PRODUCTION_DATABASE_OWNER_INVALID",
+        true,
+        {
+          phase: "PRODUCTION_DATABASE_CREATE",
+          objectType: "DATABASE",
+          objectName: safeDiagnosticObjectName(command.targetDatabase),
+        },
       );
     }
     await createRestrictedRole(
@@ -578,6 +738,10 @@ async function bootstrapProduction(
   assertProductionState(report, true);
   return [
     "PRODUCTION_DATABASE_CREATED=YES",
+    `DATABASE_OWNER=${databaseOwner}`,
+    `BOOTSTRAP_CAN_SET_OWNER_BEFORE_CREATE=${ownerMembership?.canSetBeforeOperation ? "YES" : "NO"}`,
+    `TEMPORARY_MEMBERSHIP_REVOKED=${ownerMembership?.membershipRevoked ? "YES" : "NO"}`,
+    `BOOTSTRAP_CAN_SET_OWNER_AFTER_CREATE=${ownerMembership?.canSetAfterOperation ? "YES" : "NO"}`,
     `MIGRATIONS_APPLIED=${report.migrations}`,
     `CANONICAL_IMPORT_ROW_COUNT=${report.coreRows}`,
     "ROLE_SEPARATION=PASS",
@@ -614,34 +778,63 @@ async function reconcileProduction(
     "ueb-core-phase7-roster-reconcile",
   );
   try {
-    const counts = await owner.query<{
-      users: number;
-      accounts: number;
-      roles: number;
-      scopes: number;
-      mappings: number;
-    }>(`SELECT
-      (SELECT count(*)::integer FROM auth_user) AS users,
-      (SELECT count(*)::integer FROM auth_account) AS accounts,
-      (SELECT count(*)::integer FROM role_assignment) AS roles,
-      (SELECT count(*)::integer FROM unit_scope_assignment) AS scopes,
-      (SELECT count(*)::integer FROM lecturer_user_mapping) AS mappings`);
-    const row = counts.rows[0];
-    if (!row || Object.values(row).some((count) => count !== 0)) {
-      throw new SafeProductionExecutorError(
-        "PRODUCTION_IDENTITY_TARGET_NOT_EMPTY",
+    await owner.query("BEGIN TRANSACTION READ ONLY");
+    try {
+      const report = await reconcileEmptyProductionIdentityTarget(
+        owner,
+        command,
       );
+      await owner.query("COMMIT");
+      return report;
+    } catch (error) {
+      await owner.query("ROLLBACK").catch(() => undefined);
+      throw error;
     }
-    return [
-      "ROSTER_RECONCILIATION=PASS",
-      `ROSTER_MANIFEST_SHA256=${command.rosterManifestSha}`,
-      `EXPECTED_IDENTITY_CREATE_COUNT=${PRODUCTION_EXECUTOR_CONTRACT.expectedIdentityCount}`,
-      "CURRENT_IDENTITY_COUNT=0",
-      "DATABASE_WRITES=0",
-    ];
   } finally {
     await owner.end().catch(() => undefined);
   }
+}
+
+export async function reconcileEmptyProductionIdentityTarget(
+  client: ClientBase,
+  command: ProductionExecutorCommand,
+): Promise<readonly string[]> {
+  const counts = await client.query<{
+    users: number;
+    accounts: number;
+    profiles: number;
+    roles: number;
+    scopes: number;
+    lecturer_mappings: number;
+    forced_password_profiles: number;
+    audit_events: number;
+  }>(`SELECT
+    (SELECT count(*)::integer FROM auth_user) AS users,
+    (SELECT count(*)::integer FROM auth_account) AS accounts,
+    (SELECT count(*)::integer FROM access_profile) AS profiles,
+    (SELECT count(*)::integer FROM role_assignment) AS roles,
+    (SELECT count(*)::integer FROM unit_scope_assignment) AS scopes,
+    (SELECT count(*)::integer FROM access_profile WHERE lecturer_uid IS NOT NULL) AS lecturer_mappings,
+    (SELECT count(*)::integer FROM access_profile WHERE must_change_password) AS forced_password_profiles,
+    (SELECT count(*)::integer FROM auth_audit_event) AS audit_events`);
+  const row = counts.rows[0];
+  if (!row || Object.values(row).some((count) => count !== 0)) {
+    throw new SafeProductionExecutorError(
+      "PRODUCTION_IDENTITY_TARGET_NOT_EMPTY",
+    );
+  }
+  return [
+    "ROSTER_RECONCILIATION=PASS",
+    `ROSTER_MANIFEST_SHA256=${command.rosterManifestSha}`,
+    `EXPECTED_IDENTITY_CREATE_COUNT=${PRODUCTION_EXECUTOR_CONTRACT.expectedIdentityCount}`,
+    `EXPECTED_TEST_IDENTITY_CREATE_COUNT=${PRODUCTION_EXECUTOR_CONTRACT.expectedTestIdentityCount}`,
+    "LECTURER_MAPPING_MODEL=access_profile.lecturer_uid",
+    "TEST_IDENTITY_MARKER_SOURCE=ROSTER_MANIFEST",
+    "CURRENT_IDENTITY_COUNT=0",
+    "ROSTER_BLOCK_COUNT=0",
+    "ROSTER_CONFLICT_COUNT=0",
+    "DATABASE_WRITES=0",
+  ];
 }
 
 async function backupProduction(
@@ -719,23 +912,30 @@ async function restoreProduction(
   );
   const backup = command.backupPath!;
   await verifyBackupChecksum(backup);
+  const sourceStateBefore = await readProductionState(
+    connections,
+    sourceCommand,
+  );
+  assertProductionState(sourceStateBefore, true);
+  const sourceFingerprintBefore = fingerprintState(sourceStateBefore);
   const maintenance = await connect(
     connections.bootstrap,
     "ueb-core-phase7-production-restore-create",
   );
+  let ownerMembership:
+    | {
+        readonly canSetBeforeOperation: true;
+        readonly membershipRevoked: true;
+        readonly canSetAfterOperation: false;
+      }
+    | undefined;
   try {
     await assertBootstrapRole(maintenance, connections.bootstrapUser);
-    if (await databaseExists(maintenance, command.targetDatabase)) {
-      throw new SafeProductionExecutorError(
-        "PRODUCTION_RESTORE_ALREADY_EXISTS",
-      );
-    }
-    await maintenance.query(
-      `CREATE DATABASE ${quoteIdentifier(command.targetDatabase)} OWNER ${quoteIdentifier(command.ownerRole)} TEMPLATE template0`,
-    );
-    await maintenance.query(
-      `COMMENT ON DATABASE ${quoteIdentifier(command.targetDatabase)} IS '${PRODUCTION_EXECUTOR_CONTRACT.restoreMarker}'`,
-    );
+    ownerMembership = await createGuardedProductionRestoreDatabase({
+      client: maintenance,
+      command,
+      bootstrapRole: connections.bootstrapUser,
+    });
   } finally {
     await maintenance.end().catch(() => undefined);
   }
@@ -766,12 +966,98 @@ async function restoreProduction(
   };
   const report = await readProductionState(restoredConnections, command);
   assertProductionState(report, false);
+  const sourceStateAfter = await readProductionState(
+    connections,
+    sourceCommand,
+  );
+  assertProductionState(sourceStateAfter, true);
+  assertSourceFingerprintUnchanged(
+    sourceFingerprintBefore,
+    fingerprintState(sourceStateAfter),
+  );
   return [
     "RESTORE_REHEARSAL=PASS",
+    `RESTORE_BOOTSTRAP_CAN_SET_OWNER_BEFORE_CREATE=${ownerMembership?.canSetBeforeOperation ? "YES" : "NO"}`,
+    `RESTORE_TEMPORARY_MEMBERSHIP_REVOKED=${ownerMembership?.membershipRevoked ? "YES" : "NO"}`,
+    `RESTORE_BOOTSTRAP_CAN_SET_OWNER_AFTER_CREATE=${ownerMembership?.canSetAfterOperation ? "YES" : "NO"}`,
     `RESTORE_CORE_ROW_COUNT=${report.coreRows}`,
     `RESTORE_MIGRATION_COUNT=${report.migrations}`,
     `RESTORE_FINGERPRINT=${fingerprintState(report)}`,
+    "SOURCE_PRODUCTION_FINGERPRINT_UNCHANGED=YES",
   ];
+}
+
+export async function createGuardedProductionRestoreDatabase(input: {
+  readonly client: ClientBase;
+  readonly command: ProductionExecutorCommand;
+  readonly bootstrapRole: string;
+}): Promise<{
+  readonly canSetBeforeOperation: true;
+  readonly membershipRevoked: true;
+  readonly canSetAfterOperation: false;
+}> {
+  if (await databaseExists(input.client, input.command.targetDatabase)) {
+    throw new SafeProductionExecutorError("PRODUCTION_RESTORE_ALREADY_EXISTS");
+  }
+  try {
+    const membership = await withTemporaryOwnerSetRole({
+      client: input.client,
+      bootstrapRole: input.bootstrapRole,
+      ownerRole: input.command.ownerRole,
+      forbiddenRoles: [
+        input.command.runtimeRole,
+        input.command.provisionerRole,
+      ],
+      operation: async () => {
+        await input.client.query(
+          `CREATE DATABASE ${quoteIdentifier(input.command.targetDatabase)} OWNER ${quoteIdentifier(input.command.ownerRole)} TEMPLATE template0`,
+        );
+        await input.client.query(
+          `SET ROLE ${quoteIdentifier(input.command.ownerRole)}`,
+        );
+        await input.client.query(
+          `COMMENT ON DATABASE ${quoteIdentifier(input.command.targetDatabase)} IS '${PRODUCTION_EXECUTOR_CONTRACT.restoreMarker}'`,
+        );
+      },
+    });
+    return {
+      canSetBeforeOperation: membership.canSetBeforeOperation,
+      membershipRevoked: membership.membershipRevoked,
+      canSetAfterOperation: membership.canSetAfterOperation,
+    };
+  } catch (error) {
+    const restoreExists = await databaseExists(
+      input.client,
+      input.command.targetDatabase,
+    ).catch(() => true);
+    throw new SafeProductionExecutorError(
+      "PRODUCTION_RESTORE_CREATE_FAILED",
+      restoreExists,
+      {
+        phase: "PRODUCTION_RESTORE_DATABASE_CREATE",
+        ...readSafePostgresDiagnostic(error),
+        objectType: "DATABASE",
+        objectName: safeDiagnosticObjectName(input.command.targetDatabase),
+      },
+    );
+  }
+}
+
+export function assertSourceFingerprintUnchanged(
+  before: string,
+  after: string,
+): void {
+  if (before !== after) {
+    throw new SafeProductionExecutorError(
+      "SOURCE_PRODUCTION_FINGERPRINT_CHANGED",
+      true,
+      {
+        phase: "PRODUCTION_RESTORE_SOURCE_VERIFY",
+        objectType: "DATABASE",
+        objectName: PRODUCTION_EXECUTOR_CONTRACT.database,
+      },
+    );
+  }
 }
 
 async function cleanupProductionRestore(
@@ -792,31 +1078,111 @@ async function cleanupProductionRestore(
     const state = await maintenance.query<{
       marker: string | null;
       connections: number;
+      owner_role: string;
     }>(
       `SELECT description.description AS marker,
+         owner_role.rolname AS owner_role,
          (SELECT count(*)::integer FROM pg_stat_activity WHERE datname = database.datname) AS connections
        FROM pg_database database
+       JOIN pg_roles owner_role ON owner_role.oid = database.datdba
        LEFT JOIN pg_shdescription description ON description.objoid = database.oid
        WHERE database.datname = $1`,
       [command.targetDatabase],
     );
     const row = state.rows[0];
-    if (
-      !row ||
-      row.marker !== PRODUCTION_EXECUTOR_CONTRACT.restoreMarker ||
-      row.connections !== 0
-    ) {
-      throw new SafeProductionExecutorError(
-        "PRODUCTION_RESTORE_CLEANUP_GUARD_FAILED",
-      );
-    }
-    await maintenance.query(
-      `DROP DATABASE ${quoteIdentifier(command.targetDatabase)}`,
-    );
-    return ["RESTORE_CLEANUP=PASS", "SOURCE_PRODUCTION_DATABASE=UNCHANGED"];
+    const membership = await dropGuardedProductionRestoreDatabase({
+      client: maintenance,
+      command,
+      bootstrapRole: connections.bootstrapUser,
+      state: row,
+    });
+    return [
+      "RESTORE_CLEANUP=PASS",
+      `RESTORE_CLEANUP_MEMBERSHIP_REVOKED=${membership.membershipRevoked ? "YES" : "NO"}`,
+      `RESTORE_CLEANUP_CAN_SET_OWNER_AFTER_DROP=${membership.canSetAfterOperation ? "YES" : "NO"}`,
+      "RESTORE_TARGET_EXISTS_AFTER=NO",
+      "SOURCE_PRODUCTION_DATABASE=UNCHANGED",
+    ];
   } finally {
     await maintenance.end().catch(() => undefined);
   }
+}
+
+export interface ProductionRestoreCleanupState {
+  readonly marker: string | null;
+  readonly connections: number;
+  readonly owner_role: string;
+}
+
+export function assertProductionRestoreCleanupState(
+  command: ProductionExecutorCommand,
+  state: ProductionRestoreCleanupState | undefined,
+): void {
+  assertProductionRestoreDatabase(command.targetDatabase);
+  if (
+    command.sourceDatabase !== PRODUCTION_EXECUTOR_CONTRACT.database ||
+    command.sourceDatabase === command.targetDatabase ||
+    !state ||
+    state.owner_role !== command.ownerRole ||
+    state.connections !== 0
+  ) {
+    throw new SafeProductionExecutorError(
+      "PRODUCTION_RESTORE_CLEANUP_GUARD_FAILED",
+    );
+  }
+  const markedRestore =
+    state.marker === PRODUCTION_EXECUTOR_CONTRACT.restoreMarker;
+  const acknowledgedKnownResidue =
+    state.marker === null &&
+    command.confirmKnownUnmarkedRestoreResidue === true;
+  if (!markedRestore && !acknowledgedKnownResidue) {
+    throw new SafeProductionExecutorError(
+      "PRODUCTION_RESTORE_CLEANUP_GUARD_FAILED",
+    );
+  }
+}
+
+export async function dropGuardedProductionRestoreDatabase(input: {
+  readonly client: ClientBase;
+  readonly command: ProductionExecutorCommand;
+  readonly bootstrapRole: string;
+  readonly state: ProductionRestoreCleanupState | undefined;
+}): Promise<{
+  readonly canSetBeforeOperation: true;
+  readonly membershipRevoked: true;
+  readonly canSetAfterOperation: false;
+}> {
+  assertProductionRestoreCleanupState(input.command, input.state);
+  const membership = await withTemporaryOwnerSetRole({
+    client: input.client,
+    bootstrapRole: input.bootstrapRole,
+    ownerRole: input.command.ownerRole,
+    forbiddenRoles: [input.command.runtimeRole, input.command.provisionerRole],
+    operation: async () => {
+      await input.client.query(
+        `SET ROLE ${quoteIdentifier(input.command.ownerRole)}`,
+      );
+      await input.client.query(
+        `DROP DATABASE ${quoteIdentifier(input.command.targetDatabase)}`,
+      );
+    },
+  });
+  if (await databaseExists(input.client, input.command.targetDatabase)) {
+    throw new SafeProductionExecutorError(
+      "PRODUCTION_RESTORE_CLEANUP_TARGET_STILL_EXISTS",
+      true,
+      {
+        phase: "PRODUCTION_RESTORE_CLEANUP_VERIFY",
+        objectType: "DATABASE",
+        objectName: safeDiagnosticObjectName(input.command.targetDatabase),
+      },
+    );
+  }
+  return {
+    canSetBeforeOperation: membership.canSetBeforeOperation,
+    membershipRevoked: membership.membershipRevoked,
+    canSetAfterOperation: membership.canSetAfterOperation,
+  };
 }
 
 interface ProductionConnections {
@@ -1361,6 +1727,19 @@ async function roleExists(client: ClientBase, role: string): Promise<boolean> {
       )
     ).rows[0]?.exists === true
   );
+}
+
+async function readNamedDatabaseOwner(
+  client: ClientBase,
+  database: string,
+): Promise<string | undefined> {
+  return (
+    await client.query<{ owner: string }>(
+      `SELECT pg_get_userbyid(datdba) AS owner
+       FROM pg_database WHERE datname = $1`,
+      [database],
+    )
+  ).rows[0]?.owner;
 }
 
 function withDatabase(value: string, database: string): string {
