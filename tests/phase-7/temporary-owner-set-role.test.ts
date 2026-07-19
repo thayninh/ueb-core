@@ -103,9 +103,14 @@ describe("Phase 7 temporary production-owner SET ROLE membership", () => {
       `COMMENT ON DATABASE "ueb_core_prod_restore_regression" IS '${PRODUCTION_EXECUTOR_CONTRACT.restoreMarker}'`,
     );
     const statements = state.statements();
-    expect(statements.indexOf(`SET ROLE "${OWNER}"`)).toBeLessThan(
+    const createIndex = statements.indexOf(
+      'CREATE DATABASE "ueb_core_prod_restore_regression" OWNER "ueb_core_owner_test" TEMPLATE template0',
+    );
+    const setRoleIndex = statements.indexOf(`SET ROLE "${OWNER}"`);
+    expect(createIndex).toBeLessThan(setRoleIndex);
+    expect(setRoleIndex).toBeLessThan(
       statements.indexOf(
-        'CREATE DATABASE "ueb_core_prod_restore_regression" OWNER "ueb_core_owner_test" TEMPLATE template0',
+        `COMMENT ON DATABASE "ueb_core_prod_restore_regression" IS '${PRODUCTION_EXECUTOR_CONTRACT.restoreMarker}'`,
       ),
     );
     expect(
@@ -114,6 +119,33 @@ describe("Phase 7 temporary production-owner SET ROLE membership", () => {
       ),
     ).toBeLessThan(statements.indexOf("RESET ROLE"));
     expect(state.statements().join("\n")).not.toContain("ADMIN TRUE");
+    expect(state.statements().join("\n")).not.toMatch(
+      /ALTER ROLE .* CREATEDB|WITH CREATEDB/u,
+    );
+  });
+
+  it("reproduces SQLSTATE 42501 when NOCREATEDB owner creates the restore database", async () => {
+    const state = fakeMembershipClient({ trackDatabase: true });
+
+    await expect(
+      withTemporaryOwnerSetRole({
+        client: state.client,
+        bootstrapRole: BOOTSTRAP,
+        ownerRole: OWNER,
+        forbiddenRoles: ["ueb_core_app", "ueb_core_provisioner"],
+        operation: async () => {
+          await state.client.query(`SET ROLE "${OWNER}"`);
+          await state.client.query(
+            'CREATE DATABASE "ueb_core_prod_restore_regression" OWNER "ueb_core_owner_test" TEMPLATE template0',
+          );
+        },
+      }),
+    ).rejects.toMatchObject({ code: "42501" });
+
+    expect(state.databaseExists()).toBe(false);
+    expect(state.ownerRoleActive()).toBe(false);
+    expect(state.canSet()).toBe(false);
+    expect(state.resetCount()).toBe(1);
   });
 
   it("reproduces SQLSTATE 42501 when COMMENT runs without SET ROLE", async () => {
@@ -309,7 +341,7 @@ function fakeMembershipClient(
         return { rows: [{ count: membershipCanSet ? 1 : 0 }] };
       }
       if (statement.startsWith("CREATE DATABASE ") && input.trackDatabase) {
-        if (input.failDatabaseCreate) {
+        if (ownerRoleActive || input.failDatabaseCreate) {
           throw Object.assign(new Error("injected-create-failure"), {
             code: "42501",
           });

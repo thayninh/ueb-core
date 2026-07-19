@@ -1010,10 +1010,10 @@ export async function createGuardedProductionRestoreDatabase(input: {
       ],
       operation: async () => {
         await input.client.query(
-          `SET ROLE ${quoteIdentifier(input.command.ownerRole)}`,
+          `CREATE DATABASE ${quoteIdentifier(input.command.targetDatabase)} OWNER ${quoteIdentifier(input.command.ownerRole)} TEMPLATE template0`,
         );
         await input.client.query(
-          `CREATE DATABASE ${quoteIdentifier(input.command.targetDatabase)} OWNER ${quoteIdentifier(input.command.ownerRole)} TEMPLATE template0`,
+          `SET ROLE ${quoteIdentifier(input.command.ownerRole)}`,
         );
         await input.client.query(
           `COMMENT ON DATABASE ${quoteIdentifier(input.command.targetDatabase)} IS '${PRODUCTION_EXECUTOR_CONTRACT.restoreMarker}'`,

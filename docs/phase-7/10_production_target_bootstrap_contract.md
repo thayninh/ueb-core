@@ -121,8 +121,10 @@ Unknown/duplicate inputs and confirmation plus `--dry-run` are rejected.
 9. Restore to a new marked `ueb_core_prod_restore_*` database. PostgreSQL 18
    restore creation and cleanup use the same temporary owner membership as
    target bootstrap: exact `SET` capability only, no admin option, followed by
-   an explicit `SET ROLE` before every owner-only CREATE, COMMENT or DROP,
-   `RESET ROLE`, revoke and a negative capability check on success or failure.
+   `CREATE DATABASE ... OWNER ...` as the CREATEDB bootstrap role, then an
+   explicit `SET ROLE` for owner-only COMMENT or DROP operations. The owner
+   remains NOCREATEDB. Every path performs `RESET ROLE`, revoke and a negative
+   capability check on success or failure.
    The executor verifies the restored counts and fingerprint and proves the
    source production fingerprint did not change before guarded cleanup.
 10. Reconcile the exact roster SHA read-only against the empty identity target.
