@@ -23,6 +23,7 @@ import { prepareSourceFile } from "../../phase-2/lib/row-parser";
 import { loadSourceContract } from "../../phase-2/lib/source-contract";
 
 const execFileAsync = promisify(execFile);
+const OPERATOR_SOURCE_SHA_PATH = "/operator/.source-git-sha";
 
 export const PRODUCTION_EXECUTOR_CONTRACT = {
   database: "ueb_core_prod",
@@ -359,10 +360,7 @@ export async function runProductionExecutor(input: {
   readonly command: ProductionExecutorCommand;
   readonly environment?: Readonly<Record<string, string | undefined>>;
   readonly now?: Date;
-  readonly gitState?: () => Promise<{
-    readonly head: string;
-    readonly clean: boolean;
-  }>;
+  readonly sourceSha?: () => Promise<string>;
   readonly adapter?: ProductionExecutionAdapter;
 }): Promise<ProductionExecutorResult> {
   const command = input.command;
@@ -371,9 +369,9 @@ export async function runProductionExecutor(input: {
   assertWindowState({ command, now, requireActive: mutation });
   const environment = input.environment ?? process.env;
   if (!mutation) assertNoDatabaseCredentials(environment);
-  const git = await (input.gitState ?? readGitState)();
-  if (git.head !== command.expectedGitSha || !git.clean) {
-    throw new SafeProductionExecutorError("PRODUCTION_GIT_STATE_MISMATCH");
+  const sourceSha = await (input.sourceSha ?? readEmbeddedSourceSha)();
+  if (sourceSha !== command.expectedGitSha) {
+    throw new SafeProductionExecutorError("PRODUCTION_SOURCE_GIT_SHA_MISMATCH");
   }
   await Promise.all([
     verifyArtifact(
@@ -1421,13 +1419,19 @@ async function assertAbsent(path: string): Promise<void> {
   throw new SafeProductionExecutorError("PRODUCTION_OUTPUT_ALREADY_EXISTS");
 }
 
-async function readGitState(): Promise<{
-  readonly head: string;
-  readonly clean: boolean;
-}> {
-  const [{ stdout: head }, { stdout: status }] = await Promise.all([
-    execFileAsync("git", ["rev-parse", "HEAD"]),
-    execFileAsync("git", ["status", "--porcelain"]),
-  ]);
-  return { head: head.trim(), clean: status.trim() === "" };
+export async function readEmbeddedSourceSha(
+  path = OPERATOR_SOURCE_SHA_PATH,
+): Promise<string> {
+  const metadata = await lstat(path).catch(() => undefined);
+  if (!metadata?.isFile() || metadata.isSymbolicLink()) {
+    throw new SafeProductionExecutorError("PRODUCTION_SOURCE_GIT_SHA_MISSING");
+  }
+  if ((metadata.mode & 0o777) !== 0o444 || metadata.size > 128) {
+    throw new SafeProductionExecutorError("PRODUCTION_SOURCE_GIT_SHA_INVALID");
+  }
+  const value = (await readFile(path, "utf8")).trim();
+  if (!GIT_SHA.test(value)) {
+    throw new SafeProductionExecutorError("PRODUCTION_SOURCE_GIT_SHA_INVALID");
+  }
+  return value;
 }

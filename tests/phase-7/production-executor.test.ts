@@ -15,6 +15,7 @@ import {
   parseOperatorWindow,
   parseProductionExecutorCommand,
   PRODUCTION_EXECUTOR_CONTRACT,
+  readEmbeddedSourceSha,
   runProductionExecutor,
   type ProductionExecutionAdapter,
   type ProductionExecutorMode,
@@ -154,7 +155,7 @@ describe("Phase 7 executable production guards", () => {
       ),
       environment: {},
       now: new Date("2026-07-18T18:30:00Z"),
-      gitState: async () => ({ head: gitSha, clean: true }),
+      sourceSha: async () => gitSha,
       adapter,
     });
     expect(result.exitCode).toBe(0);
@@ -176,7 +177,7 @@ describe("Phase 7 executable production guards", () => {
         ),
         environment: { MIGRATION_DATABASE_URL: "must-not-be-printed" },
         now: new Date("2026-07-18T18:30:00Z"),
-        gitState: async () => ({ head: gitSha, clean: true }),
+        sourceSha: async () => gitSha,
       }),
     ).rejects.toThrow(/DATABASE_CREDENTIALS_FORBIDDEN_IN_DRY_RUN/u);
   });
@@ -200,6 +201,10 @@ describe("Phase 7 executable production guards", () => {
     expect(dockerfile).toContain("scripts/phase-7 ./scripts/phase-7");
     expect(dockerfile).toContain("scripts/phase-2 ./scripts/phase-2");
     expect(dockerfile).toContain("config/phase-2 ./config/phase-2");
+    expect(dockerfile).toContain("UEB_CORE_SOURCE_GIT_SHA");
+    expect(dockerfile).toContain("/operator/.source-git-sha");
+    expect(dockerfile).not.toMatch(/(?:apt-get|apk).*(?:install).*\bgit\b/u);
+    expect(dockerfile).not.toMatch(/COPY\s+.*\.git/u);
   });
 
   it("redacted preflight output has no supplied credential material", async () => {
@@ -210,10 +215,54 @@ describe("Phase 7 executable production guards", () => {
       ),
       environment: {},
       now: new Date("2026-07-18T18:30:00Z"),
-      gitState: async () => ({ head: gitSha, clean: true }),
+      sourceSha: async () => gitSha,
     });
     expect(result.report).toContain("PRODUCTION_EXECUTOR=PASS");
     expect(result.report).not.toMatch(/PASSWORD|TOKEN|postgres(?:ql)?:\/\//iu);
+  });
+
+  it("accepts an exact immutable embedded source SHA", async () => {
+    const path = join(directory, ".source-git-sha");
+    await writeFile(path, `${gitSha}\n`, { mode: 0o444 });
+    await chmod(path, 0o444);
+    await expect(readEmbeddedSourceSha(path)).resolves.toBe(gitSha);
+  });
+
+  it("fails closed before database activity when embedded SHA differs", async () => {
+    const adapter = adapterMock();
+    await expect(
+      runProductionExecutor({
+        command: parseProductionExecutorCommand(
+          "BOOTSTRAP",
+          baseArguments("BOOTSTRAP"),
+        ),
+        environment: {},
+        now: new Date("2026-07-18T18:30:00Z"),
+        sourceSha: async () => "b".repeat(40),
+        adapter,
+      }),
+    ).rejects.toThrow(/PRODUCTION_SOURCE_GIT_SHA_MISMATCH/u);
+    expect(adapter.bootstrap).not.toHaveBeenCalled();
+    expect(adapter.verify).not.toHaveBeenCalled();
+    expect(adapter.reconcile).not.toHaveBeenCalled();
+    expect(adapter.backup).not.toHaveBeenCalled();
+    expect(adapter.restore).not.toHaveBeenCalled();
+    expect(adapter.cleanupRestore).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when embedded source SHA file is missing", async () => {
+    await expect(
+      readEmbeddedSourceSha(join(directory, "missing-source-sha")),
+    ).rejects.toThrow(/PRODUCTION_SOURCE_GIT_SHA_MISSING/u);
+  });
+
+  it("fails closed when embedded source SHA is malformed", async () => {
+    const path = join(directory, ".source-git-sha");
+    await writeFile(path, "not-a-git-sha\n", { mode: 0o444 });
+    await chmod(path, 0o444);
+    await expect(readEmbeddedSourceSha(path)).rejects.toThrow(
+      /PRODUCTION_SOURCE_GIT_SHA_INVALID/u,
+    );
   });
 
   it("does not eagerly load dotenv-backed mutation modules for preflight", async () => {

@@ -125,6 +125,14 @@ all eight migrations, Phase 2 canonical import code and contract, Phase 3/4 ACL
 reconciliation code, and `scripts/phase-7`. It does not contain the canonical
 Excel artifact, credentials, backup data or a `latest` image tag.
 
+Before building, the operator must verify `git rev-parse HEAD`, require an empty
+`git status --short`, and pass that exact commit as the
+`UEB_CORE_SOURCE_GIT_SHA` build argument. The build stores it as the root-owned,
+read-only `/operator/.source-git-sha` file. Runtime commands compare this
+embedded value with `--expected-git-sha` and fail closed when the file is
+missing, malformed or different. The operator image contains neither the Git
+binary nor `.git` metadata.
+
 ## 9. Failure and hard-stop policy
 
 Before target creation, invalid source/evidence/window/artifacts produce zero
