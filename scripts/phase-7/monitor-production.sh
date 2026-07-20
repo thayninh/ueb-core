@@ -94,7 +94,7 @@ verified_backup_age_seconds() {
     [[ -n "${dump}" && -f "${dump}" && ! -L "${dump}" ]] || continue
     sidecar="${dump}.sha256"
     [[ -f "${sidecar}" && ! -L "${sidecar}" ]] || continue
-    if (cd "${directory}" && sha256sum --check --status "$(basename "${sidecar}")"); then
+    if verify_backup_checksum "${dump}" "${sidecar}"; then
       modified="$(file_mtime "${dump}")" || return 1
       if ((modified > newest_modified)); then
         newest_modified="${modified}"
@@ -109,6 +109,21 @@ verified_backup_age_seconds() {
   fi
 
   return 1
+}
+
+verify_backup_checksum() {
+  local dump="$1"
+  local sidecar="$2"
+  local expected actual
+
+  expected="$(tr -d '\r\n' <"${sidecar}" | tr 'A-F' 'a-f')"
+  if [[ "${expected}" =~ ^[a-fA-F0-9]{64}$ ]]; then
+    actual="$(sha256sum "${dump}" | awk '{print $1}')" || return 1
+    [[ "${actual}" == "${expected}" ]]
+    return
+  fi
+
+  (cd "$(dirname "${dump}")" && sha256sum --check --status "$(basename "${sidecar}")")
 }
 
 classify_disk_usage() {

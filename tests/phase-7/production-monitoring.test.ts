@@ -96,6 +96,22 @@ describe("Phase 7 production monitoring contract", () => {
     ).toThrow();
   });
 
+  it("accepts the deployed raw SHA-256 sidecar contract", async () => {
+    const directory = await temporaryDirectory("raw-sidecar");
+    const dump = join(directory, "production.dump");
+    await writeFile(dump, "verified production backup", { mode: 0o600 });
+    const checksum = execFileSync("sha256sum", [dump], { encoding: "utf8" })
+      .split(" ")[0]
+      ?.trim();
+    await writeFile(`${dump}.sha256`, `${checksum}\n`, { mode: 0o600 });
+    expect(
+      bash('verified_backup_age_seconds "$BACKUP" "$NOW"', {
+        BACKUP: directory,
+        NOW: String(Math.floor(Date.now() / 1000)),
+      }),
+    ).toMatch(/^\d+$/u);
+  });
+
   it("classifies 82 percent as warning and the 85 percent threshold as high", () => {
     expect(bash("classify_disk_usage 82")).toBe("WARNING");
     expect(bash("classify_disk_usage 85")).toBe("HIGH");
