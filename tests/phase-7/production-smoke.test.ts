@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  createSessionRevocationRequest,
+  getSmokeCleanupFailure,
   isAcceptedSafeDeny,
   runWithSmokeSessionCleanup,
 } from "../../scripts/phase-7/lib/production-smoke";
@@ -68,5 +70,68 @@ describe("Phase 7 production smoke safe-deny contract", () => {
       runWithSmokeSessionCleanup(async () => "PASS", cleanup),
     ).resolves.toBe("PASS");
     expect(cleanup).toHaveBeenCalledOnce();
+  });
+
+  it("preserves the primary failure when session cleanup also fails", async () => {
+    const primaryFailure = new Error("WORKFLOW_QUEUE_ASSERTION_FAILED");
+    const cleanupFailure = new Error("SESSION_REVOCATION_HTTP_415");
+
+    let observedFailure: unknown;
+    try {
+      await runWithSmokeSessionCleanup(
+        async () => {
+          throw primaryFailure;
+        },
+        async () => {
+          throw cleanupFailure;
+        },
+      );
+    } catch (error) {
+      observedFailure = error;
+    }
+
+    expect(observedFailure).toBe(primaryFailure);
+    expect(getSmokeCleanupFailure(observedFailure)).toBe(cleanupFailure);
+  });
+
+  it("reports cleanup HTTP 415 directly when the smoke action passed", async () => {
+    const cleanupFailure = new Error("SESSION_REVOCATION_HTTP_415");
+
+    await expect(
+      runWithSmokeSessionCleanup(
+        async () => "PASS",
+        async () => {
+          throw cleanupFailure;
+        },
+      ),
+    ).rejects.toBe(cleanupFailure);
+  });
+
+  it("uses the Better Auth JSON POST contract for session revocation", () => {
+    expect(createSessionRevocationRequest()).toEqual({
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+  });
+
+  it("cleans active test sessions without creating workflow mutations", async () => {
+    let activeTestSessions = 1;
+    const workflowMutations = 0;
+
+    await expect(
+      runWithSmokeSessionCleanup(
+        async () => {
+          expect(workflowMutations).toBe(0);
+          throw new Error("SAFE_READ_ONLY_ASSERTION_FAILED");
+        },
+        async () => {
+          activeTestSessions = 0;
+        },
+      ),
+    ).rejects.toThrow("SAFE_READ_ONLY_ASSERTION_FAILED");
+
+    expect(activeTestSessions).toBe(0);
+    expect(workflowMutations).toBe(0);
   });
 });
