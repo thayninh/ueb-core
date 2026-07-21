@@ -3,6 +3,7 @@
 import { useActionState } from "react";
 
 import { createUserAction, type AdminActionState } from "@/app/actions/admin";
+import { Alert, Button, Input, Select } from "@/components/ui";
 
 const initialState: AdminActionState = { status: "IDLE", message: null };
 
@@ -24,7 +25,7 @@ export function CreateUserForm({
 
   return (
     <form action={action} className="space-y-5">
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Tên hiển thị" name="name" required />
         <Field label="Email đăng nhập" name="email" required type="email" />
         <Field
@@ -36,13 +37,9 @@ export function CreateUserForm({
           required
           type="password"
         />
-        <label className="text-sm font-medium text-zinc-700 dark:text-zinc-200">
+        <label className="text-sm font-semibold text-ink">
           Ánh xạ giảng viên
-          <select
-            className="mt-2 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 dark:border-zinc-700 dark:bg-zinc-950"
-            defaultValue=""
-            name="lecturerUid"
-          >
+          <Select className="mt-2" defaultValue="" name="lecturerUid">
             <option value="">Không ánh xạ</option>
             {lecturerCandidates.map((candidate) => (
               <option key={candidate.lecturerUid} value={candidate.lecturerUid}>
@@ -50,12 +47,12 @@ export function CreateUserForm({
                 {candidate.email ?? "Chưa có email"}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
-        <label className="text-sm font-medium text-zinc-700 dark:text-zinc-200">
+        <label className="text-sm font-semibold text-ink">
           Yêu cầu đổi mật khẩu lần đầu
-          <select
-            className="mt-2 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 dark:border-zinc-700 dark:bg-zinc-950"
+          <Select
+            className="mt-2"
             defaultValue=""
             name="requirePasswordChange"
             required
@@ -65,36 +62,46 @@ export function CreateUserForm({
             </option>
             <option value="true">Có</option>
             <option value="false">Không</option>
-          </select>
+          </Select>
         </label>
       </div>
 
       <fieldset>
-        <legend className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
-          Vai trò
-        </legend>
-        <div className="mt-3 flex flex-wrap gap-4">
+        <legend className="text-sm font-semibold text-ink">Vai trò</legend>
+        <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2">
           {[
             ["LECTURER", "Giảng viên"],
             ["FACULTY_LEADER", "Lãnh đạo khoa/đơn vị"],
             ["ADMIN", "Quản trị viên"],
           ].map(([value, label]) => (
-            <label className="flex items-center gap-2 text-sm" key={value}>
-              <input name="roles" type="checkbox" value={value} /> {label}
+            <label
+              className="flex min-h-11 items-center gap-3 rounded-control px-2 text-sm text-ink hover:bg-surface-subtle"
+              key={value}
+            >
+              <input
+                className="size-4"
+                name="roles"
+                type="checkbox"
+                value={value}
+              />{" "}
+              {label}
             </label>
           ))}
         </div>
       </fieldset>
 
       <fieldset>
-        <legend className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
+        <legend className="text-sm font-semibold text-ink">
           Đơn vị quản lý
         </legend>
-        <div className="mt-3 grid gap-2 md:grid-cols-2">
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
           {units.map((unit) => (
-            <label className="flex items-start gap-2 text-sm" key={unit.id}>
+            <label
+              className="flex min-h-11 items-start gap-3 rounded-control px-2 py-2 text-sm leading-6 text-ink hover:bg-surface-subtle"
+              key={unit.id}
+            >
               <input
-                className="mt-1"
+                className="mt-1 size-4 shrink-0"
                 name="unitIds"
                 type="checkbox"
                 value={unit.id}
@@ -106,25 +113,17 @@ export function CreateUserForm({
       </fieldset>
 
       {state.message ? (
-        <p
+        <Alert
           aria-live="polite"
-          className={`rounded-lg px-4 py-3 text-sm ${
-            state.status === "SUCCESS"
-              ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200"
-              : "bg-red-50 text-red-800 dark:bg-red-950/40 dark:text-red-200"
-          }`}
+          variant={state.status === "SUCCESS" ? "success" : "danger"}
         >
           {state.message}
-        </p>
+        </Alert>
       ) : null}
 
-      <button
-        className="rounded-lg bg-blue-700 px-5 py-2.5 font-medium text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-60"
-        disabled={pending}
-        type="submit"
-      >
+      <Button loading={pending} type="submit">
         {pending ? "Đang tạo…" : "Tạo tài khoản"}
-      </button>
+      </Button>
     </form>
   );
 }
@@ -142,14 +141,9 @@ function Field({
   } & React.InputHTMLAttributes<HTMLInputElement>
 >) {
   return (
-    <label className="text-sm font-medium text-zinc-700 dark:text-zinc-200">
+    <label className="text-sm font-semibold text-ink">
       {label}
-      <input
-        className="mt-2 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 dark:border-zinc-700 dark:bg-zinc-950"
-        name={name}
-        type={type}
-        {...props}
-      />
+      <Input className="mt-2" name={name} type={type} {...props} />
     </label>
   );
 }

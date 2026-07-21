@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { CoreDataTable } from "@/components/core-data-table";
+import { Button, Input, PageContainer } from "@/components/ui";
 import { getLatestCoreRowsForAdmin } from "@/lib/data/latest-core-data";
 import {
   firstSearchParam,
@@ -40,29 +41,30 @@ export default async function AdminDataPage({
   });
 
   return (
-    <main className="mx-auto w-full max-w-[1800px] space-y-6 px-6 py-10">
-      <header className="flex flex-wrap items-end justify-between gap-4">
+    <main className="py-8 sm:py-10">
+      <PageContainer className="max-w-[1800px] space-y-6">
+      <header className="flex flex-wrap items-end justify-between gap-5">
         <div>
-          <p className="text-sm font-medium text-blue-700 dark:text-blue-400">
+          <p className="text-sm font-semibold text-brand-700">
             Quản trị viên · Chỉ đọc
           </p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
+          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-ink sm:text-3xl">
             Dữ liệu hiện hành toàn hệ thống
           </h1>
-          <p className="mt-3 max-w-3xl text-sm text-zinc-600 dark:text-zinc-300">
+          <p className="mt-3 max-w-3xl text-sm leading-6 text-muted">
             Mỗi record chỉ hiển thị phiên bản đã phê duyệt mới nhất. Trang này
             không cung cấp thao tác sửa, gửi hoặc quyết định workflow.
           </p>
         </div>
         <nav aria-label="Quản trị hệ thống" className="flex flex-wrap gap-3">
           <Link
-            className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            className="inline-flex min-h-11 items-center justify-center rounded-control border border-border-strong bg-surface px-4 py-2.5 text-sm font-semibold text-ink shadow-control transition-colors hover:bg-surface-subtle"
             href="/admin/users"
           >
             Tài khoản
           </Link>
           <Link
-            className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            className="inline-flex min-h-11 items-center justify-center rounded-control border border-border-strong bg-surface px-4 py-2.5 text-sm font-semibold text-ink shadow-control transition-colors hover:bg-surface-subtle"
             href="/admin/audit"
           >
             Nhật ký bảo mật
@@ -71,13 +73,13 @@ export default async function AdminDataPage({
       </header>
 
       <form
-        className="grid gap-4 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 md:grid-cols-[minmax(16rem,1fr)_auto]"
+        className="grid gap-4 rounded-card border border-border bg-surface p-4 shadow-card sm:p-5 md:grid-cols-[minmax(16rem,1fr)_auto]"
         method="get"
       >
-        <label className="text-sm font-medium text-zinc-700 dark:text-zinc-200">
+        <label className="text-sm font-semibold text-ink">
           Tìm kiếm
-          <input
-            className="mt-2 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 dark:border-zinc-700 dark:bg-zinc-950"
+          <Input
+            className="mt-2"
             defaultValue={result.search}
             maxLength={100}
             name="q"
@@ -85,15 +87,12 @@ export default async function AdminDataPage({
             type="search"
           />
         </label>
-        <button
-          className="self-end rounded-lg bg-blue-700 px-5 py-2.5 font-medium text-white hover:bg-blue-800"
-          type="submit"
-        >
+        <Button className="self-end" type="submit">
           Tra cứu
-        </button>
+        </Button>
       </form>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-zinc-600 dark:text-zinc-300">
+      <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted">
         <p>
           {result.totalRows} record hiện hành · Trang {result.page}/
           {result.totalPages}
@@ -105,6 +104,7 @@ export default async function AdminDataPage({
         emptyMessage="Không có dữ liệu hiện hành phù hợp bộ lọc."
         rows={result.rows}
       />
+      </PageContainer>
     </main>
   );
 }
@@ -115,7 +115,10 @@ function Pagination({
   result: Awaited<ReturnType<typeof getLatestCoreRowsForAdmin>>;
 }>) {
   return (
-    <nav aria-label="Phân trang dữ liệu hiện hành" className="flex gap-2">
+    <nav
+      aria-label="Phân trang dữ liệu hiện hành"
+      className="flex flex-wrap gap-2"
+    >
       <PageLink
         disabled={result.page <= 1}
         href={adminDataHref(result.search, result.page - 1)}
@@ -136,17 +139,20 @@ function PageLink({
   disabled,
 }: Readonly<{ href: string; label: string; disabled: boolean }>) {
   const classes =
-    "rounded-lg border border-zinc-300 px-3 py-2 font-medium dark:border-zinc-700";
+    "inline-flex min-h-11 items-center justify-center rounded-control border border-border px-3 py-2 text-center font-semibold";
   if (disabled) {
     return (
-      <span className={`${classes} cursor-not-allowed opacity-40`}>
+      <span
+        aria-disabled="true"
+        className={`${classes} cursor-not-allowed bg-surface-subtle text-muted opacity-60`}
+      >
         {label}
       </span>
     );
   }
   return (
     <Link
-      className={`${classes} hover:bg-zinc-100 dark:hover:bg-zinc-800`}
+      className={`${classes} bg-surface text-ink shadow-control transition-colors hover:bg-surface-subtle`}
       href={href}
     >
       {label}
