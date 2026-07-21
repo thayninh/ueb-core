@@ -1,4 +1,10 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SUBMISSION_PAYLOAD_FIELD_NAMES } from "@/lib/workflow/field-policy";
@@ -71,6 +77,56 @@ describe("Phase 4 leader reject UI", () => {
     );
     expect(screen.getByText("Giảng viên A")).toBeInTheDocument();
     expect(screen.getByText("Xem và xử lý")).toBeInTheDocument();
+    expect(screen.getByLabelText("Bản gửi chờ xử lý")).toHaveAttribute(
+      "tabindex",
+      "0",
+    );
+  });
+
+  it("preserves queue filter names, values, links, and pagination queries", async () => {
+    mocks.queue.mockResolvedValue({
+      ...queueFixture(),
+      page: 2,
+      totalPages: 3,
+      search: "Giảng viên A",
+      unitId: "33333333-3333-4333-8333-333333333333",
+      submissionType: "UPDATE_EXISTING",
+    });
+    const { container } = render(
+      await LeaderSubmissionsPage({
+        searchParams: Promise.resolve({}),
+      }),
+    );
+    const filterForm = screen
+      .getByRole("button", { name: "Lọc queue" })
+      .closest("form")!;
+    expect(
+      [...filterForm.querySelectorAll("[name]")].map((field) =>
+        field.getAttribute("name"),
+      ),
+    ).toEqual(["q", "unitId", "type"]);
+    expect(screen.getByLabelText("Tìm kiếm")).toHaveValue("Giảng viên A");
+    expect(screen.getByLabelText("Đơn vị")).toHaveValue(
+      "33333333-3333-4333-8333-333333333333",
+    );
+    expect(screen.getByLabelText("Loại bản gửi")).toHaveValue(
+      "UPDATE_EXISTING",
+    );
+    expect(screen.getByRole("link", { name: "Xóa lọc" })).toHaveAttribute(
+      "href",
+      "/leader/submissions",
+    );
+    expect(screen.getByRole("link", { name: "Trang trước" })).toHaveAttribute(
+      "href",
+      "/leader/submissions?page=1&q=Gi%E1%BA%A3ng+vi%C3%AAn+A&unitId=33333333-3333-4333-8333-333333333333&type=UPDATE_EXISTING",
+    );
+    expect(screen.getByRole("link", { name: "Trang sau" })).toHaveAttribute(
+      "href",
+      "/leader/submissions?page=3&q=Gi%E1%BA%A3ng+vi%C3%AAn+A&unitId=33333333-3333-4333-8333-333333333333&type=UPDATE_EXISTING",
+    );
+    expect(
+      container.querySelectorAll('a[href^="/leader/submissions/"]'),
+    ).toHaveLength(1);
   });
 
   it("renders a required reject form and nineteen diff rows for PENDING", async () => {
@@ -83,6 +139,15 @@ describe("Phase 4 leader reject UI", () => {
     expect(
       container.querySelectorAll("[data-workflow-diff-field]"),
     ).toHaveLength(19);
+    expect(
+      [...container.querySelectorAll("[data-workflow-diff-field]")].map((row) =>
+        row.getAttribute("data-workflow-diff-field"),
+      ),
+    ).toEqual(SUBMISSION_PAYLOAD_FIELD_NAMES);
+    expect(screen.getByLabelText("So sánh 19 trường nội dung")).toHaveAttribute(
+      "tabindex",
+      "0",
+    );
     expect(screen.getByLabelText("Lý do từ chối")).toBeRequired();
     expect(
       screen.getByRole("button", { name: "Từ chối bản gửi" }),
@@ -90,6 +155,20 @@ describe("Phase 4 leader reject UI", () => {
     expect(
       screen.getByRole("button", { name: "Phê duyệt bản gửi" }),
     ).toBeInTheDocument();
+    const rejectForm = screen
+      .getByRole("button", { name: "Từ chối bản gửi" })
+      .closest("form")!;
+    expect([...new FormData(rejectForm).keys()]).toEqual([
+      "submissionId",
+      "reason",
+    ]);
+    expect(
+      screen.getByLabelText(/Tôi xác nhận từ chối bản gửi/iu),
+    ).not.toHaveAttribute("name");
+    expect(screen.getByLabelText("Lý do từ chối")).toHaveAttribute(
+      "aria-describedby",
+      "reject-reason-help",
+    );
   });
 
   it("shows stale warning while still allowing rejection", async () => {
@@ -114,6 +193,33 @@ describe("Phase 4 leader reject UI", () => {
         name: "Không thể phê duyệt dữ liệu đã thay đổi",
       }),
     ).toBeDisabled();
+  });
+
+  it("associates the unchanged rejection validation message only when rendered", async () => {
+    mocks.rejectAction.mockResolvedValue({
+      success: false,
+      fieldErrors: { reason: ["Lý do từ chối phải có ít nhất 3 ký tự."] },
+      formError: null,
+      errorCode: "VALIDATION_ERROR",
+      rejection: null,
+    });
+    render(
+      await LeaderSubmissionDetailPage({
+        params: Promise.resolve({ submissionId: SUBMISSION_ID }),
+        searchParams: Promise.resolve({}),
+      }),
+    );
+    const reason = screen.getByLabelText("Lý do từ chối");
+    fireEvent.submit(reason.closest("form")!);
+    await waitFor(() =>
+      expect(reason).toHaveAttribute(
+        "aria-describedby",
+        "reject-reason-help reject-reason-error",
+      ),
+    );
+    expect(
+      screen.getByText("Lý do từ chối phải có ít nhất 3 ký tự."),
+    ).toBeInTheDocument();
   });
 
   it("does not render a reject action for terminal detail", async () => {

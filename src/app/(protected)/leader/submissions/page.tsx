@@ -3,6 +3,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import {
+  Button,
+  Card,
+  Input,
+  PageContainer,
+  Select,
+  TableShell,
+} from "@/components/ui";
+import {
   SUBMISSION_TYPE_LABELS,
   formatWorkflowDate,
 } from "@/components/workflow/workflow-labels";
@@ -61,26 +69,28 @@ export default async function LeaderSubmissionsPage({
   }
 
   return (
-    <main className="mx-auto w-full max-w-7xl space-y-8 px-6 py-10">
-      <header>
-        <Link
-          className="text-sm font-semibold text-blue-700 underline underline-offset-2 dark:text-blue-300"
-          href="/dashboard"
-        >
-          ← Quay lại bảng điều khiển
-        </Link>
-        <h1 className="mt-4 text-3xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
-          Bản gửi chờ xử lý
-        </h1>
-        <p className="mt-3 text-sm text-zinc-600 dark:text-zinc-300">
-          Queue chỉ gồm submission có một sự kiện SUBMITTED và chưa có sự kiện
-          terminal. Danh sách được sắp từ cũ đến mới.
-        </p>
-      </header>
+    <main className="relative py-8 sm:py-10 lg:py-12">
+      <PageContainer className="max-w-7xl space-y-8">
+        <header>
+          <Link
+            className="inline-flex min-h-11 items-center text-sm font-semibold text-brand-700 underline underline-offset-2"
+            href="/dashboard"
+          >
+            ← Quay lại bảng điều khiển
+          </Link>
+          <h1 className="mt-3 text-3xl font-semibold tracking-tight text-ink sm:text-4xl">
+            Bản gửi chờ xử lý
+          </h1>
+          <p className="mt-3 text-sm leading-6 text-muted">
+            Queue chỉ gồm submission có một sự kiện SUBMITTED và chưa có sự kiện
+            terminal. Danh sách được sắp từ cũ đến mới.
+          </p>
+        </header>
 
-      <QueueFilters result={result} />
-      <QueueTable result={result} />
-      <QueuePagination result={result} />
+        <QueueFilters result={result} />
+        <QueueTable result={result} />
+        <QueuePagination result={result} />
+      </PageContainer>
     </main>
   );
 }
@@ -89,66 +99,62 @@ function QueueFilters({
   result,
 }: Readonly<{ result: LeaderSubmissionQueuePage }>) {
   return (
-    <form
-      className="grid gap-4 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm md:grid-cols-2 xl:grid-cols-4 dark:border-zinc-800 dark:bg-zinc-900"
-      method="get"
-    >
-      <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
-        Tìm kiếm
-        <input
-          className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
-          defaultValue={result.search}
-          maxLength={100}
-          name="q"
-          placeholder="Giảng viên, học phần, record…"
-          type="search"
-        />
-      </label>
-      <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
-        Đơn vị
-        <select
-          className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
-          defaultValue={result.unitId ?? ""}
-          name="unitId"
-        >
-          <option value="">Tất cả đơn vị trong phạm vi</option>
-          {result.units.map((unit) => (
-            <option key={unit.id} value={unit.id}>
-              {unit.displayName}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
-        Loại bản gửi
-        <select
-          className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
-          defaultValue={result.submissionType ?? ""}
-          name="type"
-        >
-          <option value="">Tất cả</option>
-          {Object.entries(SUBMISSION_TYPE_LABELS).map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <div className="flex items-end gap-3">
-        <button
-          className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800"
-          type="submit"
-        >
-          Lọc queue
-        </button>
-        <Link
-          className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-semibold dark:border-zinc-700"
-          href="/leader/submissions"
-        >
-          Xóa lọc
-        </Link>
-      </div>
-    </form>
+    <Card className="p-4 sm:p-5">
+      <form className="grid gap-4 md:grid-cols-2 xl:grid-cols-4" method="get">
+        <label className="text-sm font-semibold text-ink">
+          Tìm kiếm
+          <Input
+            className="mt-2"
+            defaultValue={result.search}
+            maxLength={100}
+            name="q"
+            placeholder="Giảng viên, học phần, record…"
+            type="search"
+          />
+        </label>
+        <label className="text-sm font-semibold text-ink">
+          Đơn vị
+          <Select
+            className="mt-2"
+            defaultValue={result.unitId ?? ""}
+            name="unitId"
+          >
+            <option value="">Tất cả đơn vị trong phạm vi</option>
+            {result.units.map((unit) => (
+              <option key={unit.id} value={unit.id}>
+                {unit.displayName}
+              </option>
+            ))}
+          </Select>
+        </label>
+        <label className="text-sm font-semibold text-ink">
+          Loại bản gửi
+          <Select
+            className="mt-2"
+            defaultValue={result.submissionType ?? ""}
+            name="type"
+          >
+            <option value="">Tất cả</option>
+            {Object.entries(SUBMISSION_TYPE_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </Select>
+        </label>
+        <div className="flex flex-wrap items-end gap-3">
+          <Button className="flex-1 sm:flex-none" type="submit">
+            Lọc queue
+          </Button>
+          <Link
+            className="inline-flex min-h-11 flex-1 items-center justify-center rounded-control border border-border-strong bg-surface px-4 py-2.5 text-sm font-semibold text-ink shadow-control hover:bg-surface-subtle sm:flex-none"
+            href="/leader/submissions"
+          >
+            Xóa lọc
+          </Link>
+        </div>
+      </form>
+    </Card>
   );
 }
 
@@ -157,16 +163,16 @@ function QueueTable({
 }: Readonly<{ result: LeaderSubmissionQueuePage }>) {
   if (result.submissions.length === 0) {
     return (
-      <p className="rounded-xl border border-dashed border-zinc-300 p-10 text-center text-sm text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
+      <p className="rounded-card border border-dashed border-border-strong bg-surface p-10 text-center text-sm text-muted shadow-control">
         Không có bản gửi đang chờ trong phạm vi được giao.
       </p>
     );
   }
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
+    <TableShell aria-label="Bản gửi chờ xử lý">
       <table className="min-w-full text-left text-sm">
-        <thead className="bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
+        <thead className="bg-brand-700 text-white">
           <tr>
             {[
               "Giảng viên",
@@ -184,14 +190,14 @@ function QueueTable({
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
+        <tbody className="divide-y divide-border bg-surface">
           {result.submissions.map((submission) => (
             <tr key={submission.submissionId}>
               <td className="px-4 py-3">
                 <p className="font-semibold">
                   {submission.lecturerName ?? "—"}
                 </p>
-                <p className="text-xs text-zinc-500">
+                <p className="text-xs text-muted">
                   {submission.lecturerCode ?? submission.lecturerEmail ?? "—"}
                 </p>
               </td>
@@ -200,7 +206,7 @@ function QueueTable({
               </td>
               <td className="max-w-64 px-4 py-3">
                 <p>{submission.courseCode ?? submission.courseName ?? "—"}</p>
-                <p className="mt-1 break-all font-mono text-xs text-zinc-500">
+                <p className="mt-1 break-all font-mono text-xs text-muted">
                   {submission.recordUid}
                 </p>
               </td>
@@ -213,7 +219,7 @@ function QueueTable({
               </td>
               <td className="px-4 py-3">
                 {submission.stale ? (
-                  <span className="font-semibold text-amber-800 dark:text-amber-200">
+                  <span className="font-semibold text-warning-text">
                     Dữ liệu lõi đã thay đổi
                   </span>
                 ) : (
@@ -222,7 +228,7 @@ function QueueTable({
               </td>
               <td className="px-4 py-3">
                 <Link
-                  className="font-semibold text-blue-700 underline underline-offset-2 dark:text-blue-300"
+                  className="inline-flex min-h-11 items-center font-semibold text-brand-700 underline underline-offset-2"
                   href={`/leader/submissions/${submission.submissionId}`}
                 >
                   Xem và xử lý
@@ -232,7 +238,7 @@ function QueueTable({
           ))}
         </tbody>
       </table>
-    </div>
+    </TableShell>
   );
 }
 
@@ -242,16 +248,16 @@ function QueuePagination({
   return (
     <nav
       aria-label="Phân trang queue"
-      className="flex items-center justify-between text-sm"
+      className="flex flex-wrap items-center justify-between gap-4 text-sm"
     >
-      <p className="text-zinc-600 dark:text-zinc-300">
+      <p className="text-muted">
         {result.totalSubmissions} bản gửi đang chờ · Trang {result.page}/
         {result.totalPages}
       </p>
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         {result.page > 1 && (
           <Link
-            className="rounded-lg border border-zinc-300 px-3 py-2 font-semibold dark:border-zinc-700"
+            className="inline-flex min-h-11 items-center rounded-control border border-border-strong bg-surface px-3 py-2 font-semibold shadow-control hover:bg-surface-subtle"
             href={buildPageHref(result, result.page - 1)}
           >
             Trang trước
@@ -259,7 +265,7 @@ function QueuePagination({
         )}
         {result.page < result.totalPages && (
           <Link
-            className="rounded-lg border border-zinc-300 px-3 py-2 font-semibold dark:border-zinc-700"
+            className="inline-flex min-h-11 items-center rounded-control border border-border-strong bg-surface px-3 py-2 font-semibold shadow-control hover:bg-surface-subtle"
             href={buildPageHref(result, result.page + 1)}
           >
             Trang sau

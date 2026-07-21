@@ -68,6 +68,9 @@ describe("Phase 4 leader approval UI", () => {
       .getByRole("button", { name: "Phê duyệt bản gửi" })
       .closest("form")!;
     expect([...new FormData(form).keys()]).toEqual(["submissionId"]);
+    expect(
+      screen.getByLabelText(/Tôi đã kiểm tra nội dung/iu),
+    ).not.toHaveAttribute("name");
     for (const field of [
       "recordUid",
       "lecturerUid",
