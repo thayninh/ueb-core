@@ -29,23 +29,20 @@ describe("dashboard admin navigation", () => {
     });
   });
 
-  it("links pure ADMIN to the all-latest read-only portal", async () => {
+  it("keeps the lecturer feature inventory exact", async () => {
     mocks.requireAuthenticated.mockResolvedValue({
-      userId: "admin-user",
-      roles: [BusinessRole.ADMIN],
+      userId: "lecturer-user",
+      roles: [BusinessRole.LECTURER],
     });
 
     const dashboard = await getDashboard();
 
-    expect(dashboard.allowedFeatures).toContainEqual(
-      expect.objectContaining({ href: "/admin/data" }),
-    );
-    expect(dashboard.allowedFeatures).not.toContainEqual(
-      expect.objectContaining({ href: "/leader/data" }),
-    );
+    expect(dashboard.allowedFeatures.map(({ href }) => href)).toEqual([
+      "/lecturer/profile",
+    ]);
   });
 
-  it("does not expose the admin portal link to non-admin roles", async () => {
+  it("keeps the faculty-leader feature inventory exact", async () => {
     mocks.requireAuthenticated.mockResolvedValue({
       userId: "leader-user",
       roles: [BusinessRole.FACULTY_LEADER],
@@ -53,11 +50,25 @@ describe("dashboard admin navigation", () => {
 
     const dashboard = await getDashboard();
 
-    expect(dashboard.allowedFeatures).not.toContainEqual(
-      expect.objectContaining({ href: "/admin/data" }),
-    );
-    expect(dashboard.allowedFeatures).toContainEqual(
-      expect.objectContaining({ href: "/leader/data" }),
-    );
+    expect(dashboard.allowedFeatures.map(({ href }) => href)).toEqual([
+      "/leader/data",
+      "/leader/submissions",
+    ]);
+  });
+
+  it("keeps the pure-admin feature inventory exact", async () => {
+    mocks.requireAuthenticated.mockResolvedValue({
+      userId: "admin-user",
+      roles: [BusinessRole.ADMIN],
+    });
+
+    const dashboard = await getDashboard();
+
+    expect(dashboard.allowedFeatures.map(({ href }) => href)).toEqual([
+      "/leader/submissions",
+      "/admin/data",
+      "/admin/users",
+      "/admin/audit",
+    ]);
   });
 });
