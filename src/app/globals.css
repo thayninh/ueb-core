@@ -112,10 +112,6 @@
   box-sizing: border-box;
 }
 
-html {
-  min-width: 20rem;
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
