@@ -35,6 +35,7 @@ export const PRODUCTION_EXECUTOR_CONTRACT = {
   runtimeRole: "ueb_core_app",
   provisionerRole: "ueb_core_provisioner",
   authorizationPrefix: "CREATE_AND_VALIDATE_PRODUCTION_TARGET_ONLY",
+  backupAuthorizationAction: "REFRESH_PRODUCTION_BACKUP_AND_CLOSE_PHASE7",
   rosterManifestSha:
     "c622297ee3a0b31c6265b01973fa4589d8be949e9e720d9e04d6cd59be85f8b4",
   canonicalChecksum:
@@ -43,6 +44,7 @@ export const PRODUCTION_EXECUTOR_CONTRACT = {
   migrationCount: 8,
   rollbackImageSha: "971c42027873f7de3140f815b06c2dddcfb61ba6",
   maximumWindowMilliseconds: 4 * 60 * 60 * 1000,
+  backupMaximumWindowMilliseconds: 2 * 60 * 60 * 1000,
   expectedIdentityCount: 254,
   expectedTestIdentityCount: 2,
 } as const;
@@ -66,6 +68,7 @@ export interface ProductionExecutorCommand {
   readonly mode: ProductionExecutorMode;
   readonly targetDatabase: string;
   readonly sourceDatabase?: string;
+  readonly authorizationAction?: string;
   readonly authorizationReference: string;
   readonly windowStart: string;
   readonly windowEnd: string;
@@ -166,7 +169,7 @@ const MODE_PREFIXES: Readonly<
   VERIFY: [],
   RECONCILE_RUNTIME_ACL: [],
   RECONCILE_IDENTITIES: [],
-  BACKUP: ["--backup=", "--off-host-directory="],
+  BACKUP: ["--authorization-action=", "--backup=", "--off-host-directory="],
   RESTORE: ["--source-database=", "--backup="],
   CLEANUP_RESTORE: ["--source-database=", "--backup="],
 };
@@ -236,6 +239,7 @@ export function parseProductionExecutorCommand(
   const command: ProductionExecutorCommand = {
     mode,
     targetDatabase: value("--target-database="),
+    authorizationAction: optional("--authorization-action="),
     authorizationReference: value("--authorization-reference="),
     windowStart: value("--change-window-start="),
     windowEnd: value("--change-window-end="),
@@ -276,7 +280,27 @@ export function parseProductionExecutorCommand(
 export function assertProductionExecutorContract(
   command: ProductionExecutorCommand,
 ): void {
-  if (
+  if (command.mode === "BACKUP") {
+    if (
+      command.authorizationAction !==
+      PRODUCTION_EXECUTOR_CONTRACT.backupAuthorizationAction
+    ) {
+      throw new SafeProductionExecutorError(
+        "PRODUCTION_BACKUP_AUTHORIZATION_ACTION_INVALID",
+      );
+    }
+    if (
+      command.authorizationReference.length === 0 ||
+      command.authorizationReference.length > 128 ||
+      command.authorizationReference.trim() !==
+        command.authorizationReference ||
+      /[\0\r\n]/u.test(command.authorizationReference)
+    ) {
+      throw new SafeProductionExecutorError(
+        "PRODUCTION_BACKUP_AUTHORIZATION_REFERENCE_INVALID",
+      );
+    }
+  } else if (
     !command.authorizationReference.startsWith(
       PRODUCTION_EXECUTOR_CONTRACT.authorizationPrefix,
     )
@@ -327,7 +351,11 @@ export function assertProductionExecutorContract(
   if ((command.mode === "BACKUP" || restoreMode) && !command.backupPath) {
     throw new SafeProductionExecutorError("PRODUCTION_BACKUP_PATH_REQUIRED");
   }
-  parseOperatorWindow(command.windowStart, command.windowEnd);
+  parseOperatorWindow(
+    command.windowStart,
+    command.windowEnd,
+    maximumWindowMilliseconds(command),
+  );
 }
 
 export function assertProductionDatabase(database: string): void {
@@ -351,6 +379,7 @@ export function assertProductionRestoreDatabase(database: string): void {
 export function parseOperatorWindow(
   startValue: string,
   endValue: string,
+  maximumDurationMilliseconds = PRODUCTION_EXECUTOR_CONTRACT.maximumWindowMilliseconds,
 ): { readonly start: Date; readonly end: Date } {
   const zoned = /(?:Z|[+-]\d{2}:\d{2})$/u;
   if (!zoned.test(startValue) || !zoned.test(endValue)) {
@@ -363,7 +392,7 @@ export function parseOperatorWindow(
     Number.isNaN(start.getTime()) ||
     Number.isNaN(end.getTime()) ||
     duration <= 0 ||
-    duration > PRODUCTION_EXECUTOR_CONTRACT.maximumWindowMilliseconds
+    duration > maximumDurationMilliseconds
   ) {
     throw new SafeProductionExecutorError("PRODUCTION_CHANGE_WINDOW_INVALID");
   }
@@ -378,6 +407,7 @@ export function assertWindowState(input: {
   const { start, end } = parseOperatorWindow(
     input.command.windowStart,
     input.command.windowEnd,
+    maximumWindowMilliseconds(input.command),
   );
   if (input.requireActive) {
     if (input.now < start)
@@ -389,6 +419,14 @@ export function assertWindowState(input: {
   } else if (input.now > end) {
     throw new SafeProductionExecutorError("PRODUCTION_CHANGE_WINDOW_EXPIRED");
   }
+}
+
+function maximumWindowMilliseconds(
+  command: Pick<ProductionExecutorCommand, "mode">,
+): number {
+  return command.mode === "BACKUP"
+    ? PRODUCTION_EXECUTOR_CONTRACT.backupMaximumWindowMilliseconds
+    : PRODUCTION_EXECUTOR_CONTRACT.maximumWindowMilliseconds;
 }
 
 export async function runProductionExecutor(input: {

@@ -199,6 +199,113 @@ describe("Phase 7 executable production guards", () => {
     ).toThrow(/PRODUCTION_AUTHORIZATION_REQUIRED/u);
   });
 
+  it("accepts the exact backup refresh action, reference and active two-hour window", () => {
+    const command = parseProductionExecutorCommand(
+      "BACKUP",
+      baseArguments("BACKUP"),
+    );
+
+    expect(command.authorizationAction).toBe(
+      PRODUCTION_EXECUTOR_CONTRACT.backupAuthorizationAction,
+    );
+    expect(command.authorizationReference).toBe(
+      "PHASE7_BACKUP_REFRESH_2026-07-21",
+    );
+    expect(() =>
+      assertWindowState({
+        command,
+        now: new Date("2026-07-19T02:00:00+07:00"),
+        requireActive: true,
+      }),
+    ).not.toThrow();
+  });
+
+  it("rejects wrong backup actions and missing references before database activity", () => {
+    for (const arguments_ of [
+      replace(
+        baseArguments("BACKUP"),
+        "--authorization-action=",
+        "--authorization-action=WRONG_ACTION",
+      ),
+      replace(
+        baseArguments("BACKUP"),
+        "--authorization-reference=",
+        "--authorization-reference=",
+      ),
+    ]) {
+      const error = (() => {
+        try {
+          parseProductionExecutorCommand("BACKUP", arguments_);
+          return undefined;
+        } catch (caught) {
+          return caught;
+        }
+      })();
+      const report = formatProductionExecutorFailure(error);
+      expect(report).toContain("DATABASE_CONNECTIONS=0");
+      expect(report).toContain("DATABASE_MUTATIONS=0");
+      expect(report).not.toMatch(/PHASE7_BACKUP_REFRESH_2026-07-21/u);
+    }
+  });
+
+  it("rejects expired, future and overlong backup windows before calling the adapter", async () => {
+    const adapter = adapterMock();
+    const command = parseProductionExecutorCommand(
+      "BACKUP",
+      baseArguments("BACKUP"),
+    );
+
+    for (const now of [
+      new Date("2026-07-19T00:59:59+07:00"),
+      new Date("2026-07-19T03:00:01+07:00"),
+    ]) {
+      await expect(
+        runProductionExecutor({
+          command,
+          environment: {},
+          now,
+          sourceSha: async () => gitSha,
+          adapter,
+        }),
+      ).rejects.toThrow(/PRODUCTION_CHANGE_WINDOW_(?:NOT_STARTED|EXPIRED)/u);
+    }
+    expect(() =>
+      parseProductionExecutorCommand(
+        "BACKUP",
+        replace(
+          baseArguments("BACKUP"),
+          "--change-window-end=",
+          "--change-window-end=2026-07-19T03:00:01+07:00",
+        ),
+      ),
+    ).toThrow(/PRODUCTION_CHANGE_WINDOW_INVALID/u);
+    expect(adapter.backup).not.toHaveBeenCalled();
+  });
+
+  it("rejects the wrong backup database before database activity", () => {
+    const error = (() => {
+      try {
+        parseProductionExecutorCommand(
+          "BACKUP",
+          replace(
+            baseArguments("BACKUP"),
+            "--target-database=",
+            "--target-database=ueb_core_staging",
+          ),
+        );
+        return undefined;
+      } catch (caught) {
+        return caught;
+      }
+    })();
+    expect(formatProductionExecutorFailure(error)).toContain(
+      "DATABASE_CONNECTIONS=0",
+    );
+    expect(formatProductionExecutorFailure(error)).toContain(
+      "DATABASE_MUTATIONS=0",
+    );
+  });
+
   it("accepts the unmarked-residue acknowledgement only for guarded cleanup", () => {
     const cleanup = parseProductionExecutorCommand("CLEANUP_RESTORE", [
       ...baseArguments("CLEANUP_RESTORE"),
@@ -390,6 +497,11 @@ describe("Phase 7 executable production guards", () => {
     expect(dockerfile).not.toMatch(/COPY\s+(?:--\S+\s+)*src\s+/u);
     expect(dockerfile).not.toMatch(/(?:apt-get|apk).*(?:install).*\bgit\b/u);
     expect(dockerfile).not.toMatch(/COPY\s+.*\.git/u);
+    expect(
+      await readFile("scripts/phase-7/lib/production-executor.ts", "utf8"),
+    ).toContain(
+      'backupAuthorizationAction: "REFRESH_PRODUCTION_BACKUP_AND_CLOSE_PHASE7"',
+    );
   });
 
   it("stages the exact production secret allowlist into tmpfs before dropping privileges", async () => {
@@ -731,9 +843,12 @@ function baseArguments(mode: ProductionExecutorMode, dryRun = false): string[] {
   }
   if (mode === "BACKUP") {
     args.push(
+      `--authorization-action=${PRODUCTION_EXECUTOR_CONTRACT.backupAuthorizationAction}`,
       `--backup=${join(directory, "production.dump")}`,
       `--off-host-directory=${join(directory, "off-host")}`,
     );
+    args[1] = "--authorization-reference=PHASE7_BACKUP_REFRESH_2026-07-21";
+    args[3] = "--change-window-end=2026-07-19T03:00:00+07:00";
   }
   if (mode === "RESTORE" || mode === "CLEANUP_RESTORE") {
     args[0] = "--target-database=ueb_core_prod_restore_regression";
