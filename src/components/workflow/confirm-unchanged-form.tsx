@@ -3,6 +3,7 @@
 import { useActionState } from "react";
 
 import { submitUnchangedRowFormAction } from "@/app/actions/workflow-submit";
+import { Button } from "@/components/ui";
 
 import {
   EMPTY_WORKFLOW_ACTION_RESULT,
@@ -33,7 +34,7 @@ export function ConfirmUnchangedForm({
   );
 
   return (
-    <form action={formAction} className="space-y-3">
+    <form action={formAction} className="space-y-4">
       <input name="submissionId" type="hidden" value={submissionId} />
       <input name="recordUid" type="hidden" value={recordUid} />
       <input name="baseStt" type="hidden" value={baseStt} />
@@ -45,15 +46,16 @@ export function ConfirmUnchangedForm({
           value={parentSubmissionId}
         />
       )}
-      <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+      <p className="text-sm leading-6 text-muted">
         Bạn đang gửi xác nhận rằng dòng này không thay đổi. Sau khi gửi, một bản
         gửi mới sẽ được tạo và chờ lãnh đạo xử lý.
       </p>
       <WorkflowActionFeedback result={result} />
       {!result.success && (
-        <button
-          className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-800 disabled:cursor-wait disabled:opacity-60"
+        <Button
+          className="w-full sm:w-auto"
           disabled={pending || !submissionId}
+          loading={pending}
           type="submit"
         >
           {!submissionId
@@ -61,7 +63,7 @@ export function ConfirmUnchangedForm({
             : pending
               ? "Đang gửi…"
               : "Xác nhận và gửi"}
-        </button>
+        </Button>
       )}
     </form>
   );

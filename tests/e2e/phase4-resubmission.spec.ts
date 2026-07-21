@@ -11,6 +11,13 @@ const urls = readPhase4LecturerPortalDatabaseUrls(process.env);
 const UNIT_A = "Phase 4 E2E Unit A";
 const updateReason = "Cần chỉnh lại tên học phần trước khi gửi lại.";
 const createReason = "Cần bổ sung mô tả cho dòng mới trước khi gửi lại.";
+const RESPONSIVE_VIEWPORTS = [
+  { width: 320, height: 568 },
+  { width: 390, height: 844 },
+  { width: 768, height: 1024 },
+  { width: 1024, height: 768 },
+  { width: 1440, height: 900 },
+] as const;
 
 let owner: Client;
 let recordA2: string;
@@ -181,6 +188,15 @@ test.describe.serial("Phase 4 lecturer resubmission", () => {
     await expect(page.locator('input[name="recordUid"]')).toHaveCount(0);
     await expect(page.locator('input[name="baseStt"]')).toHaveCount(0);
     await expect(page.locator('input[name="baseVersionNo"]')).toHaveCount(0);
+
+    for (const viewport of RESPONSIVE_VIEWPORTS) {
+      await page.setViewportSize(viewport);
+      await page.goto(`/lecturer/submissions/${createParentId}/resubmit`);
+      await assertPresentationReflow(page, viewport.width);
+    }
+    await page.setViewportSize({ width: 720, height: 450 });
+    await page.goto(`/lecturer/submissions/${createParentId}/resubmit`);
+    await assertPresentationReflow(page, 720);
   });
 
   test("CREATE_NEW resubmit reuses the parent record UID and writes no core", async ({
@@ -262,4 +278,29 @@ async function login(page: Page, email: string): Promise<void> {
   await page.getByLabel("Mật khẩu").fill(fixture.password);
   await page.getByRole("button", { name: "Đăng nhập" }).click();
   await expect(page).toHaveURL(/\/dashboard$/u);
+}
+
+async function assertPresentationReflow(
+  page: Page,
+  viewportWidth: number,
+): Promise<void> {
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth + 1,
+      ),
+    )
+    .toBe(true);
+
+  const clippedControlCount = await page
+    .locator("input:visible, select:visible, textarea:visible, button:visible")
+    .evaluateAll(
+      (controls, width) =>
+        controls.filter((control) => {
+          const box = control.getBoundingClientRect();
+          return box.left < -1 || box.right > width + 1;
+        }).length,
+      viewportWidth,
+    );
+  expect(clippedControlCount).toBe(0);
 }

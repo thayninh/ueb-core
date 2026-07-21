@@ -9,6 +9,13 @@ import { readPhase4LecturerPortalFixtures } from "../../scripts/phase-4/lib/lect
 const fixture = readPhase4LecturerPortalFixtures(process.env);
 const urls = readPhase4LecturerPortalDatabaseUrls(process.env);
 const UNIT_A = "Phase 4 E2E Unit A";
+const RESPONSIVE_VIEWPORTS = [
+  { width: 320, height: 568 },
+  { width: 390, height: 844 },
+  { width: 768, height: 1024 },
+  { width: 1024, height: 768 },
+  { width: 1440, height: 900 },
+] as const;
 
 let owner: Client;
 let lecturerBSubmissionId: string;
@@ -123,6 +130,34 @@ test.describe.serial("Phase 4 lecturer portal", () => {
     ).toHaveCount(0);
   });
 
+  test("lecturer presentation surfaces reflow without document overflow", async ({
+    page,
+  }) => {
+    await login(page, fixture.lecturerAEmail);
+    const routes = [
+      "/lecturer/profile",
+      "/lecturer/rows/new",
+      `/lecturer/rows/${recordA2}/edit`,
+      `/lecturer/rows/${recordA1}/history`,
+      "/lecturer/submissions",
+      `/lecturer/submissions/${confirmSubmissionId}`,
+    ];
+
+    for (const viewport of RESPONSIVE_VIEWPORTS) {
+      await page.setViewportSize(viewport);
+      for (const route of routes) {
+        await page.goto(route);
+        await assertPresentationReflow(page, viewport.width);
+      }
+    }
+
+    await page.setViewportSize({ width: 720, height: 450 });
+    for (const route of routes) {
+      await page.goto(route);
+      await assertPresentationReflow(page, 720);
+    }
+  });
+
   test("lecturer A cannot open lecturer B submission detail", async ({
     page,
   }) => {
@@ -151,4 +186,35 @@ async function login(page: Page, email: string): Promise<void> {
   await page.getByLabel("Mật khẩu").fill(fixture.password);
   await page.getByRole("button", { name: "Đăng nhập" }).click();
   await expect(page).toHaveURL(/\/dashboard$/u);
+}
+
+async function assertPresentationReflow(
+  page: Page,
+  viewportWidth: number,
+): Promise<void> {
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth + 1,
+      ),
+    )
+    .toBe(true);
+
+  const clippedControlCount = await page
+    .locator("input:visible, select:visible, textarea:visible, button:visible")
+    .evaluateAll(
+      (controls, width) =>
+        controls.filter((control) => {
+          if (control.closest('[role="region"]')) return false;
+          const box = control.getBoundingClientRect();
+          return box.left < -1 || box.right > width + 1;
+        }).length,
+      viewportWidth,
+    );
+  expect(clippedControlCount).toBe(0);
+
+  const tableRegions = page.getByRole("region");
+  for (let index = 0; index < (await tableRegions.count()); index += 1) {
+    await expect(tableRegions.nth(index)).toHaveAttribute("tabindex", "0");
+  }
 }

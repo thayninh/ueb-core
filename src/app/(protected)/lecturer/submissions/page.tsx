@@ -2,6 +2,14 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import {
+  Button,
+  Card,
+  Input,
+  PageContainer,
+  Select,
+  TableShell,
+} from "@/components/ui";
 import { SubmissionStatusBadge } from "@/components/workflow/submission-status-badge";
 import {
   SUBMISSION_TYPE_LABELS,
@@ -59,25 +67,28 @@ export default async function LecturerSubmissionsPage({
   });
 
   return (
-    <main className="mx-auto w-full max-w-6xl space-y-8 px-6 py-10">
-      <header>
-        <Link
-          className="text-sm font-semibold text-blue-700 underline underline-offset-2 dark:text-blue-300"
-          href="/lecturer/profile"
-        >
-          ← Quay lại hồ sơ
-        </Link>
-        <h1 className="mt-4 text-3xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
-          Các bản gửi của tôi
-        </h1>
-        <p className="mt-3 text-sm text-zinc-600 dark:text-zinc-300">
-          Trạng thái được suy ra từ chuỗi sự kiện bất biến của từng submission.
-        </p>
-      </header>
+    <main className="relative py-8 sm:py-10 lg:py-12">
+      <PageContainer className="space-y-8">
+        <header>
+          <Link
+            className="inline-flex min-h-11 items-center text-sm font-semibold text-brand-700 underline underline-offset-2"
+            href="/lecturer/profile"
+          >
+            ← Quay lại hồ sơ
+          </Link>
+          <h1 className="mt-3 text-3xl font-semibold tracking-tight text-ink sm:text-4xl">
+            Các bản gửi của tôi
+          </h1>
+          <p className="mt-3 text-sm leading-6 text-muted">
+            Trạng thái được suy ra từ chuỗi sự kiện bất biến của từng
+            submission.
+          </p>
+        </header>
 
-      <SubmissionFilters result={result} />
-      <SubmissionTable result={result} />
-      <Pagination result={result} />
+        <SubmissionFilters result={result} />
+        <SubmissionTable result={result} />
+        <Pagination result={result} />
+      </PageContainer>
     </main>
   );
 }
@@ -86,63 +97,59 @@ function SubmissionFilters({
   result,
 }: Readonly<{ result: LecturerSubmissionListPage }>) {
   return (
-    <form
-      className="grid gap-4 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm sm:grid-cols-2 lg:grid-cols-4 dark:border-zinc-800 dark:bg-zinc-900"
-      method="get"
-    >
-      <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
-        Tìm submission/record
-        <input
-          className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
-          defaultValue={result.search}
-          maxLength={100}
-          name="q"
-          type="search"
-        />
-      </label>
-      <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
-        Trạng thái
-        <select
-          className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
-          defaultValue={result.state ?? ""}
-          name="state"
-        >
-          <option value="">Tất cả</option>
-          <option value="PENDING">Đang chờ</option>
-          <option value="REJECTED">Đã từ chối</option>
-          <option value="APPROVED">Đã phê duyệt</option>
-        </select>
-      </label>
-      <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
-        Loại bản gửi
-        <select
-          className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950"
-          defaultValue={result.submissionType ?? ""}
-          name="type"
-        >
-          <option value="">Tất cả</option>
-          {Object.entries(SUBMISSION_TYPE_LABELS).map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <div className="flex items-end gap-3">
-        <button
-          className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800"
-          type="submit"
-        >
-          Lọc
-        </button>
-        <Link
-          className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-semibold dark:border-zinc-700"
-          href="/lecturer/submissions"
-        >
-          Xóa lọc
-        </Link>
-      </div>
-    </form>
+    <Card className="p-4 sm:p-5">
+      <form className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" method="get">
+        <label className="text-sm font-semibold text-ink">
+          Tìm submission/record
+          <Input
+            className="mt-2"
+            defaultValue={result.search}
+            maxLength={100}
+            name="q"
+            type="search"
+          />
+        </label>
+        <label className="text-sm font-semibold text-ink">
+          Trạng thái
+          <Select
+            className="mt-2"
+            defaultValue={result.state ?? ""}
+            name="state"
+          >
+            <option value="">Tất cả</option>
+            <option value="PENDING">Đang chờ</option>
+            <option value="REJECTED">Đã từ chối</option>
+            <option value="APPROVED">Đã phê duyệt</option>
+          </Select>
+        </label>
+        <label className="text-sm font-semibold text-ink">
+          Loại bản gửi
+          <Select
+            className="mt-2"
+            defaultValue={result.submissionType ?? ""}
+            name="type"
+          >
+            <option value="">Tất cả</option>
+            {Object.entries(SUBMISSION_TYPE_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </Select>
+        </label>
+        <div className="flex flex-wrap items-end gap-3">
+          <Button className="flex-1 sm:flex-none" type="submit">
+            Lọc
+          </Button>
+          <Link
+            className="inline-flex min-h-11 flex-1 items-center justify-center rounded-control border border-border-strong bg-surface px-4 py-2.5 text-sm font-semibold text-ink shadow-control transition-colors hover:bg-surface-subtle sm:flex-none"
+            href="/lecturer/submissions"
+          >
+            Xóa lọc
+          </Link>
+        </div>
+      </form>
+    </Card>
   );
 }
 
@@ -151,15 +158,15 @@ function SubmissionTable({
 }: Readonly<{ result: LecturerSubmissionListPage }>) {
   if (result.submissions.length === 0) {
     return (
-      <p className="rounded-xl border border-dashed border-zinc-300 p-10 text-center text-sm text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
+      <p className="rounded-card border border-dashed border-border-strong bg-surface p-10 text-center text-sm text-muted shadow-control">
         Không có bản gửi phù hợp.
       </p>
     );
   }
   return (
-    <div className="overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
+    <TableShell aria-label="Danh sách bản gửi của tôi">
       <table className="min-w-full text-left text-sm">
-        <thead className="bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
+        <thead className="bg-brand-700 text-white">
           <tr>
             {[
               "Loại",
@@ -176,7 +183,7 @@ function SubmissionTable({
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
+        <tbody className="divide-y divide-border bg-surface">
           {result.submissions.map((submission) => (
             <tr key={submission.submissionId}>
               <td className="px-4 py-3">
@@ -185,7 +192,7 @@ function SubmissionTable({
               <td className="px-4 py-3">
                 <SubmissionStatusBadge state={submission.state} />
               </td>
-              <td className="max-w-52 break-all px-4 py-3 font-mono text-xs">
+              <td className="max-w-52 break-all px-4 py-3 font-mono text-xs text-muted">
                 {submission.recordUid}
               </td>
               <td className="px-4 py-3">
@@ -198,14 +205,14 @@ function SubmissionTable({
                 {submission.state === "REJECTED" ? (
                   <div className="space-y-1">
                     <p>{formatWorkflowDate(submission.terminalAt)}</p>
-                    <p className="line-clamp-2 text-xs text-red-700 dark:text-red-300">
+                    <p className="line-clamp-2 text-xs text-danger-text">
                       {submission.rejectionReason}
                     </p>
                   </div>
                 ) : submission.state === "APPROVED" ? (
                   <div className="space-y-1">
                     <p>{formatWorkflowDate(submission.terminalAt)}</p>
-                    <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                    <p className="text-xs font-medium text-success-text">
                       STT {submission.resultStt} · Phiên bản{" "}
                       {submission.resultVersionNo}
                     </p>
@@ -216,7 +223,7 @@ function SubmissionTable({
               </td>
               <td className="px-4 py-3">
                 <Link
-                  className="font-semibold text-blue-700 underline underline-offset-2 dark:text-blue-300"
+                  className="inline-flex min-h-11 items-center font-semibold text-brand-700 underline underline-offset-2"
                   href={"/lecturer/submissions/" + submission.submissionId}
                 >
                   Xem
@@ -226,7 +233,7 @@ function SubmissionTable({
           ))}
         </tbody>
       </table>
-    </div>
+    </TableShell>
   );
 }
 
@@ -236,16 +243,16 @@ function Pagination({
   return (
     <nav
       aria-label="Phân trang bản gửi"
-      className="flex items-center justify-between text-sm"
+      className="flex flex-wrap items-center justify-between gap-4 text-sm"
     >
-      <p className="text-zinc-600 dark:text-zinc-300">
+      <p className="text-muted">
         {result.totalSubmissions} bản gửi · Trang {result.page}/
         {result.totalPages}
       </p>
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         {result.page > 1 && (
           <Link
-            className="rounded-lg border border-zinc-300 px-3 py-2 font-semibold dark:border-zinc-700"
+            className="inline-flex min-h-11 items-center rounded-control border border-border-strong bg-surface px-3 py-2 font-semibold shadow-control hover:bg-surface-subtle"
             href={buildPageHref(result, result.page - 1)}
           >
             Trang trước
@@ -253,7 +260,7 @@ function Pagination({
         )}
         {result.page < result.totalPages && (
           <Link
-            className="rounded-lg border border-zinc-300 px-3 py-2 font-semibold dark:border-zinc-700"
+            className="inline-flex min-h-11 items-center rounded-control border border-border-strong bg-surface px-3 py-2 font-semibold shadow-control hover:bg-surface-subtle"
             href={buildPageHref(result, result.page + 1)}
           >
             Trang sau

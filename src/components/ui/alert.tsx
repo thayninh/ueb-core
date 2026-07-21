@@ -1,4 +1,4 @@
-import type { HTMLAttributes } from "react";
+import type { ComponentPropsWithRef } from "react";
 
 import { classNames } from "@/components/ui/class-names";
 
@@ -9,7 +9,7 @@ const variants = {
   warning: "bg-warning-surface text-warning-text",
 } as const;
 
-export interface AlertProps extends HTMLAttributes<HTMLDivElement> {
+export interface AlertProps extends ComponentPropsWithRef<"div"> {
   readonly variant?: keyof typeof variants;
 }
 

@@ -43,6 +43,10 @@ describe("CoreDataTable", () => {
   it("renders all 20 source-contract business columns", () => {
     render(<CoreDataTable rows={[row]} />);
 
+    expect(screen.getByLabelText("Dữ liệu UEB Core")).toHaveAttribute(
+      "tabindex",
+      "0",
+    );
     expect(screen.getAllByRole("columnheader")).toHaveLength(20);
     const dataRow = screen.getAllByRole("row")[1];
     expect(within(dataRow).getAllByRole("cell")).toHaveLength(20);

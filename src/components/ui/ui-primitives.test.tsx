@@ -12,6 +12,7 @@ import {
   PageContainer,
   Panel,
   Select,
+  TableShell,
   Textarea,
 } from "@/components/ui";
 
@@ -58,6 +59,15 @@ describe("UI primitives", () => {
         <Card aria-label="Card kiểm tra" />
         <Panel aria-label="Panel kiểm tra" />
         <PageContainer data-testid="page-container" />
+        <TableShell aria-label="Bảng kiểm tra">
+          <table>
+            <tbody>
+              <tr>
+                <td>Dữ liệu</td>
+              </tr>
+            </tbody>
+          </table>
+        </TableShell>
       </>,
     );
 
@@ -72,5 +82,9 @@ describe("UI primitives", () => {
     expect(screen.getByLabelText("Card kiểm tra")).toBeInTheDocument();
     expect(screen.getByLabelText("Panel kiểm tra")).toBeInTheDocument();
     expect(screen.getByTestId("page-container")).toBeInTheDocument();
+    expect(screen.getByLabelText("Bảng kiểm tra")).toHaveAttribute(
+      "tabindex",
+      "0",
+    );
   });
 });

@@ -6,6 +6,7 @@ import {
   submitNewRowFormAction,
   submitUpdatedRowFormAction,
 } from "@/app/actions/workflow-submit";
+import { Button, Input } from "@/components/ui";
 import {
   EDITABLE_BUSINESS_FIELD_NAMES,
   READ_ONLY_BUSINESS_FIELD_NAMES,
@@ -70,7 +71,7 @@ export function EditableRowForm(props: Readonly<EditableFormMode>) {
   );
 
   return (
-    <form action={formAction} className="space-y-8">
+    <form action={formAction} className="space-y-6 sm:space-y-8">
       <input name="submissionId" type="hidden" value={submissionId} />
       <input
         name="editableFields"
@@ -96,17 +97,17 @@ export function EditableRowForm(props: Readonly<EditableFormMode>) {
         </>
       )}
       {props.kind === "UPDATE_EXISTING" && (
-        <fieldset className="rounded-2xl border border-zinc-200 p-6 dark:border-zinc-800">
-          <legend className="px-2 font-semibold text-zinc-950 dark:text-zinc-50">
+        <fieldset className="rounded-card border border-border bg-surface p-4 shadow-control sm:p-6">
+          <legend className="px-2 font-semibold text-ink">
             Thông tin chỉ đọc
           </legend>
           <dl className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {READ_ONLY_BUSINESS_FIELD_NAMES.map((field) => (
               <div key={field}>
-                <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                <dt className="text-xs font-semibold uppercase tracking-wide text-muted">
                   {BUSINESS_FIELD_LABELS[field]}
                 </dt>
-                <dd className="mt-1 break-words text-sm text-zinc-900 dark:text-zinc-100">
+                <dd className="mt-1 break-words text-sm text-ink">
                   {formatWorkflowFieldValue(props.currentRow[field])}
                 </dd>
               </div>
@@ -115,25 +116,25 @@ export function EditableRowForm(props: Readonly<EditableFormMode>) {
         </fieldset>
       )}
 
-      <fieldset className="rounded-2xl border border-zinc-200 p-6 dark:border-zinc-800">
-        <legend className="px-2 font-semibold text-zinc-950 dark:text-zinc-50">
+      <fieldset className="rounded-card border border-border bg-surface p-4 shadow-control sm:p-6">
+        <legend className="px-2 font-semibold text-ink">
           14 trường được phép chỉnh sửa
         </legend>
-        <div className="grid gap-5 md:grid-cols-2">
+        <div className="grid gap-5 sm:grid-cols-2">
           {EDITABLE_BUSINESS_FIELD_NAMES.map((field) => {
             const errorId = field + "-error";
             const fieldErrors = result.fieldErrors.editableFields;
             return (
               <div key={field}>
                 <label
-                  className="block text-sm font-medium text-zinc-800 dark:text-zinc-200"
+                  className="block text-sm font-semibold text-ink"
                   htmlFor={field}
                 >
                   {BUSINESS_FIELD_LABELS[field]}
                 </label>
-                <input
+                <Input
                   aria-describedby={fieldErrors ? errorId : undefined}
-                  className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-950 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-200 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
+                  className="mt-2"
                   data-workflow-editable-field={field}
                   id={field}
                   inputMode={field === "khoi_kien_thuc" ? "numeric" : undefined}
@@ -153,7 +154,7 @@ export function EditableRowForm(props: Readonly<EditableFormMode>) {
                   value={toInputValue(editableFields[field])}
                 />
                 {fieldErrors && (
-                  <p className="mt-1 text-sm text-red-700" id={errorId}>
+                  <p className="mt-1 text-sm text-danger-text" id={errorId}>
                     {fieldErrors.join(" ")}
                   </p>
                 )}
@@ -165,9 +166,10 @@ export function EditableRowForm(props: Readonly<EditableFormMode>) {
 
       <WorkflowActionFeedback result={result} />
       {!result.success && (
-        <button
-          className="rounded-lg bg-blue-700 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-800 disabled:cursor-wait disabled:opacity-60"
+        <Button
+          className="w-full sm:w-auto"
           disabled={pending || !submissionId}
+          loading={pending}
           type="submit"
         >
           {!submissionId
@@ -175,7 +177,7 @@ export function EditableRowForm(props: Readonly<EditableFormMode>) {
             : pending
               ? "Đang gửi…"
               : "Gửi bản chờ phê duyệt"}
-        </button>
+        </Button>
       )}
     </form>
   );

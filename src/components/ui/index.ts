@@ -7,4 +7,5 @@ export { FormField, FormMessage } from "@/components/ui/form-field";
 export { Input } from "@/components/ui/input";
 export { PageContainer } from "@/components/ui/page-container";
 export { Select } from "@/components/ui/select";
+export { TableShell } from "@/components/ui/table-shell";
 export { Textarea } from "@/components/ui/textarea";
