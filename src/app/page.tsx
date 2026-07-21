@@ -1,17 +1,28 @@
+import { Card, PageContainer } from "@/components/ui";
+
 export default function Home() {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-zinc-50 px-6 py-16 dark:bg-zinc-950">
-      <section className="w-full max-w-2xl rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 sm:p-12">
-        <p className="text-sm font-medium uppercase tracking-[0.2em] text-blue-700 dark:text-blue-400">
-          Project foundation
-        </p>
-        <h1 className="mt-4 text-4xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50 sm:text-5xl">
-          UEB Core
-        </h1>
-        <p className="mt-4 text-lg leading-8 text-zinc-600 dark:text-zinc-300">
-          Hệ thống quản lý dữ liệu giảng viên
-        </p>
-      </section>
+    <main className="relative flex min-h-dvh items-center overflow-hidden bg-canvas py-12 sm:py-16">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 overflow-hidden"
+      >
+        <div className="absolute -top-40 right-[-10rem] h-96 w-96 rounded-full bg-brand-100 opacity-70 blur-3xl dark:opacity-10" />
+        <div className="absolute -bottom-52 left-[-8rem] h-96 w-96 rounded-full border border-brand-200 opacity-70 dark:opacity-20" />
+      </div>
+      <PageContainer className="relative">
+        <Card className="mx-auto max-w-2xl p-6 sm:p-10 lg:p-12">
+          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-brand-700">
+            Project foundation
+          </p>
+          <h1 className="mt-4 text-4xl font-semibold tracking-tight text-ink sm:text-5xl">
+            UEB Core
+          </h1>
+          <p className="mt-4 text-lg leading-8 text-muted">
+            Hệ thống quản lý dữ liệu giảng viên
+          </p>
+        </Card>
+      </PageContainer>
     </main>
   );
 }
