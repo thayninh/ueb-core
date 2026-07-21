@@ -1,4 +1,4 @@
-ueb-core.cargis.vn {
+ueb-core-staging.cargis.vn {
 	encode zstd gzip
 
 	request_body {

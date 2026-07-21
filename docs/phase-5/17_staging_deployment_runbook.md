@@ -173,7 +173,7 @@ read-only, and neither app nor database publishes a host port.
 
 ```bash
 curl --fail --silent --show-error \
-  https://ueb-core.cargis.vn/api/health >/dev/null
+  https://ueb-core-staging.cargis.vn/api/health >/dev/null
 ```
 
 Require HTTP 200. Health proves the process responds; it does not prove database
@@ -183,7 +183,7 @@ readiness.
 
 ```bash
 curl --fail --silent --show-error \
-  https://ueb-core.cargis.vn/api/ready >/dev/null
+  https://ueb-core-staging.cargis.vn/api/ready >/dev/null
 ```
 
 Require HTTP 200 and verify the response is not cached. A 503 blocks rollout.

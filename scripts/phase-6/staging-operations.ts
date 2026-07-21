@@ -23,6 +23,7 @@ import {
   runDeploymentPreflight,
   formatRollbackReport,
   verifyRollbackImage,
+  withDefaultLocalReleaseSha,
 } from "./lib/staging-deployment";
 import {
   assertExactArguments,
@@ -105,6 +106,7 @@ async function main(): Promise<void> {
           `BOOTSTRAP_OWNER_MEMBERSHIP_RETAINED=${result.temporaryMembershipRevoked ? "NO" : "YES"}`,
           `BOOTSTRAP_CAN_SET_OWNER_ROLE_AFTER=${result.bootstrapCanSetOwnerRoleAfter ? "YES" : "NO"}`,
           `MIGRATION_COUNT=${result.migrationCount}`,
+          `MIGRATION_LEDGER_FINGERPRINT=${result.migrationLedgerFingerprint}`,
           "PENDING_MIGRATIONS=0",
           "USERS_PROVISIONED=0",
           "APPLICATION_SESSIONS_CREATED=0",
@@ -311,7 +313,9 @@ async function main(): Promise<void> {
         break;
       }
       case "deployment-preflight": {
-        const command = parseDeploymentPreflightCommand(args);
+        const command = parseDeploymentPreflightCommand(
+          await withDefaultLocalReleaseSha(args),
+        );
         await runDeploymentPreflight({ command, environment: process.env });
         print([
           `TARGET_HOST=${command.targetHost}`,

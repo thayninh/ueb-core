@@ -4,7 +4,7 @@
 
 ```text
 ENVIRONMENT=STAGING
-PLANNED_DOMAIN=ueb-core.cargis.vn
+PLANNED_DOMAIN=ueb-core-staging.cargis.vn
 DATABASE=<APPROVED_DEDICATED_STAGING_DATABASE>
 DATABASE_PUBLIC_PORT=NO
 APP_PUBLIC_HOST_PORT=NO
@@ -20,7 +20,7 @@ volume, UAT credential, UAT session hoặc UAT identity bundle làm staging.
 | --- | --- |
 | Application | Approved immutable standalone image, user `node`, read-only root filesystem, tmpfs cho temporary/cache paths |
 | PostgreSQL | Dedicated pinned image/volume, private database network only, không publish `5432` |
-| Caddy | TLS termination cho `ueb-core.cargis.vn`, private upstream, forwarded headers/security headers/request limit |
+| Caddy | TLS termination cho `ueb-core-staging.cargis.vn`, private upstream, forwarded headers/security headers/request limit |
 | Operator workspace | Node 24.x, restricted access, owner/provisioning secrets injected in memory |
 | Secret store | External, encrypted, audited; không nằm trong repository hoặc Compose output |
 | Evidence store | External restricted store cho raw logs/dumps/catalog; Git chỉ nhận redacted summaries |
@@ -73,7 +73,7 @@ Không render full Compose environment vào shared logs.
 - App nối database network và external Caddy proxy network; app không publish
   host port.
 - Caddy là public ingress duy nhất; upstream là private service alias.
-- TLS phải hợp lệ cho `ueb-core.cargis.vn`, redirect/HTTPS policy và expiry
+- TLS phải hợp lệ cho `ueb-core-staging.cargis.vn`, redirect/HTTPS policy và expiry
   monitoring được xác minh trước acceptance.
 - Caddy giữ trusted `Host`/forwarded context, không tin arbitrary client-supplied
   forwarded headers khi có upstream proxy khác.

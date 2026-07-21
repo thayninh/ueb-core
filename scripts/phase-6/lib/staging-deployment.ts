@@ -24,9 +24,13 @@ import {
   STAGING_VPS_HOST,
   valuesFor,
 } from "./staging-contracts";
+import {
+  assertMigrationLedgerMatches,
+  type MigrationLedger,
+  readSourceMigrationLedger,
+} from "./migration-ledger";
 
 const execFileAsync = promisify(execFile);
-const EXPECTED_BRANCH = "feat/phase-6-staging-rollout-validation";
 
 export interface DeploymentPreflightCommand {
   readonly gitCommit: string;
@@ -53,16 +57,78 @@ export interface RollbackReport {
   readonly imageId?: string;
   readonly architecture?: string;
   readonly migrationCount?: number;
+  readonly migrationLedgerFingerprint?: string;
+  readonly previousReleaseSha?: string;
   readonly rollbackVerify: "PASS";
+}
+
+export async function withDefaultLocalReleaseSha(
+  arguments_: readonly string[],
+): Promise<string[]> {
+  const args = [...arguments_];
+  const supplied = args.filter((argument) =>
+    argument.startsWith("--expected-git-commit="),
+  );
+  if (supplied.length > 1) {
+    throw new SafePhase6StagingError(
+      "Approved release SHA must not be duplicated.",
+    );
+  }
+  if (supplied.length === 1) return args;
+  const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], {
+    cwd: process.cwd(),
+  });
+  const releaseSha = stdout.trim();
+  if (!isGitSha(releaseSha)) {
+    throw new SafePhase6StagingError(
+      "Local release SHA could not be determined safely.",
+    );
+  }
+  return [`--expected-git-commit=${releaseSha}`, ...args];
 }
 
 interface RollbackMetadata {
   readonly imageId: string;
-  readonly imageTag: string;
   readonly architecture: string;
   readonly composeService: string;
+  readonly releaseSha: string;
+  readonly previousReleaseSha: string;
+  readonly currentImage: string;
+  readonly previousImage: string;
+  readonly sourceMigrationCount: number;
+  readonly migrationLedgerFingerprint: string;
+  readonly databaseMigrationStatus: "COMPATIBLE";
+  readonly schemaCompatibilityDecision: "APPROVED";
+  readonly backupIdentifier: string;
+  readonly backupChecksum: string;
+  readonly timestamp: string;
+  readonly operatorIdentityReference: string;
+}
+
+export interface OperatorImageContract {
+  readonly sourceGitSha: string;
   readonly migrationCount: number;
-  readonly schemaCompatible: boolean;
+  readonly migrationLedgerFingerprint: string;
+}
+
+export function assertOperatorImageContract(input: {
+  readonly approvedReleaseSha: string;
+  readonly sourceLedger: MigrationLedger;
+  readonly imageContract: OperatorImageContract;
+}): void {
+  if (input.imageContract.sourceGitSha !== input.approvedReleaseSha) {
+    throw new SafePhase6StagingError(
+      "Operator image source SHA does not match the approved release SHA.",
+    );
+  }
+  assertMigrationLedgerMatches(
+    input.sourceLedger,
+    {
+      count: input.imageContract.migrationCount,
+      fingerprint: input.imageContract.migrationLedgerFingerprint,
+    },
+    "Operator image",
+  );
 }
 
 export function parseDeploymentPreflightCommand(
@@ -168,6 +234,9 @@ export function parseDeploymentPreflightCommand(
 export async function runDeploymentPreflight(input: {
   readonly command: DeploymentPreflightCommand;
   readonly environment: Readonly<Record<string, string | undefined>>;
+  readonly inspectOperatorContract?: (
+    imageTag: string,
+  ) => Promise<OperatorImageContract>;
 }): Promise<void> {
   assertMonitoringEmail(input.environment.STAGING_MONITORING_EMAIL);
   parseChangeWindow(input.environment);
@@ -176,25 +245,26 @@ export async function runDeploymentPreflight(input: {
       "UAT credential references are forbidden in staging deployment preflight.",
     );
   }
-  const [{ stdout: branch }, { stdout: commit }, { stdout: status }] =
-    await Promise.all([
-      execFileAsync("git", ["branch", "--show-current"], {
-        cwd: process.cwd(),
-      }),
-      execFileAsync("git", ["rev-parse", "HEAD"], { cwd: process.cwd() }),
-      execFileAsync("git", ["status", "--porcelain"], {
-        cwd: process.cwd(),
-      }),
-    ]);
-  if (
-    branch.trim() !== EXPECTED_BRANCH ||
-    commit.trim() !== input.command.gitCommit ||
-    status.trim() !== ""
-  ) {
+  const [{ stdout: commit }, { stdout: status }] = await Promise.all([
+    execFileAsync("git", ["rev-parse", "HEAD"], { cwd: process.cwd() }),
+    execFileAsync("git", ["status", "--porcelain"], {
+      cwd: process.cwd(),
+    }),
+  ]);
+  if (commit.trim() !== input.command.gitCommit || status.trim() !== "") {
     throw new SafePhase6StagingError(
-      "Git branch or commit does not match approval.",
+      "Git commit or working tree does not match approval.",
     );
   }
+  await execFileAsync(
+    "git",
+    ["cat-file", "-e", `${input.command.gitCommit}^{commit}`],
+    { cwd: process.cwd() },
+  ).catch(() => {
+    throw new SafePhase6StagingError(
+      "Approved release SHA does not identify a local Git commit.",
+    );
+  });
   const archive = await stat(input.command.imageArchive).catch(() => undefined);
   const operatorArchive = await stat(input.command.operatorImageArchive).catch(
     () => undefined,
@@ -253,6 +323,17 @@ export async function runDeploymentPreflight(input: {
   ) {
     throw new SafePhase6StagingError("Docker image ID mismatch.");
   }
+  const sourceLedger = await readSourceMigrationLedger();
+  const inspectOperatorContract =
+    input.inspectOperatorContract ?? readOperatorImageContract;
+  const operatorContract = await inspectOperatorContract(
+    input.command.operatorImageTag,
+  );
+  assertOperatorImageContract({
+    approvedReleaseSha: input.command.gitCommit,
+    sourceLedger,
+    imageContract: operatorContract,
+  });
   const rollbackEvidence = await readFile(
     input.command.rollbackEvidence,
     "utf8",
@@ -330,6 +411,8 @@ export async function verifyRollbackImage(input: {
   readonly inspectImage?: (
     imageTag: string,
   ) => Promise<{ readonly imageId: string; readonly architecture: string }>;
+  readonly sourceLedger?: MigrationLedger;
+  readonly currentReleaseSha?: string;
 }): Promise<RollbackReport> {
   if (input.command.firstDeployment) {
     if (
@@ -347,24 +430,47 @@ export async function verifyRollbackImage(input: {
   const metadata = JSON.parse(
     await readFile(input.command.metadataPath, "utf8"),
   ) as Partial<RollbackMetadata>;
+  const sourceLedger =
+    input.sourceLedger ?? (await readSourceMigrationLedger());
+  const currentReleaseSha =
+    input.currentReleaseSha ??
+    (
+      await execFileAsync("git", ["rev-parse", "HEAD"], {
+        cwd: process.cwd(),
+      })
+    ).stdout.trim();
   if (
     !metadata.imageId ||
-    !metadata.imageTag ||
+    !metadata.previousImage ||
     metadata.architecture !== input.command.expectedArchitecture ||
     metadata.composeService !== "app" ||
-    metadata.migrationCount !== 7 ||
-    metadata.schemaCompatible !== true
+    metadata.releaseSha !== currentReleaseSha ||
+    !isGitSha(metadata.previousReleaseSha) ||
+    metadata.previousReleaseSha === metadata.releaseSha ||
+    !metadata.currentImage ||
+    metadata.sourceMigrationCount !== sourceLedger.count ||
+    metadata.migrationLedgerFingerprint !== sourceLedger.fingerprint ||
+    metadata.databaseMigrationStatus !== "COMPATIBLE" ||
+    metadata.schemaCompatibilityDecision !== "APPROVED" ||
+    !isSafeReference(metadata.backupIdentifier) ||
+    !metadata.backupChecksum ||
+    !isSafeReference(metadata.operatorIdentityReference) ||
+    !isValidTimestamp(metadata.timestamp)
   ) {
     throw new SafePhase6StagingError(
       "Rollback image metadata is incompatible with the staging contract.",
     );
   }
   assertImageId(metadata.imageId);
-  if (/(?:^|:)latest$/u.test(metadata.imageTag)) {
+  assertSha256(metadata.backupChecksum, "Rollback backup SHA-256");
+  if (
+    /(?:^|:)latest$/u.test(metadata.previousImage) ||
+    /(?:^|:)latest$/u.test(metadata.currentImage)
+  ) {
     throw new SafePhase6StagingError("Rollback image must not use latest.");
   }
   const inspectImage = input.inspectImage ?? inspectLocalImage;
-  const actual = await inspectImage(metadata.imageTag);
+  const actual = await inspectImage(metadata.previousImage);
   if (
     actual.imageId !== metadata.imageId ||
     actual.architecture !== metadata.architecture
@@ -377,7 +483,9 @@ export async function verifyRollbackImage(input: {
     mode: "PREVIOUS_IMAGE",
     imageId: metadata.imageId,
     architecture: metadata.architecture,
-    migrationCount: metadata.migrationCount,
+    migrationCount: sourceLedger.count,
+    migrationLedgerFingerprint: sourceLedger.fingerprint,
+    previousReleaseSha: metadata.previousReleaseSha,
     rollbackVerify: "PASS",
   };
 }
@@ -419,9 +527,61 @@ export function formatRollbackReport(report: RollbackReport): string {
     ...(report.migrationCount !== undefined
       ? [`ROLLBACK_MIGRATION_COUNT=${report.migrationCount}`]
       : []),
+    ...(report.migrationLedgerFingerprint
+      ? [
+          `ROLLBACK_MIGRATION_LEDGER_FINGERPRINT=${report.migrationLedgerFingerprint}`,
+        ]
+      : []),
+    ...(report.previousReleaseSha
+      ? [`ROLLBACK_PREVIOUS_RELEASE_SHA=${report.previousReleaseSha}`]
+      : []),
     "DATABASE_ROLLBACK=FORBIDDEN",
     `ROLLBACK_VERIFY=${report.rollbackVerify}`,
   ].join("\n");
+}
+
+async function readOperatorImageContract(
+  imageTag: string,
+): Promise<OperatorImageContract> {
+  try {
+    const { stdout } = await execFileAsync(
+      "docker",
+      ["image", "inspect", imageTag, "--format", "{{json .Config.Labels}}"],
+      { cwd: process.cwd() },
+    );
+    const labels = JSON.parse(stdout) as Record<string, string>;
+    return {
+      sourceGitSha: labels["org.opencontainers.image.revision"] ?? "",
+      migrationCount: Number(labels["io.ueb-core.migration-count"]),
+      migrationLedgerFingerprint:
+        labels["io.ueb-core.migration-ledger-fingerprint"] ?? "",
+    };
+  } catch {
+    throw new SafePhase6StagingError(
+      "Operator image source or migration ledger evidence is unavailable.",
+    );
+  }
+}
+
+function isGitSha(value: string | undefined): value is string {
+  return typeof value === "string" && /^[a-f0-9]{40}$/u.test(value);
+}
+
+function isSafeReference(value: string | undefined): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 128 &&
+    !/[\r\n\0]/u.test(value)
+  );
+}
+
+function isValidTimestamp(value: string | undefined): value is string {
+  return (
+    typeof value === "string" &&
+    /(?:Z|[+-]\d{2}:\d{2})$/u.test(value) &&
+    Number.isFinite(Date.parse(value))
+  );
 }
 
 function assertOutsideRepository(path: string, cwd = process.cwd()): string {

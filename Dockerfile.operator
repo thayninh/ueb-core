@@ -5,6 +5,12 @@ FROM node:24-bookworm-slim AS node-runtime
 FROM postgres:18.4-bookworm AS operator
 
 ARG UEB_CORE_SOURCE_GIT_SHA
+ARG UEB_CORE_MIGRATION_LEDGER_FINGERPRINT
+ARG UEB_CORE_MIGRATION_COUNT
+
+LABEL org.opencontainers.image.revision="${UEB_CORE_SOURCE_GIT_SHA}" \
+  io.ueb-core.migration-ledger-fingerprint="${UEB_CORE_MIGRATION_LEDGER_FINGERPRINT}" \
+  io.ueb-core.migration-count="${UEB_CORE_MIGRATION_COUNT}"
 
 ENV PNPM_HOME="/pnpm"
 ENV PATH="${PNPM_HOME}:${PATH}"
@@ -39,11 +45,15 @@ RUN case "${UEB_CORE_SOURCE_GIT_SHA}" in \
       [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;; \
       *) echo "UEB_CORE_SOURCE_GIT_SHA must be an exact lowercase 40-character Git SHA" >&2; exit 2 ;; \
     esac \
+  && node --import tsx scripts/phase-6/migration-ledger.ts --json > /operator/.migration-ledger.json \
+  && node -e "const fs=require('node:fs');const ledger=JSON.parse(fs.readFileSync('/operator/.migration-ledger.json','utf8'));if(ledger.fingerprint!==process.argv[1]||String(ledger.count)!==process.argv[2])process.exit(2)" "${UEB_CORE_MIGRATION_LEDGER_FINGERPRINT}" "${UEB_CORE_MIGRATION_COUNT}" \
   && pnpm exec prisma generate \
   && chown -R operator:operator /operator /pnpm \
   && printf '%s\n' "${UEB_CORE_SOURCE_GIT_SHA}" > /operator/.source-git-sha \
   && chown root:root /operator/.source-git-sha \
   && chmod 0444 /operator/.source-git-sha \
+  && chown root:root /operator/.migration-ledger.json \
+  && chmod 0444 /operator/.migration-ledger.json \
   && chmod 0555 /usr/local/bin/operator-secure-entrypoint
 
 USER root

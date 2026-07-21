@@ -263,7 +263,7 @@ function generate(
     databaseHost: "db",
     databasePort: "5432",
     databaseName: overrides.databaseName ?? "ueb_core_staging",
-    publicUrl: "https://ueb-core.cargis.vn",
+    publicUrl: "https://ueb-core-staging.cargis.vn",
     monitoringEmail: overrides.monitoringEmail ?? "ops@sample.test",
     repositoryDirectory,
     now: new Date("2026-07-18T00:00:00.000Z"),

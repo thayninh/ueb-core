@@ -26,7 +26,7 @@ dùng raw SQL hoặc Phase 5 UAT commands.
 
 | Contract | Approved value | Static compatibility |
 | --- | --- | --- |
-| Host/domain | `103.200.25.54`, `ueb-core.cargis.vn` | SSH/DNS discovery match |
+| Host/domain | `103.200.25.54`, `ueb-core-staging.cargis.vn` | SSH/DNS discovery match |
 | Deployment directory | `/opt/ueb-core` | Không trùng `/opt/khtc-ueb` |
 | App image | `ueb-core:<GIT_COMMIT_SHA>` | `Dockerfile` runner dùng Node 24, non-root |
 | Operator image | `ueb-core-operator:<GIT_COMMIT_SHA>` | Node 24, pnpm, Prisma, 7 migrations và PostgreSQL 18 client; non-root, không expose port |
@@ -93,7 +93,16 @@ build time.
 
 ```bash
 docker build --target runner --tag "$UEB_CORE_IMAGE" .
-docker build --file Dockerfile.operator --tag "$UEB_CORE_OPERATOR_IMAGE" .
+MIGRATION_LEDGER_JSON="$(pnpm --silent phase6:migration-ledger)"
+MIGRATION_COUNT="$(node -e 'const value=JSON.parse(process.argv[1]);process.stdout.write(String(value.count))' "$MIGRATION_LEDGER_JSON")"
+MIGRATION_LEDGER_FINGERPRINT="$(node -e 'const value=JSON.parse(process.argv[1]);process.stdout.write(value.fingerprint)' "$MIGRATION_LEDGER_JSON")"
+docker build --platform linux/amd64 --file Dockerfile.operator \
+  --build-arg "UEB_CORE_SOURCE_GIT_SHA=${GIT_SHA}" \
+  --build-arg "UEB_CORE_MIGRATION_COUNT=${MIGRATION_COUNT}" \
+  --build-arg "UEB_CORE_MIGRATION_LEDGER_FINGERPRINT=${MIGRATION_LEDGER_FINGERPRINT}" \
+  --tag "$UEB_CORE_OPERATOR_IMAGE" .
+test "$(docker image inspect "$UEB_CORE_OPERATOR_IMAGE" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$GIT_SHA"
+test "$(docker image inspect "$UEB_CORE_OPERATOR_IMAGE" --format '{{index .Config.Labels "io.ueb-core.migration-ledger-fingerprint"}}')" = "$MIGRATION_LEDGER_FINGERPRINT"
 LOCAL_IMAGE_ID="$(docker image inspect "$UEB_CORE_IMAGE" --format '{{.Id}}')"
 test -n "$LOCAL_IMAGE_ID"
 
@@ -264,14 +273,16 @@ active restore process; target present hoặc state không rõ là hard stop.
 
 1. Deployment/rollback preflight PASS từ immutable local artifact.
 2. Nếu database đã tồn tại, guarded backup/verify/off-host evidence PASS.
-3. Nếu database chưa tồn tại, guarded bootstrap tự chạy đúng 7 migrations.
+3. Nếu database chưa tồn tại, guarded bootstrap áp dụng đúng ordered source
+   migration ledger đã được fingerprint trong immutable operator image.
 4. Guarded role bootstrap tạo/reconcile `ueb_core_staging_app` và
    `ueb_core_staging_provisioner` qua distinct authorized role-admin URL.
 5. Guarded runtime/provisioning ACL reconciliation PASS.
 6. Read-only security verifier và metadata-only fingerprint PASS:
 
    ```text
-   MIGRATION_COUNT=7
+   MIGRATION_COUNT=<DYNAMIC_SOURCE_LEDGER_COUNT>
+   MIGRATION_LEDGER_FINGERPRINT=<SOURCE_LEDGER_SHA256>
    OWNER_RUNTIME_PROVISIONER_DISTINCT=YES
    RUNTIME_NON_OWNER=YES
    RUNTIME_NON_SUPERUSER=YES
@@ -359,7 +370,7 @@ export CADDYFILE=/opt/khtc-ueb/repo/infra/caddy/Caddyfile
 export SITE_SNIPPET=/opt/ueb-core/change/Caddyfile.ueb-core
 export CADDY_BACKUP="${CADDYFILE}.phase6.$(date -u +%Y%m%dT%H%M%SZ).bak"
 
-sudo grep -nF 'ueb-core.cargis.vn' "$CADDYFILE" && exit 1 || true
+sudo grep -nF 'ueb-core-staging.cargis.vn' "$CADDYFILE" && exit 1 || true
 sudo cp --preserve=mode,ownership,timestamps "$CADDYFILE" "$CADDY_BACKUP"
 sudo sh -c 'printf "\n" >>"$1"; cat "$2" >>"$1"' \
   sh "$CADDYFILE" "$SITE_SNIPPET"
@@ -404,9 +415,9 @@ ssh -o BatchMode=yes ueb-core-staging '
 '
 
 curl --fail --silent --show-error \
-  https://ueb-core.cargis.vn/api/health >/dev/null
+  https://ueb-core-staging.cargis.vn/api/health >/dev/null
 curl --fail --silent --show-error \
-  https://ueb-core.cargis.vn/api/ready >/dev/null
+  https://ueb-core-staging.cargis.vn/api/ready >/dev/null
 ```
 
 Verify immutable image ID, health, readiness no-cache, TLS hostname, restart
@@ -440,11 +451,11 @@ docker inspect "$APP_ID" \
 docker inspect "$DB_ID" \
   --format 'DB_HEALTH={{.State.Health.Status}} DB_RESTARTS={{.RestartCount}}'
 curl --fail --silent --show-error \
-  https://ueb-core.cargis.vn/api/health >/dev/null
+  https://ueb-core-staging.cargis.vn/api/health >/dev/null
 curl --fail --silent --show-error \
-  https://ueb-core.cargis.vn/api/ready >/dev/null
+  https://ueb-core-staging.cargis.vn/api/ready >/dev/null
 curl --fail --silent --show-error --head \
-  https://ueb-core.cargis.vn >/dev/null
+  https://ueb-core-staging.cargis.vn >/dev/null
 df -P / /var/backups/ueb-core/staging
 ```
 
