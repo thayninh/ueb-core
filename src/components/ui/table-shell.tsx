@@ -13,6 +13,7 @@ export function TableShell({
         "overflow-x-auto rounded-card border border-border bg-surface shadow-control",
         className,
       )}
+      role="region"
       tabIndex={0}
     />
   );

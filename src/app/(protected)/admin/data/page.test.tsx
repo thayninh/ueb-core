@@ -115,6 +115,48 @@ describe("admin latest data page", () => {
     });
   });
 
+  it("preserves the filter field, pagination query, and accessible table shell", async () => {
+    mocks.getLatestCoreRowsForAdmin.mockResolvedValue({
+      rows: [row],
+      search: "UAT101",
+      page: 2,
+      pageSize: 25,
+      totalRows: 51,
+      totalPages: 3,
+    });
+    render(
+      await AdminDataPage({
+        searchParams: Promise.resolve({ q: "UAT101", page: "2" }),
+      }),
+    );
+
+    const form = screen
+      .getByRole("button", { name: "Tra cứu" })
+      .closest("form")!;
+    expect(
+      [...form.querySelectorAll("[name]")].map((field) =>
+        field.getAttribute("name"),
+      ),
+    ).toEqual(["q"]);
+    expect(screen.getByLabelText("Tìm kiếm")).toHaveValue("UAT101");
+    expect(screen.getByLabelText("Tìm kiếm")).toHaveAttribute(
+      "maxlength",
+      "100",
+    );
+    expect(screen.getByRole("link", { name: "Trang trước" })).toHaveAttribute(
+      "href",
+      "/admin/data?page=1&q=UAT101",
+    );
+    expect(screen.getByRole("link", { name: "Trang sau" })).toHaveAttribute(
+      "href",
+      "/admin/data?page=3&q=UAT101",
+    );
+    expect(screen.getByLabelText("Dữ liệu UEB Core")).toHaveAttribute(
+      "tabindex",
+      "0",
+    );
+  });
+
   it("safe-denies malformed or unexpected query parameters", async () => {
     await expect(
       AdminDataPage({

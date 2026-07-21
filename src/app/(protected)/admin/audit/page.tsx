@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { Button, PageContainer, Select, TableShell } from "@/components/ui";
 import { AUTH_AUDIT_EVENT_TYPES } from "@/lib/auth/audit";
 import {
   AUTH_AUDIT_OUTCOMES,
@@ -51,124 +52,123 @@ export default async function AdminAuditPage({ searchParams }: AuditPageProps) {
   });
 
   return (
-    <main className="mx-auto w-full max-w-7xl space-y-6 px-6 py-10">
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="text-sm font-medium text-blue-700 dark:text-blue-400">
-            Chỉ đọc · Append-only
+    <main className="py-8 sm:py-10">
+      <PageContainer className="max-w-7xl space-y-6">
+        <header className="flex flex-wrap items-end justify-between gap-5">
+          <div>
+            <p className="text-sm font-semibold text-brand-700">
+              Chỉ đọc · Append-only
+            </p>
+            <h1 className="mt-2 text-2xl font-semibold tracking-tight text-ink sm:text-3xl">
+              Nhật ký bảo mật
+            </h1>
+            <p className="mt-3 text-sm leading-6 text-muted">
+              Không hiển thị email đăng nhập thất bại, mật khẩu, session token
+              hoặc OAuth token.
+            </p>
+          </div>
+          <Link
+            className="inline-flex min-h-11 items-center justify-center rounded-control border border-border-strong bg-surface px-4 py-2.5 text-sm font-semibold text-ink shadow-control transition-colors hover:bg-surface-subtle"
+            href="/admin/users"
+          >
+            Quản trị tài khoản
+          </Link>
+        </header>
+
+        <form
+          className="grid gap-4 rounded-card border border-border bg-surface p-4 shadow-card sm:p-5 md:grid-cols-[1fr_1fr_auto]"
+          method="get"
+        >
+          <FilterSelect
+            label="Loại sự kiện"
+            name="eventType"
+            options={AUTH_AUDIT_EVENT_TYPES}
+            value={result.eventType ?? ""}
+          />
+          <FilterSelect
+            label="Kết quả"
+            name="outcome"
+            options={AUTH_AUDIT_OUTCOMES}
+            value={result.outcome ?? ""}
+          />
+          <Button className="self-end" type="submit">
+            Lọc
+          </Button>
+        </form>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted">
+          <p>
+            {result.totalRows} sự kiện · Trang {result.page}/{result.totalPages}
           </p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
-            Nhật ký bảo mật
-          </h1>
-          <p className="mt-3 text-sm text-zinc-600 dark:text-zinc-300">
-            Không hiển thị email đăng nhập thất bại, mật khẩu, session token
-            hoặc OAuth token.
-          </p>
+          <nav aria-label="Phân trang audit" className="flex flex-wrap gap-2">
+            <AuditPageLink
+              disabled={result.page <= 1}
+              eventType={result.eventType}
+              label="Trang trước"
+              outcome={result.outcome}
+              page={result.page - 1}
+            />
+            <AuditPageLink
+              disabled={result.page >= result.totalPages}
+              eventType={result.eventType}
+              label="Trang sau"
+              outcome={result.outcome}
+              page={result.page + 1}
+            />
+          </nav>
         </div>
-        <Link
-          className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
-          href="/admin/users"
-        >
-          Quản trị tài khoản
-        </Link>
-      </header>
 
-      <form
-        className="grid gap-4 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 md:grid-cols-[1fr_1fr_auto]"
-        method="get"
-      >
-        <FilterSelect
-          label="Loại sự kiện"
-          name="eventType"
-          options={AUTH_AUDIT_EVENT_TYPES}
-          value={result.eventType ?? ""}
-        />
-        <FilterSelect
-          label="Kết quả"
-          name="outcome"
-          options={AUTH_AUDIT_OUTCOMES}
-          value={result.outcome ?? ""}
-        />
-        <button
-          className="self-end rounded-lg bg-blue-700 px-5 py-2.5 font-medium text-white hover:bg-blue-800"
-          type="submit"
-        >
-          Lọc
-        </button>
-      </form>
-
-      <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-zinc-600 dark:text-zinc-300">
-        <p>
-          {result.totalRows} sự kiện · Trang {result.page}/{result.totalPages}
-        </p>
-        <nav aria-label="Phân trang audit" className="flex gap-2">
-          <AuditPageLink
-            disabled={result.page <= 1}
-            eventType={result.eventType}
-            label="Trang trước"
-            outcome={result.outcome}
-            page={result.page - 1}
-          />
-          <AuditPageLink
-            disabled={result.page >= result.totalPages}
-            eventType={result.eventType}
-            label="Trang sau"
-            outcome={result.outcome}
-            page={result.page + 1}
-          />
-        </nav>
-      </div>
-
-      <div className="overflow-x-auto rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-        <table className="min-w-full text-left text-sm">
-          <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
-            <tr>
-              {[
-                "Thời điểm",
-                "Sự kiện",
-                "Kết quả",
-                "Actor ID",
-                "Target ID",
-                "Session ID",
-                "Metadata an toàn",
-              ].map((label) => (
-                <th className="px-4 py-3 font-semibold" key={label}>
-                  {label}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
-            {result.rows.map((row) => (
-              <tr className="align-top" key={row.id}>
-                <td className="whitespace-nowrap px-4 py-3">
-                  {row.occurredAt.toLocaleString("vi-VN")}
-                </td>
-                <td className="whitespace-nowrap px-4 py-3 font-medium">
-                  {row.eventType}
-                </td>
-                <td className="px-4 py-3">{row.outcome}</td>
-                <IdCell value={row.actorUserId} />
-                <IdCell value={row.targetUserId} />
-                <IdCell value={row.sessionId} />
-                <td className="min-w-64 px-4 py-3 text-xs text-zinc-600 dark:text-zinc-300">
-                  {formatMetadata(row.metadata)}
-                </td>
-              </tr>
-            ))}
-            {result.rows.length === 0 ? (
+        <TableShell aria-label="Nhật ký bảo mật">
+          <table className="min-w-full text-left text-sm">
+            <thead className="bg-brand-700 text-xs uppercase tracking-wide text-white">
               <tr>
-                <td
-                  className="px-4 py-10 text-center text-zinc-500"
-                  colSpan={7}
-                >
-                  Không có sự kiện phù hợp bộ lọc.
-                </td>
+                {[
+                  "Thời điểm",
+                  "Sự kiện",
+                  "Kết quả",
+                  "Actor ID",
+                  "Target ID",
+                  "Session ID",
+                  "Metadata an toàn",
+                ].map((label) => (
+                  <th className="px-4 py-3 font-semibold" key={label}>
+                    {label}
+                  </th>
+                ))}
               </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody className="divide-y divide-border bg-surface">
+              {result.rows.map((row) => (
+                <tr
+                  className="align-top transition-colors hover:bg-surface-subtle"
+                  key={row.id}
+                >
+                  <td className="whitespace-nowrap px-4 py-3">
+                    {row.occurredAt.toLocaleString("vi-VN")}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 font-medium">
+                    {row.eventType}
+                  </td>
+                  <td className="px-4 py-3">{row.outcome}</td>
+                  <IdCell value={row.actorUserId} />
+                  <IdCell value={row.targetUserId} />
+                  <IdCell value={row.sessionId} />
+                  <td className="min-w-64 px-4 py-3 text-xs text-muted">
+                    {formatMetadata(row.metadata)}
+                  </td>
+                </tr>
+              ))}
+              {result.rows.length === 0 ? (
+                <tr>
+                  <td className="px-4 py-10 text-center text-muted" colSpan={7}>
+                    Không có sự kiện phù hợp bộ lọc.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </TableShell>
+      </PageContainer>
     </main>
   );
 }
@@ -185,27 +185,23 @@ function FilterSelect({
   value: string;
 }>) {
   return (
-    <label className="text-sm font-medium text-zinc-700 dark:text-zinc-200">
+    <label className="text-sm font-semibold text-ink">
       {label}
-      <select
-        className="mt-2 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 dark:border-zinc-700 dark:bg-zinc-950"
-        defaultValue={value}
-        name={name}
-      >
+      <Select className="mt-2" defaultValue={value} name={name}>
         <option value="">Tất cả</option>
         {options.map((option) => (
           <option key={option} value={option}>
             {option}
           </option>
         ))}
-      </select>
+      </Select>
     </label>
   );
 }
 
 function IdCell({ value }: Readonly<{ value: string | null }>) {
   return (
-    <td className="whitespace-nowrap px-4 py-3 font-mono text-xs">
+    <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-muted">
       {value ?? "—"}
     </td>
   );
@@ -225,10 +221,13 @@ function AuditPageLink({
   outcome: string | null;
 }>) {
   const classes =
-    "rounded-lg border border-zinc-300 px-3 py-2 font-medium dark:border-zinc-700";
+    "inline-flex min-h-11 items-center justify-center rounded-control border border-border px-3 py-2 text-center font-semibold";
   if (disabled) {
     return (
-      <span className={`${classes} cursor-not-allowed opacity-40`}>
+      <span
+        aria-disabled="true"
+        className={`${classes} cursor-not-allowed bg-surface-subtle text-muted opacity-60`}
+      >
         {label}
       </span>
     );
@@ -239,7 +238,7 @@ function AuditPageLink({
   if (outcome) params.set("outcome", outcome);
   return (
     <Link
-      className={`${classes} hover:bg-zinc-100 dark:hover:bg-zinc-800`}
+      className={`${classes} bg-surface text-ink shadow-control transition-colors hover:bg-surface-subtle`}
       href={`/admin/audit?${params.toString()}`}
     >
       {label}

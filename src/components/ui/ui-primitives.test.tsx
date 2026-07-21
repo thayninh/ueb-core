@@ -86,5 +86,6 @@ describe("UI primitives", () => {
       "tabindex",
       "0",
     );
+    expect(screen.getByRole("region", { name: "Bảng kiểm tra" })).toBeVisible();
   });
 });

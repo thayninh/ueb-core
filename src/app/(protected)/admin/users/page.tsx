@@ -10,6 +10,7 @@ import {
   setUserUnitScopeAction,
 } from "@/app/actions/admin";
 import { CreateUserForm } from "@/app/(protected)/admin/users/create-user-form";
+import { Badge, Card, PageContainer, Select } from "@/components/ui";
 import { BusinessRole } from "@/generated/prisma/client";
 import {
   getAdminUserManagement,
@@ -36,64 +37,62 @@ export default async function AdminUsersPage({
   const data = await getAdminUserManagement();
 
   return (
-    <main className="mx-auto w-full max-w-7xl space-y-8 px-6 py-10">
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="text-sm font-medium text-blue-700 dark:text-blue-400">
-            Quản trị định danh
-          </p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
-            Tài khoản và phân quyền
-          </h1>
-          <p className="mt-3 text-sm text-zinc-600 dark:text-zinc-300">
-            Không hỗ trợ hard delete, impersonation hoặc thay đổi dữ liệu
-            legacy.
-          </p>
-        </div>
-        <Link
-          className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
-          href="/admin/audit"
-        >
-          Xem nhật ký bảo mật
-        </Link>
-      </header>
+    <main className="py-8 sm:py-10">
+      <PageContainer className="max-w-7xl space-y-8">
+        <header className="flex flex-wrap items-end justify-between gap-5">
+          <div>
+            <p className="text-sm font-semibold text-brand-700">
+              Quản trị định danh
+            </p>
+            <h1 className="mt-2 text-2xl font-semibold tracking-tight text-ink sm:text-3xl">
+              Tài khoản và phân quyền
+            </h1>
+            <p className="mt-3 text-sm leading-6 text-muted">
+              Không hỗ trợ hard delete, impersonation hoặc thay đổi dữ liệu
+              legacy.
+            </p>
+          </div>
+          <Link
+            className="inline-flex min-h-11 items-center justify-center rounded-control border border-border-strong bg-surface px-4 py-2.5 text-sm font-semibold text-ink shadow-control transition-colors hover:bg-surface-subtle"
+            href="/admin/audit"
+          >
+            Xem nhật ký bảo mật
+          </Link>
+        </header>
 
-      <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-        <h2 className="text-xl font-semibold text-zinc-950 dark:text-zinc-50">
-          Tạo tài khoản
-        </h2>
-        <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
-          Mật khẩu tạm chỉ được gửi tới server khi tạo và không được hiển thị
-          lại.
-        </p>
-        <div className="mt-6">
-          <CreateUserForm
-            lecturerCandidates={data.lecturerCandidates}
-            units={data.units}
-          />
-        </div>
-      </section>
-
-      <section>
-        <div className="flex items-end justify-between gap-4">
-          <h2 className="text-xl font-semibold text-zinc-950 dark:text-zinc-50">
-            Danh sách tài khoản
-          </h2>
-          <p className="text-sm text-zinc-600 dark:text-zinc-300">
-            {data.users.length} tài khoản
+        <Card className="p-4 sm:p-6">
+          <h2 className="text-xl font-semibold text-ink">Tạo tài khoản</h2>
+          <p className="mt-2 text-sm leading-6 text-muted">
+            Mật khẩu tạm chỉ được gửi tới server khi tạo và không được hiển thị
+            lại.
           </p>
-        </div>
-        <div className="mt-4 space-y-5">
-          {data.users.map((user) => (
-            <UserCard
+          <div className="mt-6">
+            <CreateUserForm
               lecturerCandidates={data.lecturerCandidates}
-              key={user.id}
               units={data.units}
-              user={user}
             />
-          ))}
-        </div>
-      </section>
+          </div>
+        </Card>
+
+        <section>
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <h2 className="text-xl font-semibold text-ink">
+              Danh sách tài khoản
+            </h2>
+            <p className="text-sm text-muted">{data.users.length} tài khoản</p>
+          </div>
+          <div className="mt-4 space-y-5">
+            {data.users.map((user) => (
+              <UserCard
+                lecturerCandidates={data.lecturerCandidates}
+                key={user.id}
+                units={data.units}
+                user={user}
+              />
+            ))}
+          </div>
+        </section>
+      </PageContainer>
     </main>
   );
 }
@@ -114,28 +113,26 @@ function UserCard({
   const activeUnitIds = new Set(user.units.map(({ id }) => id));
 
   return (
-    <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+    <article className="rounded-card border border-border bg-surface p-4 shadow-card sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h3 className="text-lg font-semibold text-zinc-950 dark:text-zinc-50">
+        <div className="min-w-0">
+          <h3 className="break-words text-lg font-semibold text-ink">
             {user.name}
           </h3>
-          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-            {user.email}
-          </p>
+          <p className="mt-1 break-all text-sm text-muted">{user.email}</p>
           <div className="mt-3 flex flex-wrap gap-2 text-xs">
-            <Badge label={`Trạng thái: ${user.status}`} />
-            <Badge
-              label={
-                user.lecturerUid
-                  ? "Đã ánh xạ giảng viên"
-                  : "Chưa ánh xạ giảng viên"
-              }
-            />
-            <Badge label={`${user.sessionCount} session đang hoạt động`} />
+            <Badge variant={user.status === "ACTIVE" ? "success" : "danger"}>
+              Trạng thái: {user.status}
+            </Badge>
+            <Badge>
+              {user.lecturerUid
+                ? "Đã ánh xạ giảng viên"
+                : "Chưa ánh xạ giảng viên"}
+            </Badge>
+            <Badge>{user.sessionCount} session đang hoạt động</Badge>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex w-full flex-wrap gap-2 sm:w-auto">
           <form action={setUserStatusAction}>
             <input name="targetUserId" type="hidden" value={user.id} />
             <input
@@ -155,11 +152,9 @@ function UserCard({
         </div>
       </div>
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-3">
-        <section>
-          <h4 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-            Vai trò
-          </h4>
+      <div className="mt-6 grid gap-4 lg:grid-cols-3">
+        <section className="rounded-control border border-border bg-surface-subtle p-4">
+          <h4 className="text-sm font-semibold text-ink">Vai trò</h4>
           <div className="mt-3 space-y-2">
             {Object.values(BusinessRole).map((role) => {
               const enabled = user.roles.includes(role);
@@ -169,7 +164,7 @@ function UserCard({
                   className="flex items-center justify-between gap-3"
                   key={role}
                 >
-                  <span className="text-sm text-zinc-700 dark:text-zinc-200">
+                  <span className="min-w-0 text-sm leading-6 text-ink">
                     {ROLE_LABELS[role]}
                   </span>
                   <input name="targetUserId" type="hidden" value={user.id} />
@@ -186,11 +181,9 @@ function UserCard({
           </div>
         </section>
 
-        <section>
-          <h4 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-            Đơn vị quản lý
-          </h4>
-          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+        <section className="rounded-control border border-border bg-surface-subtle p-4">
+          <h4 className="text-sm font-semibold text-ink">Đơn vị quản lý</h4>
+          <p className="mt-1 text-xs leading-5 text-muted">
             Gán ít nhất một đơn vị trước khi cấp vai trò lãnh đạo.
           </p>
           <div className="mt-3 max-h-48 space-y-2 overflow-y-auto pr-1">
@@ -202,7 +195,7 @@ function UserCard({
                   className="flex items-start justify-between gap-3"
                   key={unit.id}
                 >
-                  <span className="text-sm text-zinc-700 dark:text-zinc-200">
+                  <span className="min-w-0 text-sm leading-6 text-ink">
                     {unit.displayName}
                   </span>
                   <input name="targetUserId" type="hidden" value={user.id} />
@@ -223,14 +216,14 @@ function UserCard({
           </div>
         </section>
 
-        <section>
-          <h4 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+        <section className="rounded-control border border-border bg-surface-subtle p-4">
+          <h4 className="text-sm font-semibold text-ink">
             Ánh xạ lecturer_uid
           </h4>
           <form action={setLecturerMappingAction} className="mt-3 space-y-3">
             <input name="targetUserId" type="hidden" value={user.id} />
-            <select
-              className="block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+            <Select
+              aria-label="Ánh xạ lecturer_uid"
               defaultValue={user.lecturerUid ?? ""}
               name="lecturerUid"
             >
@@ -244,20 +237,12 @@ function UserCard({
                   {candidate.email ?? "Chưa có email"}
                 </option>
               ))}
-            </select>
+            </Select>
             <ActionButton label="Lưu ánh xạ" />
           </form>
         </section>
       </div>
     </article>
-  );
-}
-
-function Badge({ label }: Readonly<{ label: string }>) {
-  return (
-    <span className="rounded-full bg-zinc-100 px-3 py-1 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
-      {label}
-    </span>
   );
 }
 
@@ -271,16 +256,15 @@ function ActionButton({
   tone?: "neutral" | "primary" | "danger";
 }>) {
   const colors = {
-    neutral:
-      "border-zinc-300 text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800",
-    primary: "border-blue-700 bg-blue-700 text-white hover:bg-blue-800",
+    neutral: "border-border-strong bg-surface text-ink hover:bg-surface-subtle",
+    primary: "border-brand-600 bg-brand-600 text-white hover:bg-brand-700",
     danger:
-      "border-red-300 text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/40",
+      "border-danger-text bg-danger-surface text-danger-text hover:brightness-95",
   }[tone];
   return (
     <button
-      className={`shrink-0 rounded-lg border font-medium ${colors} ${
-        small ? "px-2.5 py-1 text-xs" : "px-3 py-2 text-sm"
+      className={`inline-flex min-h-11 shrink-0 items-center justify-center rounded-control border font-semibold shadow-control transition-colors ${colors} ${
+        small ? "px-3 py-2 text-xs" : "px-3.5 py-2.5 text-sm"
       }`}
       type="submit"
     >
