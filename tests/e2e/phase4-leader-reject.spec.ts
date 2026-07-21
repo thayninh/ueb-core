@@ -9,6 +9,13 @@ import { readPhase4LecturerPortalFixtures } from "../../scripts/phase-4/lib/lect
 const fixture = readPhase4LecturerPortalFixtures(process.env);
 const urls = readPhase4LecturerPortalDatabaseUrls(process.env);
 const reason = "Cần bổ sung minh chứng chuyên môn trước khi gửi lại.";
+const RESPONSIVE_VIEWPORTS = [
+  { width: 320, height: 568 },
+  { width: 390, height: 844 },
+  { width: 768, height: 1024 },
+  { width: 1024, height: 768 },
+  { width: 1440, height: 900 },
+] as const;
 
 let owner: Client;
 let submissionId: string;
@@ -71,6 +78,32 @@ test.describe.serial("Phase 4 leader rejection", () => {
     expect(response?.status()).toBe(404);
   });
 
+  test("leader presentation surfaces reflow without document overflow", async ({
+    page,
+  }) => {
+    await login(page, fixture.leaderAEmail);
+    const routes = [
+      "/leader/data",
+      "/leader/submissions",
+      `/leader/submissions/${submissionId}`,
+    ];
+
+    for (const viewport of RESPONSIVE_VIEWPORTS) {
+      await page.setViewportSize(viewport);
+      for (const route of routes) {
+        await page.goto(route);
+        await assertPresentationReflow(page, viewport.width);
+      }
+    }
+
+    // A 720 CSS-pixel viewport represents a 1440-pixel desktop at 200% zoom.
+    await page.setViewportSize({ width: 720, height: 450 });
+    for (const route of routes) {
+      await page.goto(route);
+      await assertPresentationReflow(page, 720);
+    }
+  });
+
   test("Leader A rejects and the submission leaves the pending queue", async ({
     page,
   }) => {
@@ -117,4 +150,69 @@ async function login(page: Page, email: string): Promise<void> {
   await page.getByLabel("Mật khẩu").fill(fixture.password);
   await page.getByRole("button", { name: "Đăng nhập" }).click();
   await expect(page).toHaveURL(/\/dashboard$/u);
+}
+
+async function assertPresentationReflow(
+  page: Page,
+  viewportWidth: number,
+): Promise<void> {
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth + 1,
+      ),
+    )
+    .toBe(true);
+
+  const clippedControls = await page
+    .locator(
+      'input:visible:not([type="hidden"]):not([type="checkbox"]), select:visible, textarea:visible, button:visible:not([data-next-mark])',
+    )
+    .evaluateAll(
+      (controls, width) =>
+        controls
+          .filter((control) => {
+            const box = control.getBoundingClientRect();
+            return box.left < -1 || box.right > width + 1 || box.height < 44;
+          })
+          .map((control) => {
+            const box = control.getBoundingClientRect();
+            return {
+              element: control.outerHTML.slice(0, 180),
+              height: box.height,
+              left: box.left,
+              right: box.right,
+            };
+          }),
+      viewportWidth,
+    );
+  expect(clippedControls).toEqual([]);
+
+  const checkboxLabels = page.locator(
+    'label:has(input[type="checkbox"]):visible',
+  );
+  for (let index = 0; index < (await checkboxLabels.count()); index += 1) {
+    const box = await checkboxLabels.nth(index).boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+  }
+
+  const tableRegions = page.getByRole("region");
+  for (let index = 0; index < (await tableRegions.count()); index += 1) {
+    await expect(tableRegions.nth(index)).toHaveAttribute("tabindex", "0");
+  }
+
+  const firstInteractive = page
+    .locator(
+      'main a:visible, main button:visible, main input:visible:not([type="hidden"]), main select:visible, main textarea:visible',
+    )
+    .first();
+  await firstInteractive.focus();
+  expect(
+    await firstInteractive.evaluate((element) => {
+      const style = window.getComputedStyle(element);
+      return (
+        style.outlineStyle !== "none" && parseFloat(style.outlineWidth) >= 2
+      );
+    }),
+  ).toBe(true);
 }
