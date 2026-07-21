@@ -84,12 +84,18 @@ describe("Phase 4 lecturer submission UI", () => {
   });
 
   it("renders every latest-row display field and workflow metadata", () => {
-    render(<LecturerRowsTable pendingSubmissions={[]} rows={[latestRow]} />);
+    const { container } = render(
+      <LecturerRowsTable pendingSubmissions={[]} rows={[latestRow]} />,
+    );
     expect(screen.getAllByRole("columnheader")).toHaveLength(
       CORE_DISPLAY_FIELD_NAMES.length + 3,
     );
     expect(screen.getByText(RECORD_UID)).toBeInTheDocument();
     expect(screen.getByText("Xem lịch sử phiên bản")).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("Dữ liệu hiện hành và thao tác workflow"),
+    ).toHaveAttribute("tabindex", "0");
+    expect(container.querySelectorAll("form")).toHaveLength(1);
   });
 
   it("locks new actions when the row already has a pending submission", () => {
@@ -151,6 +157,13 @@ describe("Phase 4 lecturer submission UI", () => {
     expect(
       container.querySelectorAll("[data-workflow-editable-field]"),
     ).toHaveLength(14);
+    expect(
+      Array.from(
+        container.querySelectorAll<HTMLInputElement>(
+          "[data-workflow-editable-field]",
+        ),
+      ).map((input) => input.dataset.workflowEditableField),
+    ).toEqual([...EDITABLE_BUSINESS_FIELD_NAMES]);
     fireEvent.submit(container.querySelector("form")!);
     await waitFor(() => expect(mocks.submitUpdated).toHaveBeenCalledOnce());
     const sent = mocks.submitUpdated.mock.calls[0]![1] as FormData;

@@ -1,5 +1,7 @@
 import type { UebCoreDataDto } from "@/lib/data/dto";
 
+import { TableShell } from "@/components/ui";
+
 const BUSINESS_COLUMNS = [
   ["stt", "STT"],
   ["donViPhuTrachHocPhan", "Đơn vị phụ trách học phần"],
@@ -34,27 +36,27 @@ export function CoreDataTable({
 }>) {
   if (rows.length === 0) {
     return (
-      <div className="rounded-xl border border-dashed border-zinc-300 px-6 py-12 text-center text-sm text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
+      <div className="rounded-card border border-dashed border-border-strong bg-surface px-5 py-12 text-center text-sm text-muted shadow-control sm:px-6">
         {emptyMessage}
       </div>
     );
   }
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
+    <TableShell aria-label="Dữ liệu UEB Core">
       <table className="min-w-max border-collapse text-left text-sm">
-        <thead className="bg-zinc-100 text-xs uppercase tracking-wide text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
+        <thead className="bg-brand-700 text-xs uppercase tracking-wide text-white">
           <tr>
             {showVersionMetadata && (
               <>
                 <th
-                  className="border-b border-zinc-200 px-4 py-3 font-semibold dark:border-zinc-700"
+                  className="border-b border-brand-800 px-4 py-3 font-semibold"
                   scope="col"
                 >
                   Phiên bản
                 </th>
                 <th
-                  className="border-b border-zinc-200 px-4 py-3 font-semibold dark:border-zinc-700"
+                  className="border-b border-brand-800 px-4 py-3 font-semibold"
                   scope="col"
                 >
                   Trạng thái
@@ -63,10 +65,8 @@ export function CoreDataTable({
             )}
             {BUSINESS_COLUMNS.map(([key, label], index) => (
               <th
-                className={`border-b border-zinc-200 px-4 py-3 font-semibold dark:border-zinc-700 ${
-                  index === 0
-                    ? "sticky left-0 z-10 bg-zinc-100 dark:bg-zinc-800"
-                    : ""
+                className={`border-b border-brand-800 px-4 py-3 font-semibold ${
+                  index === 0 ? "sticky left-0 z-10 bg-brand-700" : ""
                 }`}
                 key={key}
                 scope="col"
@@ -78,37 +78,35 @@ export function CoreDataTable({
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-zinc-200 bg-white dark:divide-zinc-800 dark:bg-zinc-900">
+        <tbody className="divide-y divide-border bg-surface">
           {rows.map((row, rowIndex) => (
             <tr
-              className="align-top hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
+              className="align-top transition-colors hover:bg-surface-subtle"
               data-current-version={showVersionMetadata && rowIndex === 0}
               data-version-no={row.versionNo}
               key={`${row.recordUid}:${row.versionNo}:${row.stt}`}
             >
               {showVersionMetadata && (
                 <>
-                  <td className="px-4 py-3 font-semibold text-zinc-900 dark:text-zinc-100">
+                  <td className="px-4 py-3 font-semibold text-ink">
                     {row.versionNo}
                   </td>
                   <td className="px-4 py-3">
                     {rowIndex === 0 ? (
-                      <span className="rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-100">
+                      <span className="inline-flex min-h-6 items-center rounded-full bg-success-surface px-2.5 py-0.5 text-xs font-semibold text-success-text">
                         Hiện hành
                       </span>
                     ) : (
-                      <span className="text-xs text-zinc-500">
-                        Phiên bản cũ
-                      </span>
+                      <span className="text-xs text-muted">Phiên bản cũ</span>
                     )}
                   </td>
                 </>
               )}
               {BUSINESS_COLUMNS.map(([key], index) => (
                 <td
-                  className={`max-w-80 px-4 py-3 text-zinc-700 dark:text-zinc-200 ${
+                  className={`max-w-80 px-4 py-3 text-muted ${
                     index === 0
-                      ? "sticky left-0 z-10 bg-white font-medium text-zinc-950 dark:bg-zinc-900 dark:text-zinc-50"
+                      ? "sticky left-0 z-10 bg-surface font-medium text-ink"
                       : "whitespace-pre-wrap"
                   }`}
                   key={key}
@@ -120,7 +118,7 @@ export function CoreDataTable({
           ))}
         </tbody>
       </table>
-    </div>
+    </TableShell>
   );
 }
 
