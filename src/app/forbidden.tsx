@@ -1,25 +1,34 @@
 import Link from "next/link";
 
+import { Card, PageContainer } from "@/components/ui";
+
 export default function ForbiddenPage() {
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-xl items-center px-6 py-16">
-      <section className="w-full rounded-2xl border border-zinc-200 bg-white p-8 text-center shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-        <p className="text-sm font-semibold text-red-700 dark:text-red-300">
-          HTTP 403
-        </p>
-        <h1 className="mt-3 text-3xl font-semibold text-zinc-950 dark:text-zinc-50">
-          Không có quyền truy cập
-        </h1>
-        <p className="mt-3 text-zinc-600 dark:text-zinc-300">
-          Tài khoản hiện tại không được phép mở tài nguyên này.
-        </p>
-        <Link
-          className="mt-6 inline-block rounded-lg bg-blue-700 px-5 py-2.5 font-medium text-white hover:bg-blue-800"
-          href="/dashboard"
-        >
-          Về bảng điều khiển
-        </Link>
-      </section>
+    <main className="relative flex min-h-dvh items-center overflow-hidden bg-canvas py-12 sm:py-16">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 overflow-hidden"
+      >
+        <div className="absolute -top-40 right-[-10rem] h-96 w-96 rounded-full bg-brand-100 opacity-70 blur-3xl dark:opacity-10" />
+        <div className="absolute -bottom-52 left-[-8rem] h-96 w-96 rounded-full border border-brand-200 opacity-70 dark:opacity-20" />
+      </div>
+      <PageContainer className="relative">
+        <Card className="mx-auto max-w-xl p-6 text-center sm:p-10">
+          <p className="text-sm font-semibold text-danger-text">HTTP 403</p>
+          <h1 className="mt-3 text-3xl font-semibold text-ink">
+            Không có quyền truy cập
+          </h1>
+          <p className="mt-3 leading-7 text-muted">
+            Tài khoản hiện tại không được phép mở tài nguyên này.
+          </p>
+          <Link
+            className="mt-6 inline-flex min-h-11 items-center justify-center rounded-control bg-brand-600 px-5 py-2.5 font-semibold text-white shadow-control transition-colors hover:bg-brand-700"
+            href="/dashboard"
+          >
+            Về bảng điều khiển
+          </Link>
+        </Card>
+      </PageContainer>
     </main>
   );
 }
