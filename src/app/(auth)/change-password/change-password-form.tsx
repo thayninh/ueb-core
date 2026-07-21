@@ -6,6 +6,10 @@ import {
   changeRequiredPasswordAction,
   type ChangePasswordActionState,
 } from "@/app/actions/auth";
+import { Alert } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { FormField } from "@/components/ui/form-field";
+import { Input } from "@/components/ui/input";
 
 const initialState: ChangePasswordActionState = { error: null };
 
@@ -34,22 +38,14 @@ export function ChangePasswordForm() {
       />
 
       {state.error ? (
-        <p
-          aria-live="polite"
-          className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300"
-          role="alert"
-        >
+        <Alert aria-live="polite" role="alert" variant="danger">
           {state.error}
-        </p>
+        </Alert>
       ) : null}
 
-      <button
-        className="flex w-full items-center justify-center rounded-xl bg-blue-700 px-4 py-3 font-medium text-white transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-60"
-        disabled={pending}
-        type="submit"
-      >
+      <Button className="w-full" loading={pending} type="submit">
         {pending ? "Đang đổi mật khẩu…" : "Đổi mật khẩu"}
-      </button>
+      </Button>
     </form>
   );
 }
@@ -64,17 +60,16 @@ function PasswordField({
   autoComplete: string;
 }>) {
   return (
-    <label className="block text-sm font-medium text-zinc-800 dark:text-zinc-200">
-      {label}
-      <input
+    <FormField htmlFor={name} label={label}>
+      <Input
         autoComplete={autoComplete}
-        className="mt-2 block w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-zinc-950 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
+        id={name}
         maxLength={128}
         minLength={12}
         name={name}
         required
         type="password"
       />
-    </label>
+    </FormField>
   );
 }

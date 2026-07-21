@@ -3,6 +3,10 @@
 import { useActionState } from "react";
 
 import { signInAction } from "@/app/actions/auth";
+import { Alert } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { FormField } from "@/components/ui/form-field";
+import { Input } from "@/components/ui/input";
 import type { SignInActionState } from "@/lib/auth/sign-in-policy";
 
 const initialState: SignInActionState = { error: null };
@@ -15,59 +19,37 @@ export function SignInForm() {
 
   return (
     <form action={formAction} className="mt-8 space-y-5">
-      <div>
-        <label
-          className="block text-sm font-medium text-zinc-800 dark:text-zinc-200"
-          htmlFor="email"
-        >
-          Email
-        </label>
-        <input
+      <FormField htmlFor="email" label="Email">
+        <Input
           autoComplete="email"
-          className="mt-2 block w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-zinc-950 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
           id="email"
           inputMode="email"
           name="email"
           required
           type="email"
         />
-      </div>
+      </FormField>
 
-      <div>
-        <label
-          className="block text-sm font-medium text-zinc-800 dark:text-zinc-200"
-          htmlFor="password"
-        >
-          Mật khẩu
-        </label>
-        <input
+      <FormField htmlFor="password" label="Mật khẩu">
+        <Input
           autoComplete="current-password"
-          className="mt-2 block w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-zinc-950 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
           id="password"
           maxLength={128}
           name="password"
           required
           type="password"
         />
-      </div>
+      </FormField>
 
       {state.error ? (
-        <p
-          aria-live="polite"
-          className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300"
-          role="alert"
-        >
+        <Alert aria-live="polite" role="alert" variant="danger">
           {state.error}
-        </p>
+        </Alert>
       ) : null}
 
-      <button
-        className="flex w-full items-center justify-center rounded-xl bg-blue-700 px-4 py-3 font-medium text-white transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-60"
-        disabled={pending}
-        type="submit"
-      >
+      <Button className="w-full" loading={pending} type="submit">
         {pending ? "Đang đăng nhập…" : "Đăng nhập"}
-      </button>
+      </Button>
     </form>
   );
 }

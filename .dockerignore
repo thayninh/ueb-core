@@ -14,7 +14,10 @@ test-results
 *.xls
 
 docs
-data
+data/*
+!data/input/
+data/input/*
+!data/input/logo.png
 infra/audit
 infra/backup
 
