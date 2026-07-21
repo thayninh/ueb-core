@@ -1,6 +1,7 @@
 # Dữ liệu cá nhân và dữ liệu đầu vào
 data/input/*
 !data/input/.gitkeep
+!data/input/logo.png
 *.xlsx
 *.xls
 *.csv

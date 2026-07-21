@@ -1,26 +1,147 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light;
+
+  --ueb-brand-50: #fff1f3;
+  --ueb-brand-100: #ffe4e8;
+  --ueb-brand-200: #fecdd5;
+  --ueb-brand-500: #c71836;
+  --ueb-brand-600: #b0102b;
+  --ueb-brand-700: #960d25;
+  --ueb-brand-800: #7f1024;
+  --ueb-brand-900: #65101f;
+  --ueb-brand-950: #3d0710;
+
+  --ueb-canvas: #f6f7f9;
+  --ueb-surface: #ffffff;
+  --ueb-surface-subtle: #f1f3f5;
+  --ueb-text: #18181b;
+  --ueb-text-muted: #52525b;
+  --ueb-border: #d4d4d8;
+  --ueb-border-strong: #a1a1aa;
+
+  --ueb-success-surface: #ecfdf5;
+  --ueb-success-text: #047857;
+  --ueb-warning-surface: #fffbeb;
+  --ueb-warning-text: #92400e;
+  --ueb-danger-surface: #fef2f2;
+  --ueb-danger-text: #b91c1c;
+  --ueb-info-surface: #eff6ff;
+  --ueb-info-text: #1d4ed8;
+
+  --ueb-focus-ring: #2563eb;
+  --ueb-shadow-card: 0 16px 40px rgb(24 24 27 / 0.1);
+  --ueb-shadow-control: 0 1px 2px rgb(24 24 27 / 0.06);
+  --ueb-radius-control: 0.75rem;
+  --ueb-radius-card: 1rem;
+  --ueb-radius-panel: 1.5rem;
+  --ueb-container-content: 72rem;
+  --ueb-container-auth: 64rem;
+
+  --background: var(--ueb-canvas);
+  --foreground: var(--ueb-text);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: Arial, Helvetica, sans-serif;
+  --color-canvas: var(--ueb-canvas);
+  --color-surface: var(--ueb-surface);
+  --color-surface-subtle: var(--ueb-surface-subtle);
+  --color-ink: var(--ueb-text);
+  --color-muted: var(--ueb-text-muted);
+  --color-border: var(--ueb-border);
+  --color-border-strong: var(--ueb-border-strong);
+  --color-brand-50: var(--ueb-brand-50);
+  --color-brand-100: var(--ueb-brand-100);
+  --color-brand-200: var(--ueb-brand-200);
+  --color-brand-500: var(--ueb-brand-500);
+  --color-brand-600: var(--ueb-brand-600);
+  --color-brand-700: var(--ueb-brand-700);
+  --color-brand-800: var(--ueb-brand-800);
+  --color-brand-900: var(--ueb-brand-900);
+  --color-brand-950: var(--ueb-brand-950);
+  --color-success-surface: var(--ueb-success-surface);
+  --color-success-text: var(--ueb-success-text);
+  --color-warning-surface: var(--ueb-warning-surface);
+  --color-warning-text: var(--ueb-warning-text);
+  --color-danger-surface: var(--ueb-danger-surface);
+  --color-danger-text: var(--ueb-danger-text);
+  --color-info-surface: var(--ueb-info-surface);
+  --color-info-text: var(--ueb-info-text);
+  --color-focus: var(--ueb-focus-ring);
+  --font-sans:
+    ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial,
+    sans-serif;
   --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  --radius-control: var(--ueb-radius-control);
+  --radius-card: var(--ueb-radius-card);
+  --radius-panel: var(--ueb-radius-panel);
+  --shadow-card: var(--ueb-shadow-card);
+  --shadow-control: var(--ueb-shadow-control);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    color-scheme: dark;
+
+    --ueb-canvas: #09090b;
+    --ueb-surface: #18181b;
+    --ueb-surface-subtle: #27272a;
+    --ueb-text: #fafafa;
+    --ueb-text-muted: #d4d4d8;
+    --ueb-border: #3f3f46;
+    --ueb-border-strong: #71717a;
+    --ueb-success-surface: #052e24;
+    --ueb-success-text: #6ee7b7;
+    --ueb-warning-surface: #451a03;
+    --ueb-warning-text: #fcd34d;
+    --ueb-danger-surface: #450a0a;
+    --ueb-danger-text: #fca5a5;
+    --ueb-info-surface: #172554;
+    --ueb-info-text: #93c5fd;
+    --ueb-focus-ring: #60a5fa;
+    --ueb-shadow-card: 0 18px 48px rgb(0 0 0 / 0.35);
   }
+}
+
+*,
+::before,
+::after {
+  box-sizing: border-box;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family:
+    ui-sans-serif,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Arial,
+    sans-serif;
+  overflow-wrap: anywhere;
+}
+
+:where(a, button, input, select, textarea, summary):focus-visible {
+  outline: 2px solid var(--ueb-focus-ring);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--ueb-brand-200);
+  color: var(--ueb-brand-950);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }
