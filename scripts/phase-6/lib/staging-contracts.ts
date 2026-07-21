@@ -15,7 +15,9 @@ export const STAGING_PROXY_NETWORK = "ueb-core-proxy";
 export const STAGING_CADDY_CONTAINER = "khtc-ueb-prod-caddy-1";
 export const STAGING_BACKUP_DIRECTORY = "/var/backups/ueb-core/staging";
 export const STAGING_TIMEZONE = "Asia/Ho_Chi_Minh";
-export const STAGING_MIGRATION_COUNT = 7;
+export const STAGING_DOMAIN = "ueb-core-staging.cargis.vn";
+export const STAGING_URL = `https://${STAGING_DOMAIN}`;
+export const PRODUCTION_DOMAIN = "ueb-core.cargis.vn";
 
 const SAFE_SUFFIX = /^[a-z0-9][a-z0-9_]{0,23}$/u;
 const IDENTIFIER = /^[a-z_][a-z0-9_]{0,62}$/u;
@@ -34,6 +36,17 @@ const FORBIDDEN_DATABASES = new Set([
 ]);
 
 export class SafePhase6StagingError extends Error {}
+
+export function assertStagingUrl(
+  value: string | undefined,
+): typeof STAGING_URL {
+  if (value !== STAGING_URL || value.includes(PRODUCTION_DOMAIN)) {
+    throw new SafePhase6StagingError(
+      "Staging URL must target the exact approved staging domain.",
+    );
+  }
+  return STAGING_URL;
+}
 
 export interface StagingConnectionContract {
   readonly url: string;

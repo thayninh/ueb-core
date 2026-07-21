@@ -13,6 +13,38 @@ import {
 } from "../../scripts/phase-6/lib/staging-deployment";
 
 const temporaryDirectories: string[] = [];
+const currentReleaseSha = "b".repeat(40);
+const previousReleaseSha = "c".repeat(40);
+const sourceLedger = {
+  version: 1 as const,
+  count: 2,
+  fingerprint: "d".repeat(64),
+  migrations: [
+    { name: "20260101000000_one", checksum: "e".repeat(64) },
+    { name: "20260102000000_two", checksum: "f".repeat(64) },
+  ],
+};
+
+function validRollbackMetadata(overrides: Record<string, unknown> = {}) {
+  return {
+    imageId: `sha256:${"a".repeat(64)}`,
+    architecture: "linux/amd64",
+    composeService: "app",
+    releaseSha: currentReleaseSha,
+    previousReleaseSha,
+    currentImage: `ueb-core:${currentReleaseSha}`,
+    previousImage: `ueb-core:${previousReleaseSha}`,
+    sourceMigrationCount: sourceLedger.count,
+    migrationLedgerFingerprint: sourceLedger.fingerprint,
+    databaseMigrationStatus: "COMPATIBLE",
+    schemaCompatibilityDecision: "APPROVED",
+    backupIdentifier: "staging-predeploy-20260722",
+    backupChecksum: "1".repeat(64),
+    timestamp: "2026-07-22T10:00:00+07:00",
+    operatorIdentityReference: "phase9-staging-operator",
+    ...overrides,
+  };
+}
 
 afterEach(async () => {
   await Promise.all(
@@ -57,14 +89,13 @@ describe("Phase 6 rollback compatibility", () => {
   it("blocks incompatible architecture, service, schema, or migration metadata", async () => {
     const metadata = await temporaryFile(
       "rollback.json",
-      JSON.stringify({
-        imageId: `sha256:${"a".repeat(64)}`,
-        imageTag: `ueb-core:${"b".repeat(40)}`,
-        architecture: "linux/arm64",
-        composeService: "worker",
-        migrationCount: 6,
-        schemaCompatible: false,
-      }),
+      JSON.stringify(
+        validRollbackMetadata({
+          architecture: "linux/arm64",
+          composeService: "worker",
+          schemaCompatibilityDecision: "REJECTED",
+        }),
+      ),
     );
     const command = parseRollbackCommand([
       `--previous-image-metadata=${metadata}`,
@@ -74,6 +105,8 @@ describe("Phase 6 rollback compatibility", () => {
       verifyRollbackImage({
         command,
         environment: {},
+        sourceLedger,
+        currentReleaseSha,
         inspectImage: async () => ({
           imageId: `sha256:${"a".repeat(64)}`,
           architecture: "linux/amd64",
@@ -85,14 +118,7 @@ describe("Phase 6 rollback compatibility", () => {
   it("accepts compatible immutable previous-image metadata", async () => {
     const metadata = await temporaryFile(
       "rollback.json",
-      JSON.stringify({
-        imageId: `sha256:${"a".repeat(64)}`,
-        imageTag: `ueb-core:${"b".repeat(40)}`,
-        architecture: "linux/amd64",
-        composeService: "app",
-        migrationCount: 7,
-        schemaCompatible: true,
-      }),
+      JSON.stringify(validRollbackMetadata()),
     );
     const command = parseRollbackCommand([
       `--previous-image-metadata=${metadata}`,
@@ -102,6 +128,8 @@ describe("Phase 6 rollback compatibility", () => {
       verifyRollbackImage({
         command,
         environment: {},
+        sourceLedger,
+        currentReleaseSha,
         inspectImage: async () => ({
           imageId: `sha256:${"a".repeat(64)}`,
           architecture: "linux/amd64",
@@ -110,9 +138,48 @@ describe("Phase 6 rollback compatibility", () => {
     ).resolves.toMatchObject({
       mode: "PREVIOUS_IMAGE",
       architecture: "linux/amd64",
-      migrationCount: 7,
+      migrationCount: sourceLedger.count,
+      migrationLedgerFingerprint: sourceLedger.fingerprint,
+      previousReleaseSha,
       rollbackVerify: "PASS",
     });
+  });
+
+  it("does not depend on a fixed migration count", async () => {
+    const expandedLedger = {
+      ...sourceLedger,
+      count: 3,
+      fingerprint: "2".repeat(64),
+      migrations: [
+        ...sourceLedger.migrations,
+        { name: "20260103000000_three", checksum: "3".repeat(64) },
+      ],
+    };
+    const metadata = await temporaryFile(
+      "rollback.json",
+      JSON.stringify(
+        validRollbackMetadata({
+          sourceMigrationCount: expandedLedger.count,
+          migrationLedgerFingerprint: expandedLedger.fingerprint,
+        }),
+      ),
+    );
+    const command = parseRollbackCommand([
+      `--previous-image-metadata=${metadata}`,
+      "--expected-architecture=linux/amd64",
+    ]);
+    await expect(
+      verifyRollbackImage({
+        command,
+        environment: {},
+        sourceLedger: expandedLedger,
+        currentReleaseSha,
+        inspectImage: async () => ({
+          imageId: `sha256:${"a".repeat(64)}`,
+          architecture: "linux/amd64",
+        }),
+      }),
+    ).resolves.toMatchObject({ migrationCount: 3 });
   });
 
   it("requires explicit approval for first-deployment stack removal", async () => {

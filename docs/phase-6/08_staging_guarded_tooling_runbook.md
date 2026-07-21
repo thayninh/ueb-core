@@ -65,8 +65,9 @@ thay cho `DATABASE_URL`.
 
 ## 3. Local immutable artifact and rollback preflight
 
-Run from clean branch `feat/phase-6-staging-rollout-validation`. Paths below must
-be absolute and outside the repository.
+Run from a clean working tree at the explicitly approved release SHA. The guard
+does not depend on a branch name; paths below must be absolute and outside the
+repository.
 
 ```bash
 pnpm phase6:verify-rollback-image -- \
@@ -93,6 +94,12 @@ pnpm phase6:staging-deployment-preflight -- \
   --rollback-evidence="$ROLLBACK_EVIDENCE_PATH" \
   --confirm-authorized-staging-deployment
 ```
+
+Rollback metadata follows the dynamic contract in
+`docs/phase-9/00_staging_release_and_uat_contract.md`; it records both release
+SHAs, immutable images, source ledger count/fingerprint, read-only database
+migration status, explicit schema-compatibility decision, verified backup
+identifier/checksum, timestamp and operator identity reference.
 
 Nếu đây là first deployment, thay command rollback đầu tiên bằng command dưới
 đây, sau khi external change record phê duyệt giữ nguyên database/backup khi
@@ -138,7 +145,9 @@ Chỉ dùng branch này khi exact target chưa tồn tại.
 `STAGING_BOOTSTRAP_DATABASE_URL` dùng approved bootstrap identity;
 `MIGRATION_DATABASE_URL` luôn là dedicated owner. Bootstrap từ chối
 superuser/existing target, tạo exact owner/database rồi chạy `prisma migrate
-deploy` và require 7 applied migrations.
+deploy`. Verification requires the database ledger to match the ordered names
+and checksums calculated from the approved source migration directories; no
+fixed count is trusted.
 
 PostgreSQL 18 yêu cầu identity chạy `CREATE DATABASE ... OWNER <role-khác>` có
 khả năng `SET ROLE` sang owner. Guarded bootstrap vì vậy reconcile mọi grant

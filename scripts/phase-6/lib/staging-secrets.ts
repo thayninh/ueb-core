@@ -20,18 +20,20 @@ import {
 import {
   assertMonitoringEmail,
   assertRoleSeparation,
+  assertStagingUrl,
   SafePhase6StagingError,
   STAGING_DATABASE,
   STAGING_DATABASE_HOST,
   STAGING_OWNER_ROLE,
   STAGING_PROVISIONING_ROLE,
   STAGING_RUNTIME_ROLE,
+  STAGING_URL,
   STAGING_VPS_HOST,
 } from "./staging-contracts";
 
 export const STAGING_BOOTSTRAP_ROLE = "ueb_core_staging_bootstrap";
 export const STAGING_CLUSTER_ADMIN_ROLE = "ueb_core_staging_cluster_admin";
-export const STAGING_PUBLIC_URL = "https://ueb-core.cargis.vn";
+export const STAGING_PUBLIC_URL = STAGING_URL;
 export const STAGING_SECRET_FILE_NAMES = [
   "postgres-bootstrap.env",
   "database-owner.env",
@@ -254,11 +256,11 @@ export async function validateStagingSecrets(input: {
 }
 
 function assertGeneratorContract(input: GenerateStagingSecretsInput): void {
+  assertStagingUrl(input.publicUrl);
   if (
     input.databaseHost !== STAGING_DATABASE_HOST ||
     input.databasePort !== "5432" ||
-    input.databaseName !== STAGING_DATABASE ||
-    input.publicUrl !== STAGING_PUBLIC_URL
+    input.databaseName !== STAGING_DATABASE
   ) {
     throw new SafePhase6StagingError(
       "Staging secret generation target does not match the approved contract.",

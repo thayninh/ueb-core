@@ -57,10 +57,10 @@ docker compose \
   ps
 
 curl --fail --silent --show-error \
-  https://ueb-core.cargis.vn/api/health >/dev/null
+  https://ueb-core-staging.cargis.vn/api/health >/dev/null
 
 curl --fail --silent --show-error \
-  https://ueb-core.cargis.vn/api/ready >/dev/null
+  https://ueb-core-staging.cargis.vn/api/ready >/dev/null
 ```
 
 Do not render Compose configuration or inspect container environment into a

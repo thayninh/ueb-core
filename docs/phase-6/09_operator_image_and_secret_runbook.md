@@ -21,7 +21,7 @@ pnpm phase6:generate-staging-secrets -- \
   --database-host=db \
   --database-port=5432 \
   --database-name=ueb_core_staging \
-  --public-url=https://ueb-core.cargis.vn \
+  --public-url=https://ueb-core-staging.cargis.vn \
   --confirm-generate-staging-secrets
 ```
 
@@ -48,12 +48,21 @@ docker build --platform linux/amd64 --target runner --tag "$UEB_CORE_IMAGE" .
 
 ```bash
 export UEB_CORE_OPERATOR_IMAGE="ueb-core-operator:${GIT_SHA}"
+MIGRATION_LEDGER_JSON="$(pnpm --silent phase6:migration-ledger)"
+MIGRATION_COUNT="$(node -e 'const value=JSON.parse(process.argv[1]);process.stdout.write(String(value.count))' "$MIGRATION_LEDGER_JSON")"
+MIGRATION_LEDGER_FINGERPRINT="$(node -e 'const value=JSON.parse(process.argv[1]);process.stdout.write(value.fingerprint)' "$MIGRATION_LEDGER_JSON")"
 docker build --platform linux/amd64 --file Dockerfile.operator \
+  --build-arg "UEB_CORE_SOURCE_GIT_SHA=${GIT_SHA}" \
+  --build-arg "UEB_CORE_MIGRATION_COUNT=${MIGRATION_COUNT}" \
+  --build-arg "UEB_CORE_MIGRATION_LEDGER_FINGERPRINT=${MIGRATION_LEDGER_FINGERPRINT}" \
   --tag "$UEB_CORE_OPERATOR_IMAGE" .
+
+test "$(docker image inspect "$UEB_CORE_OPERATOR_IMAGE" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$GIT_SHA"
+test "$(docker image inspect "$UEB_CORE_OPERATOR_IMAGE" --format '{{index .Config.Labels "io.ueb-core.migration-ledger-fingerprint"}}')" = "$MIGRATION_LEDGER_FINGERPRINT"
 ```
 
 Operator image contains Node 24, package-manager-pinned pnpm, `tsx`, Prisma
-CLI/client, schema, exactly 7 migrations, Phase 6 scripts, PostgreSQL 18 client
+CLI/client, schema, the dynamically fingerprinted source migration ledger, Phase 6 scripts, PostgreSQL 18 client
 and CA certificates. It runs as `operator`, exposes no port and has no app
 runtime entrypoint.
 
@@ -182,5 +191,5 @@ acceptance phải chạy PostgreSQL 18 regression và local guarded cleanup evid
 
 Stop on any Git/image/checksum mismatch, secret validation failure, UAT
 reference, role collision, unexpected existing target, non-private database
-endpoint, migration count other than 7, ACL/RLS failure or production service
+endpoint, source/image/database migration-ledger mismatch, ACL/RLS failure or production service
 health failure. Secret is never baked into either image and is never printed.

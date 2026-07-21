@@ -22,13 +22,13 @@ import {
 } from "./lib/staging-database";
 import {
   SafePhase6StagingError,
-  STAGING_MIGRATION_COUNT,
   STAGING_OWNER_ROLE,
   STAGING_PROVISIONING_ROLE,
   STAGING_RUNTIME_ROLE,
   STAGING_VPS_HOST,
   withDatabaseName,
 } from "./lib/staging-contracts";
+import { readSourceMigrationLedger } from "./lib/migration-ledger";
 
 const execFileAsync = promisify(execFile);
 
@@ -58,6 +58,7 @@ async function main(): Promise<void> {
   let executionPassed = false;
   let cleanupPassed = false;
   let guardedRestoreCleanupPassed = false;
+  const sourceMigrationLedger = await readSourceMigrationLedger();
   try {
     stage = "CONNECT_ADMIN";
     await maintenance.connect();
@@ -153,7 +154,8 @@ async function main(): Promise<void> {
       !bootstrap.bootstrapCanSetOwnerRoleBeforeCreate ||
       !bootstrap.temporaryMembershipRevoked ||
       bootstrap.bootstrapCanSetOwnerRoleAfter ||
-      bootstrap.migrationCount !== STAGING_MIGRATION_COUNT
+      bootstrap.migrationCount !== sourceMigrationLedger.count ||
+      bootstrap.migrationLedgerFingerprint !== sourceMigrationLedger.fingerprint
     ) {
       throw new SafePhase6StagingError(
         "Local PostgreSQL 18 ownership bootstrap evidence is invalid.",
@@ -183,7 +185,9 @@ async function main(): Promise<void> {
       allowTest: true,
     });
     if (
-      sourceFingerprintBefore.migrationCount !== STAGING_MIGRATION_COUNT ||
+      sourceFingerprintBefore.migrationCount !== sourceMigrationLedger.count ||
+      sourceFingerprintBefore.migrationLedgerFingerprint !==
+        sourceMigrationLedger.fingerprint ||
       sourceFingerprintBefore.failedMigrationCount !== 0
     ) {
       throw new SafePhase6StagingError(
@@ -335,7 +339,10 @@ async function main(): Promise<void> {
     console.log("BOOTSTRAP_CAN_SET_OWNER_ROLE=YES");
     console.log("BOOTSTRAP_OWNER_MEMBERSHIP_RETAINED=NO");
     console.log("BOOTSTRAP_CAN_SET_OWNER_ROLE_AFTER=NO");
-    console.log(`MIGRATION_COUNT=${STAGING_MIGRATION_COUNT}`);
+    console.log(`MIGRATION_COUNT=${sourceMigrationLedger.count}`);
+    console.log(
+      `MIGRATION_LEDGER_FINGERPRINT=${sourceMigrationLedger.fingerprint}`,
+    );
     console.log("ROLE_ACL_RLS=PASS");
     console.log("FINGERPRINT=PASS");
     console.log("BACKUP_RESTORE=PASS");

@@ -7,6 +7,7 @@ import {
   assertImageTag,
   assertMonitoringEmail,
   assertRoleSeparation,
+  assertStagingUrl,
   parseChangeWindow,
   parseClearStaleRestoreLockCommand,
   parseCleanupRestoreCommand,
@@ -17,6 +18,7 @@ import {
   STAGING_OWNER_ROLE,
   STAGING_PROVISIONING_ROLE,
   STAGING_RUNTIME_ROLE,
+  STAGING_URL,
 } from "../../scripts/phase-6/lib/staging-contracts";
 
 const productionEnvironment = {
@@ -282,5 +284,12 @@ describe("Phase 6 operator approval contracts", () => {
     expect(() => assertImageTag(`ueb-core:${"b".repeat(40)}`, sha)).toThrow();
     expect(() => assertImageTag("ueb-core:a", "a")).toThrow();
     expect(() => assertImageTag(`ueb-core:${sha}`, sha)).not.toThrow();
+  });
+
+  it("accepts only the staging domain and rejects the production domain", () => {
+    expect(assertStagingUrl(STAGING_URL)).toBe(STAGING_URL);
+    expect(() => assertStagingUrl("https://ueb-core.cargis.vn")).toThrow(
+      /staging domain/u,
+    );
   });
 });

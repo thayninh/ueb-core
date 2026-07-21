@@ -19,10 +19,12 @@ import {
   withTemporaryOwnerSetRole,
 } from "../../scripts/phase-6/lib/staging-database";
 import {
-  STAGING_MIGRATION_COUNT,
   STAGING_OWNER_ROLE,
   withDatabaseName,
 } from "../../scripts/phase-6/lib/staging-contracts";
+import { readSourceMigrationLedger } from "../../scripts/phase-6/lib/migration-ledger";
+
+const SOURCE_MIGRATION_LEDGER = await readSourceMigrationLedger();
 
 const DATABASE = "ueb_core_staging_test_ownership_18";
 const WRONG_OWNER_DATABASE = "ueb_core_staging_test_wrong_owner_18";
@@ -129,7 +131,8 @@ isolatedDescribe("PostgreSQL 18 staging database ownership", () => {
       allowTest: true,
     });
     expect(report).toEqual({
-      migrationCount: STAGING_MIGRATION_COUNT,
+      migrationCount: SOURCE_MIGRATION_LEDGER.count,
+      migrationLedgerFingerprint: SOURCE_MIGRATION_LEDGER.fingerprint,
       databaseOwner: STAGING_OWNER_ROLE,
       bootstrapCanSetOwnerRoleBeforeCreate: true,
       temporaryMembershipRevoked: true,

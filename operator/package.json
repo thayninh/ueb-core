@@ -26,6 +26,7 @@
     "phase6:generate-staging-secrets": "tsx scripts/phase-6/staging-secrets.ts generate",
     "phase6:validate-staging-secrets": "tsx scripts/phase-6/staging-secrets.ts validate",
     "phase6:operator-local-execution-test": "tsx scripts/phase-6/operator-local-execution-test.ts",
+    "phase6:migration-ledger": "tsx scripts/phase-6/migration-ledger.ts --json",
     "phase7:preflight-production-target": "tsx scripts/phase-7/production-target.ts preflight",
     "phase7:bootstrap-production-target": "tsx scripts/phase-7/production-target.ts bootstrap",
     "phase7:verify-production-target": "tsx scripts/phase-7/production-target.ts verify",

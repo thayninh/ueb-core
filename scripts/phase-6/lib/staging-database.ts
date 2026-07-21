@@ -16,12 +16,15 @@ import {
   readStagingRoleEnvironment,
   SafePhase6StagingError,
   STAGING_DATABASE,
-  STAGING_MIGRATION_COUNT,
   STAGING_OWNER_ROLE,
   STAGING_PROVISIONING_ROLE,
   STAGING_RUNTIME_ROLE,
   withDatabaseName,
 } from "./staging-contracts";
+import {
+  assertDatabaseMigrationRows,
+  readSourceMigrationLedger,
+} from "./migration-ledger";
 import { withTemporaryOwnerSetRole } from "./temporary-owner-set-role";
 
 export { withTemporaryOwnerSetRole } from "./temporary-owner-set-role";
@@ -88,6 +91,7 @@ export interface StagingFingerprint {
   readonly database: string;
   readonly migrationCount: number;
   readonly failedMigrationCount: number;
+  readonly migrationLedgerFingerprint: string;
   readonly coreCount: number;
   readonly workflowCount: number;
   readonly importRunCount: number;
@@ -103,6 +107,7 @@ export interface StagingFingerprint {
 
 export interface DatabaseBootstrapReport {
   readonly migrationCount: number;
+  readonly migrationLedgerFingerprint: string;
   readonly databaseOwner: typeof STAGING_OWNER_ROLE;
   readonly bootstrapCanSetOwnerRoleBeforeCreate: true;
   readonly temporaryMembershipRevoked: true;
@@ -205,9 +210,10 @@ export async function bootstrapStagingDatabase(input: {
   });
   const ownerUrl = configuredOwner.url;
   await runPrismaMigrateDeploy(ownerUrl);
-  const migrationCount = await verifyMigrationState(ownerUrl);
+  const migrationLedger = await verifyMigrationState(ownerUrl);
   return {
-    migrationCount,
+    migrationCount: migrationLedger.count,
+    migrationLedgerFingerprint: migrationLedger.fingerprint,
     databaseOwner: STAGING_OWNER_ROLE,
     bootstrapCanSetOwnerRoleBeforeCreate: true,
     temporaryMembershipRevoked: true,
@@ -586,10 +592,20 @@ export async function fingerprintStaging(input: {
     const roleMap = new Map(
       roles.rows.map((role) => [role.rolname, role.flags]),
     );
+    const migrationRows = await client.query<{
+      migration_name: string;
+      checksum: string;
+      finished_at: Date | null;
+      rolled_back_at: Date | null;
+    }>(`SELECT migration_name, checksum, finished_at, rolled_back_at
+       FROM public._prisma_migrations ORDER BY migration_name`);
+    const migrationLedger = await readSourceMigrationLedger();
+    assertDatabaseMigrationRows(migrationLedger, migrationRows.rows);
     const material = {
       database: connection.database,
       migrationCount: row.migration_count,
       failedMigrationCount: row.failed_migration_count,
+      migrationLedgerFingerprint: migrationLedger.fingerprint,
       coreCount: row.core_count,
       workflowCount: row.workflow_count,
       importRunCount: row.import_run_count,
@@ -864,25 +880,28 @@ async function runPrismaMigrateDeploy(ownerUrl: string): Promise<void> {
   }
 }
 
-async function verifyMigrationState(ownerUrl: string): Promise<number> {
+async function verifyMigrationState(ownerUrl: string): Promise<{
+  readonly count: number;
+  readonly fingerprint: string;
+}> {
   const client = new Client({
     connectionString: ownerUrl,
     application_name: "ueb-core-phase6-migration-verify",
   });
   try {
     await client.connect();
-    const row = (
-      await client.query<{ applied: number; failed: number }>(`SELECT
-        count(*) FILTER (WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL)::integer AS applied,
-        count(*) FILTER (WHERE finished_at IS NULL AND rolled_back_at IS NULL)::integer AS failed
-        FROM public._prisma_migrations`)
-    ).rows[0];
-    if (row?.applied !== STAGING_MIGRATION_COUNT || row.failed !== 0) {
-      throw new SafePhase6StagingError(
-        "Migration verification requires exactly 7 applied and 0 failed migrations.",
-      );
-    }
-    return row.applied;
+    const rows = (
+      await client.query<{
+        migration_name: string;
+        checksum: string;
+        finished_at: Date | null;
+        rolled_back_at: Date | null;
+      }>(`SELECT migration_name, checksum, finished_at, rolled_back_at
+          FROM public._prisma_migrations ORDER BY migration_name`)
+    ).rows;
+    const ledger = await readSourceMigrationLedger();
+    assertDatabaseMigrationRows(ledger, rows);
+    return { count: ledger.count, fingerprint: ledger.fingerprint };
   } finally {
     await client.end().catch(() => undefined);
   }
