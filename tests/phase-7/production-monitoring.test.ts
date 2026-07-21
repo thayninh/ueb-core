@@ -1,7 +1,15 @@
 // @vitest-environment node
 
 import { execFileSync } from "node:child_process";
-import { chmod, mkdir, symlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  readFile,
+  readdir,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -141,5 +149,108 @@ describe("Phase 7 production monitoring contract", () => {
         readFile(script, "utf8"),
       ),
     ).not.toMatch(/DATABASE_URL|PASSWORD=|TOKEN=|COOKIE=/u);
+  });
+
+  it("atomically records successful cron evidence with mode 0600", async () => {
+    const directory = await temporaryDirectory("cron-success");
+    const started = "2026-07-21T13:15:00+07:00";
+    const finished = "2026-07-21T13:15:04+07:00";
+    bash(
+      `cron_started_at='${started}'; cron_finished_at='${finished}'; backup_freshness_status=PASS; production_health_status=PASS; staging_health_status=PASS; caddy_health_status=PASS; disk_evidence_status=WARNING; duplicate_alert_guard_status=PASS; secret_leakage_count=0; write_cron_status 0`,
+      { MONITOR_EVIDENCE_DIRECTORY: directory },
+    );
+    const evidencePath = join(directory, "cron-status.json");
+    const evidence = JSON.parse(await readFile(evidencePath, "utf8"));
+    expect(evidence).toMatchObject({
+      environment: "production",
+      started_at: started,
+      finished_at: finished,
+      exit_code: 0,
+      backup_freshness_status: "PASS",
+      production_health_status: "PASS",
+      staging_health_status: "PASS",
+      caddy_health_status: "PASS",
+      disk_status: "WARNING",
+      duplicate_alert_guard_status: "PASS",
+      secret_leakage_count: 0,
+    });
+    expect((await stat(evidencePath)).mode & 0o777).toBe(0o600);
+    expect(
+      (await readdir(directory)).filter((name) =>
+        name.startsWith(".cron-status.json."),
+      ),
+    ).toEqual([]);
+  });
+
+  it("records failed cron evidence with a non-zero exit code", async () => {
+    const directory = await temporaryDirectory("cron-failure");
+    bash(
+      "cron_started_at='2026-07-21T13:20:00+07:00'; cron_finished_at='2026-07-21T13:20:03+07:00'; write_cron_status 2",
+      { MONITOR_EVIDENCE_DIRECTORY: directory },
+    );
+    const evidence = JSON.parse(
+      await readFile(join(directory, "cron-status.json"), "utf8"),
+    );
+    expect(evidence.exit_code).toBe(2);
+    expect(evidence.backup_freshness_status).toBe("FAIL");
+  });
+
+  it("replaces evidence atomically with increasing run timestamps", async () => {
+    const directory = await temporaryDirectory("cron-replace");
+    const environment = { MONITOR_EVIDENCE_DIRECTORY: directory };
+    bash(
+      "cron_started_at='2026-07-21T13:25:00+07:00'; cron_finished_at='2026-07-21T13:25:02+07:00'; write_cron_status 1",
+      environment,
+    );
+    bash(
+      "cron_started_at='2026-07-21T13:30:00+07:00'; cron_finished_at='2026-07-21T13:30:02+07:00'; backup_freshness_status=PASS; production_health_status=PASS; staging_health_status=PASS; caddy_health_status=PASS; disk_evidence_status=PASS; duplicate_alert_guard_status=PASS; write_cron_status 0",
+      environment,
+    );
+    const evidence = JSON.parse(
+      await readFile(join(directory, "cron-status.json"), "utf8"),
+    );
+    expect(Date.parse(evidence.started_at)).toBeGreaterThan(
+      Date.parse("2026-07-21T13:25:00+07:00"),
+    );
+    expect(evidence.exit_code).toBe(0);
+  });
+
+  it("rejects malformed, stale and secret-bearing cron evidence", async () => {
+    const directory = await temporaryDirectory("cron-invalid");
+    const evidencePath = join(directory, "cron-status.json");
+    await writeFile(evidencePath, "not-json\n", { mode: 0o600 });
+    expect(() =>
+      bash('validate_cron_status "$EVIDENCE" "$NOW"', {
+        EVIDENCE: evidencePath,
+        MONITOR_EVIDENCE_DIRECTORY: directory,
+        NOW: String(Math.floor(Date.now() / 1000)),
+      }),
+    ).toThrow();
+
+    bash(
+      "cron_started_at='2026-07-21T13:35:00+07:00'; cron_finished_at='2026-07-21T13:35:02+07:00'; backup_freshness_status=PASS; production_health_status=PASS; staging_health_status=PASS; caddy_health_status=PASS; disk_evidence_status=PASS; duplicate_alert_guard_status=PASS; write_cron_status 0",
+      { MONITOR_EVIDENCE_DIRECTORY: directory },
+    );
+    const finished = Math.floor(Date.parse("2026-07-21T13:35:02+07:00") / 1000);
+    expect(() =>
+      bash('validate_cron_status "$EVIDENCE" "$NOW"', {
+        EVIDENCE: evidencePath,
+        MONITOR_EVIDENCE_DIRECTORY: directory,
+        NOW: String(finished + 601),
+      }),
+    ).toThrow();
+
+    const evidence = JSON.parse(await readFile(evidencePath, "utf8"));
+    evidence.secret_leakage_count = 1;
+    await writeFile(evidencePath, `${JSON.stringify(evidence)}\n`, {
+      mode: 0o600,
+    });
+    expect(() =>
+      bash('validate_cron_status "$EVIDENCE" "$NOW"', {
+        EVIDENCE: evidencePath,
+        MONITOR_EVIDENCE_DIRECTORY: directory,
+        NOW: String(finished + 1),
+      }),
+    ).toThrow();
   });
 });

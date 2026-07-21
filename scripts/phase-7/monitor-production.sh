@@ -7,12 +7,14 @@ umask 077
 
 readonly DEFAULT_CONFIG_FILE="/opt/ueb-core/config/monitor-production.env"
 readonly STAGING_BACKUP_DIRECTORY="/var/backups/ueb-core/staging"
-readonly EVIDENCE_DIRECTORY="/opt/ueb-core/evidence/monitoring"
+readonly EVIDENCE_DIRECTORY="${MONITOR_EVIDENCE_DIRECTORY:-/opt/ueb-core/evidence/monitoring}"
 readonly MONITORING_ENV_FILE="/opt/ueb-core/secrets/monitoring.env"
 readonly LOG_FILE="${EVIDENCE_DIRECTORY}/monitor.log"
+readonly CRON_STATUS_FILE="${EVIDENCE_DIRECTORY}/cron-status.json"
 readonly ALERT_LATCH="${EVIDENCE_DIRECTORY}/email-alert-active"
 readonly EMAIL_SCRIPT="/opt/ueb-core/config/send-monitor-alert.sh"
 readonly MAX_BACKUP_AGE_SECONDS=86400
+readonly MAX_CRON_EVIDENCE_AGE_SECONDS=600
 readonly DISK_WARNING_PERCENT=70
 readonly DISK_HIGH_PERCENT=85
 readonly MIN_MEMORY_AVAILABLE_KB=262144
@@ -20,6 +22,15 @@ readonly MAX_LOG_LINES=500
 
 monitor_environment=""
 monitor_backup_directory=""
+cron_started_at=""
+cron_finished_at=""
+backup_freshness_status="FAIL"
+production_health_status="FAIL"
+staging_health_status="FAIL"
+caddy_health_status="FAIL"
+disk_evidence_status="HIGH"
+duplicate_alert_guard_status="FAIL"
+secret_leakage_count=0
 
 file_mode() {
   stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1"
@@ -31,6 +42,119 @@ file_mtime() {
 
 record() {
   printf '%s %s\n' "$(date --iso-8601=seconds)" "$1" >>"${LOG_FILE}"
+}
+
+ensure_evidence_directory() {
+  [[ "${EVIDENCE_DIRECTORY}" == /* && "${EVIDENCE_DIRECTORY}" != *$'\n'* ]] || return 1
+  [[ "/${EVIDENCE_DIRECTORY#/}" != *"/../"* && "${EVIDENCE_DIRECTORY}" != */.. && "${EVIDENCE_DIRECTORY}" != *"/./"* ]] || return 1
+  mkdir -p "${EVIDENCE_DIRECTORY}" || return 1
+  [[ -d "${EVIDENCE_DIRECTORY}" && ! -L "${EVIDENCE_DIRECTORY}" ]] || return 1
+  chmod 700 "${EVIDENCE_DIRECTORY}" || return 1
+  [[ "$(file_mode "${EVIDENCE_DIRECTORY}")" == "700" ]]
+}
+
+write_cron_status() {
+  local exit_code="$1"
+  local temporary
+
+  [[ "${exit_code}" =~ ^[0-9]+$ && "${exit_code}" -le 255 ]] || return 1
+  [[ -n "${cron_started_at}" && -n "${cron_finished_at}" ]] || return 1
+  ensure_evidence_directory || return 1
+  temporary="$(mktemp "${EVIDENCE_DIRECTORY}/.cron-status.json.XXXXXX")" || return 1
+  if ! printf '{\n  "environment": "production",\n  "started_at": "%s",\n  "finished_at": "%s",\n  "exit_code": %s,\n  "backup_freshness_status": "%s",\n  "production_health_status": "%s",\n  "staging_health_status": "%s",\n  "caddy_health_status": "%s",\n  "disk_status": "%s",\n  "duplicate_alert_guard_status": "%s",\n  "secret_leakage_count": %s\n}\n' \
+    "${cron_started_at}" \
+    "${cron_finished_at}" \
+    "${exit_code}" \
+    "${backup_freshness_status}" \
+    "${production_health_status}" \
+    "${staging_health_status}" \
+    "${caddy_health_status}" \
+    "${disk_evidence_status}" \
+    "${duplicate_alert_guard_status}" \
+    "${secret_leakage_count}" >"${temporary}"; then
+    rm -f "${temporary}"
+    return 1
+  fi
+  chmod 600 "${temporary}" || {
+    rm -f "${temporary}"
+    return 1
+  }
+  mv -f "${temporary}" "${CRON_STATUS_FILE}"
+}
+
+validate_cron_status() {
+  local evidence_file="${1:-${CRON_STATUS_FILE}}"
+  local now_seconds="${2:-$(date +%s)}"
+
+  [[ -f "${evidence_file}" && ! -L "${evidence_file}" ]] || return 1
+  [[ "$(file_mode "${evidence_file}")" == "600" ]] || return 1
+  [[ "$(wc -c <"${evidence_file}")" -le 8192 ]] || return 1
+  [[ "${now_seconds}" =~ ^[0-9]+$ ]] || return 1
+  python3 - "${evidence_file}" "${now_seconds}" "${MAX_CRON_EVIDENCE_AGE_SECONDS}" <<'PY'
+import json
+import sys
+from datetime import datetime
+
+path, now_value, maximum_age_value = sys.argv[1:]
+expected_keys = {
+    "environment",
+    "started_at",
+    "finished_at",
+    "exit_code",
+    "backup_freshness_status",
+    "production_health_status",
+    "staging_health_status",
+    "caddy_health_status",
+    "disk_status",
+    "duplicate_alert_guard_status",
+    "secret_leakage_count",
+}
+try:
+    with open(path, encoding="utf-8") as handle:
+        evidence = json.load(handle)
+    if set(evidence) != expected_keys or evidence["environment"] != "production":
+        raise ValueError
+    started = datetime.fromisoformat(evidence["started_at"].replace("Z", "+00:00"))
+    finished = datetime.fromisoformat(evidence["finished_at"].replace("Z", "+00:00"))
+    if started.tzinfo is None or finished.tzinfo is None or finished < started:
+        raise ValueError
+    age = int(now_value) - int(finished.timestamp())
+    if age < 0 or age > int(maximum_age_value):
+        raise ValueError
+    if not isinstance(evidence["exit_code"], int) or not 0 <= evidence["exit_code"] <= 255:
+        raise ValueError
+    if evidence["backup_freshness_status"] not in {"PASS", "FAIL"}:
+        raise ValueError
+    for key in ("production_health_status", "staging_health_status", "caddy_health_status"):
+        if evidence[key] not in {"PASS", "FAIL"}:
+            raise ValueError
+    if evidence["disk_status"] not in {"PASS", "WARNING", "HIGH"}:
+        raise ValueError
+    if evidence["duplicate_alert_guard_status"] not in {"PASS", "FAIL"}:
+        raise ValueError
+    if evidence["secret_leakage_count"] != 0:
+        raise ValueError
+except (KeyError, TypeError, ValueError, json.JSONDecodeError, OSError):
+    raise SystemExit(1)
+PY
+}
+
+persist_cron_status() {
+  local exit_code="$?"
+  local leakage_pattern
+  trap - EXIT
+  cron_finished_at="$(date --iso-8601=seconds)"
+  if [[ -f "${LOG_FILE}" ]]; then
+    leakage_pattern='(PASS''WORD|TO''KEN|DATA''BASE_URL|COO''KIE|AUTH''ORIZATION)[[:space:]]*='
+    secret_leakage_count="$(grep -Eic "${leakage_pattern}" "${LOG_FILE}" || true)"
+  fi
+  if ((secret_leakage_count > 0)); then
+    exit_code=1
+  fi
+  if ! write_cron_status "${exit_code}"; then
+    exit_code=1
+  fi
+  exit "${exit_code}"
 }
 
 load_monitor_config() {
@@ -167,8 +291,7 @@ main() {
   local overall=0
   local backup_age disk_percent disk_status memory_available
 
-  mkdir -p "${EVIDENCE_DIRECTORY}"
-  chmod 700 "${EVIDENCE_DIRECTORY}"
+  ensure_evidence_directory || return 1
   touch "${LOG_FILE}"
   chmod 600 "${LOG_FILE}"
   record "MONITOR_RUN=START"
@@ -180,12 +303,20 @@ main() {
     overall=1
   fi
 
+  production_health_status="PASS"
+  staging_health_status="PASS"
+  caddy_health_status="PASS"
   for container in ueb-core-production-app ueb-core-staging-app-1 ueb-core-staging-db-1 khtc-ueb-prod-caddy-1; do
     if container_health_passes "${container}"; then
       record "CONTAINER_HEALTH=PASS CONTAINER=${container}"
     else
       record "CONTAINER_HEALTH=FAIL CONTAINER=${container}"
       overall=1
+      case "${container}" in
+        ueb-core-production-app) production_health_status="FAIL" ;;
+        ueb-core-staging-app-1 | ueb-core-staging-db-1) staging_health_status="FAIL" ;;
+        khtc-ueb-prod-caddy-1) caddy_health_status="FAIL" ;;
+      esac
     fi
   done
 
@@ -199,11 +330,16 @@ main() {
     else
       record "HTTP_PROBE=FAIL TARGET=${url}"
       overall=1
+      case "${url}" in
+        https://ueb-core.cargis.vn/*) production_health_status="FAIL" ;;
+        https://ueb-core-staging.cargis.vn/*) staging_health_status="FAIL" ;;
+      esac
     fi
   done
 
   disk_percent="$(df -P / | awk 'NR == 2 { gsub(/%/, "", $5); print $5 }')"
   disk_status="$(classify_disk_usage "${disk_percent}")" || disk_status="HIGH"
+  disk_evidence_status="${disk_status}"
   record "DISK_STATUS=${disk_status} USED_PERCENT=${disk_percent}"
   [[ "${disk_status}" != "HIGH" ]] || overall=1
 
@@ -217,8 +353,10 @@ main() {
 
   if ((overall == 0)) || [[ -n "${monitor_backup_directory}" ]]; then
     if backup_age="$(verified_backup_age_seconds "${monitor_backup_directory}")" && ((backup_age >= 0 && backup_age <= MAX_BACKUP_AGE_SECONDS)); then
+      backup_freshness_status="PASS"
       record "BACKUP_FRESHNESS=PASS VERIFIED_CHECKSUM=YES AGE_SECONDS=${backup_age}"
     else
+      backup_freshness_status="FAIL"
       record "BACKUP_FRESHNESS=FAIL"
       overall=1
     fi
@@ -233,13 +371,16 @@ main() {
 
   if ((overall == 0)); then
     rm -f "${ALERT_LATCH}"
+    duplicate_alert_guard_status="PASS"
     record "MONITORING_LOCAL_CHECKS=PASS"
   elif [[ -f "${ALERT_LATCH}" ]]; then
+    duplicate_alert_guard_status="PASS"
     record "EMAIL_ALERT=DUPLICATE_SUPPRESSED"
     record "MONITORING_LOCAL_CHECKS=FAIL"
   elif [[ -x "${EMAIL_SCRIPT}" ]] && "${EMAIL_SCRIPT}" "UEB Core production monitoring incident" "A production monitoring gate failed. Review restricted host evidence." >/dev/null 2>&1; then
     touch "${ALERT_LATCH}"
     chmod 600 "${ALERT_LATCH}"
+    duplicate_alert_guard_status="PASS"
     record "EMAIL_ALERT=SENT"
     record "MONITORING_LOCAL_CHECKS=FAIL"
   else
@@ -252,5 +393,7 @@ main() {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  cron_started_at="$(date --iso-8601=seconds)"
+  trap persist_cron_status EXIT
   main "$@"
 fi
