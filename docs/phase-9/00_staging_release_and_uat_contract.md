@@ -150,6 +150,48 @@ locally with mode `0600` using a temporary file and atomic rename, outside the
 repository. It contains sanitized, bounded evidence and only a hash of the
 remote secret reference.
 
+### Rollback metadata readiness audit
+
+`pnpm phase9:rollback-metadata-readiness` separates evidence discovery from
+approval and installation. Its `--dry-run` mode is local-only. A separately
+authorized `--execute-read-only` mode may inspect the current app/operator
+images, immutable rollback-image inventory, Compose mapping, migration ledger,
+latest checksum-verified/off-host staging backup, approved-path state, schema
+compatibility inputs, and monitoring/health/readiness. The collector does not
+pull, load, tag, remove, start or restart images or services and does not write
+to the server or database.
+
+The approved metadata schema remains fail-closed and contains:
+
+- `imageId`, `architecture`, `composeService`;
+- `releaseSha`, `previousReleaseSha`, `currentImage`, `previousImage`;
+- `sourceMigrationCount`, `migrationLedgerFingerprint`,
+  `databaseMigrationStatus`, `schemaCompatibilityDecision`;
+- `backupIdentifier`, `backupChecksum`, `timestamp`, and
+  `operatorIdentityReference`.
+
+Runtime inspection resolves the current image/labels, Compose mapping and
+database ledger. Verified backup evidence resolves the backup identifier and
+checksum. Selecting a rollback release/image digest, approving schema
+compatibility and providing the operator/change reference always require an
+explicit operator decision. Multiple compatible candidates are never selected
+automatically.
+
+`--generate-draft` consumes a local readiness report and atomically writes a
+mode-`0600` JSON draft outside the repository. The draft uses
+`proposedMetadata` plus per-field `RESOLVED`, `OPERATOR_DECISION_REQUIRED` or
+`BLOCKED` states; it always contains `approved: false` and is never accepted as
+deploy-ready metadata.
+
+Installing `/opt/ueb-core/evidence/rollback/approved.json` is deliberately not
+implemented in Phase 9C5. A future separately authorized command must bind the
+exact draft SHA-256, current and rollback releases, immutable rollback image
+digest, backup identifier/checksum, approved schema-compatibility decision,
+operator/change reference and exact absolute target. It must use atomic
+temporary-file plus rename semantics, enforce a regular non-symlink mode-`0600`
+target with restrictive ownership, and perform post-write read-only
+verification.
+
 ## 6. Gate 3 — post-transfer candidate image verification
 
 After a separately authorized transfer/load operation, use a new one-attempt

@@ -97,6 +97,7 @@
     "phase9:staging-read-only-preflight": "tsx scripts/phase-9/staging-read-only-preflight.ts",
     "phase9:verify-local-candidate-artifacts": "tsx scripts/phase-9/candidate-image-verification.ts",
     "phase9:verify-staging-candidate-images": "tsx scripts/phase-9/staging-read-only-preflight.ts",
+    "phase9:rollback-metadata-readiness": "tsx scripts/phase-9/rollback-metadata-readiness.ts",
     "phase9:uat-plan": "tsx scripts/phase-9/uat-runner.ts",
     "data:inspect": "tsx scripts/phase-2/inspect-source.ts",
     "data:profile-column": "tsx scripts/phase-2/profile-column.ts",
