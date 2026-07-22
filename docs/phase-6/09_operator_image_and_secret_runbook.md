@@ -41,16 +41,20 @@ monitoring email, database URLs hoặc secret values vào repository/evidence.
 export GIT_SHA="$(git rev-parse HEAD)"
 test -z "$(git status --short)"
 export UEB_CORE_IMAGE="ueb-core:${GIT_SHA}"
-docker build --platform linux/amd64 --target runner --tag "$UEB_CORE_IMAGE" .
+MIGRATION_LEDGER_JSON="$(pnpm --silent phase6:migration-ledger)"
+MIGRATION_COUNT="$(node -e 'const value=JSON.parse(process.argv[1]);process.stdout.write(String(value.count))' "$MIGRATION_LEDGER_JSON")"
+MIGRATION_LEDGER_FINGERPRINT="$(node -e 'const value=JSON.parse(process.argv[1]);process.stdout.write(value.fingerprint)' "$MIGRATION_LEDGER_JSON")"
+docker build --platform linux/amd64 --target runner \
+  --build-arg "UEB_CORE_SOURCE_GIT_SHA=${GIT_SHA}" \
+  --build-arg "UEB_CORE_MIGRATION_COUNT=${MIGRATION_COUNT}" \
+  --build-arg "UEB_CORE_MIGRATION_LEDGER_FINGERPRINT=${MIGRATION_LEDGER_FINGERPRINT}" \
+  --tag "$UEB_CORE_IMAGE" .
 ```
 
 ### 2.4 Build immutable operator image
 
 ```bash
 export UEB_CORE_OPERATOR_IMAGE="ueb-core-operator:${GIT_SHA}"
-MIGRATION_LEDGER_JSON="$(pnpm --silent phase6:migration-ledger)"
-MIGRATION_COUNT="$(node -e 'const value=JSON.parse(process.argv[1]);process.stdout.write(String(value.count))' "$MIGRATION_LEDGER_JSON")"
-MIGRATION_LEDGER_FINGERPRINT="$(node -e 'const value=JSON.parse(process.argv[1]);process.stdout.write(value.fingerprint)' "$MIGRATION_LEDGER_JSON")"
 docker build --platform linux/amd64 --file Dockerfile.operator \
   --build-arg "UEB_CORE_SOURCE_GIT_SHA=${GIT_SHA}" \
   --build-arg "UEB_CORE_MIGRATION_COUNT=${MIGRATION_COUNT}" \

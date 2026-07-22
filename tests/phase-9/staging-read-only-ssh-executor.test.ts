@@ -8,9 +8,12 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { MigrationLedger } from "../../scripts/phase-6/lib/migration-ledger";
 import {
+  PHASE9_POST_TRANSFER_CHECKS,
   PHASE9_REMOTE_CHECKS,
   assertCollectorReadOnly,
+  buildPostTransferSshArguments,
   buildSshArguments,
+  executePostTransferCandidateVerification,
   executeReadOnlyPreflight,
   parseExecuteReadOnlyArguments,
   type SshExecutionRequest,
@@ -22,6 +25,8 @@ const releaseSha = "a".repeat(40);
 const fingerprint = "b".repeat(64);
 const imageId = `sha256:${"c".repeat(64)}`;
 const checksum = "d".repeat(64);
+const currentReleaseSha = "f".repeat(40);
+const previousReleaseSha = "e".repeat(40);
 const roots: string[] = [];
 const ledger: MigrationLedger = {
   version: 1,
@@ -72,8 +77,8 @@ function result(
   const evidence = new Map<string, string>([
     ["SERVER_TIME", "2026-07-22T09:00:00+07:00"],
     [
-      "RELEASE_IMAGE",
-      `APP=${imageId}|linux/amd64\nOPERATOR=${imageId}|linux/amd64|${releaseSha}|2|${fingerprint}`,
+      "CURRENT_ROLLBACK_IMAGES",
+      `CURRENT=ueb-core:${currentReleaseSha}|${imageId}|linux/amd64|app-container\nROLLBACK=ueb-core:${previousReleaseSha}|${imageId}|linux/amd64\nMETADATA_RELEASE_SHA=${releaseSha}\nMETADATA_PREVIOUS_RELEASE_SHA=${previousReleaseSha}`,
     ],
     [
       "COMPOSE_SERVICES",
@@ -96,9 +101,9 @@ function result(
         architecture: "linux/amd64",
         composeService: "app",
         releaseSha,
-        previousReleaseSha: "e".repeat(40),
-        currentImage: `ueb-core:${releaseSha}`,
-        previousImage: `ueb-core:${"e".repeat(40)}`,
+        previousReleaseSha,
+        currentImage: `ueb-core:${currentReleaseSha}`,
+        previousImage: `ueb-core:${previousReleaseSha}`,
         sourceMigrationCount: 2,
         migrationLedgerFingerprint: fingerprint,
         databaseMigrationStatus: "COMPATIBLE",
@@ -116,6 +121,22 @@ function result(
     const encoded = Buffer.from(evidence.get(id) ?? "").toString("base64");
     return `P9B|${id}|PASS|1|0|CHECK_PASS|${encoded}`;
   }).join("\n");
+  return { exitCode: 0, stdout, stderr: "", ...overrides };
+}
+
+function postTransferArgumentsFor(root: string): string[] {
+  return argumentsFor(root).map((argument) =>
+    argument === "--execute-read-only"
+      ? "--execute-post-transfer-image-verify"
+      : argument,
+  );
+}
+
+function postTransferResult(
+  overrides: Partial<SshExecutionResult> = {},
+): SshExecutionResult {
+  const evidence = `APP=${imageId}|linux/amd64|${releaseSha}|2|${fingerprint}\nOPERATOR=${imageId}|linux/amd64|${releaseSha}|2|${fingerprint}\nEXPECTED_COUNT=2\nEXPECTED_FINGERPRINT=${fingerprint}`;
+  const stdout = `P9B|${PHASE9_POST_TRANSFER_CHECKS[0]}|PASS|1|0|CANDIDATE_IMAGES_INSPECTED|${Buffer.from(evidence).toString("base64")}`;
   return { exitCode: 0, stdout, stderr: "", ...overrides };
 }
 
@@ -224,6 +245,19 @@ describe("Phase 9B guarded argument contract", () => {
       ),
     ).toThrow(/outside the approved bound/u);
   });
+
+  it("rejects consumed one-attempt authorization references", async () => {
+    const root = await fixture();
+    expect(() =>
+      parseExecuteReadOnlyArguments(
+        argumentsFor(root).map((argument) =>
+          argument.startsWith("--authorization-ref=")
+            ? "--authorization-ref=P9C2-READONLY-STAGING-20260722-01"
+            : argument,
+        ),
+      ),
+    ).toThrow(/missing or unsafe/u);
+  });
 });
 
 describe("Phase 9B fake SSH execution", () => {
@@ -253,6 +287,10 @@ describe("Phase 9B fake SSH execution", () => {
     expect(request.collectorStdin).toContain(
       "default_transaction_read_only=on",
     );
+    expect(request.collectorStdin).toContain("CURRENT_ROLLBACK_IMAGES");
+    expect(request.collectorStdin).not.toContain(
+      'app_image="ueb-core:$release_sha"',
+    );
     expect(request.collectorStdin).not.toContain("set -x");
     const saved = JSON.parse(
       await readFile(join(root, "report.json"), "utf8"),
@@ -261,6 +299,30 @@ describe("Phase 9B fake SSH execution", () => {
     };
     expect(saved.reportSchemaVersion).toBe(1);
     expect((await stat(join(root, "report.json"))).mode & 0o777).toBe(0o600);
+  });
+
+  it("blocks when current or rollback image evidence mismatches metadata", async () => {
+    const root = await fixture();
+    const mismatch = result();
+    const lines = mismatch.stdout.split("\n");
+    const imageIndex = PHASE9_REMOTE_CHECKS.indexOf("CURRENT_ROLLBACK_IMAGES");
+    const imageParts = lines[imageIndex]!.split("|");
+    const imageEvidence = Buffer.from(imageParts[6]!, "base64")
+      .toString("utf8")
+      .replace(
+        `ROLLBACK=ueb-core:${previousReleaseSha}`,
+        `ROLLBACK=ueb-core:${"1".repeat(40)}`,
+      );
+    imageParts[6] = Buffer.from(imageEvidence).toString("base64");
+    lines[imageIndex] = imageParts.join("|");
+    const stdout = lines.join("\n");
+    const report = await executeReadOnlyPreflight(
+      argumentsFor(root),
+      dependencies(new FakeTransport({ ...mismatch, stdout })),
+    );
+    expect(report.status).toBe("BLOCKED");
+    expect(report.failedCheck).toBe("CURRENT_ROLLBACK_IMAGES");
+    expect(report.stopReason).toMatch(/METADATA_MISMATCH/u);
   });
 
   it("fails before execution when ssh -G resolves a different user or host", async () => {
@@ -506,5 +568,72 @@ describe("Phase 9B mutation prevention", () => {
       "2",
       fingerprint,
     ]);
+  });
+});
+
+describe("Phase 9C3 post-transfer candidate verification", () => {
+  it("requires candidate images only in the separate post-transfer gate", async () => {
+    const root = await fixture();
+    const fake = new FakeTransport(postTransferResult());
+    const report = await executePostTransferCandidateVerification(
+      postTransferArgumentsFor(root),
+      dependencies(fake),
+    );
+    expect(report.status).toBe("PASS");
+    expect(report.checks.map((check) => check.id)).toEqual([
+      "CANDIDATE_IMAGES",
+    ]);
+    expect(fake.requests[0]!.collectorStdin).not.toContain(
+      "default_transaction_read_only=on",
+    );
+    expect(fake.requests[0]!.collectorStdin).not.toContain(
+      "CURRENT_ROLLBACK_IMAGES",
+    );
+    expect(report.mutationCommandCount).toBe(0);
+  });
+
+  it("fails closed when a candidate image is absent or metadata differs", async () => {
+    const root = await fixture();
+    const missing = postTransferResult({
+      exitCode: 61,
+      stdout: `P9B|CANDIDATE_IMAGES|BLOCKED|1|61|CANDIDATE_APP_IMAGE_MISSING|`,
+    });
+    const missingReport = await executePostTransferCandidateVerification(
+      postTransferArgumentsFor(root),
+      dependencies(new FakeTransport(missing)),
+    );
+    expect(missingReport.failedCheck).toBe("CANDIDATE_IMAGES");
+    expect(missingReport.status).toBe("BLOCKED");
+
+    const secondRoot = await fixture();
+    const mismatchEvidence = `APP=${imageId}|linux/amd64|${"f".repeat(40)}|2|${fingerprint}\nOPERATOR=${imageId}|linux/amd64|${releaseSha}|2|${fingerprint}\nEXPECTED_COUNT=2\nEXPECTED_FINGERPRINT=${fingerprint}`;
+    const mismatch = postTransferResult({
+      stdout: `P9B|CANDIDATE_IMAGES|PASS|1|0|CANDIDATE_IMAGES_INSPECTED|${Buffer.from(mismatchEvidence).toString("base64")}`,
+    });
+    const mismatchReport = await executePostTransferCandidateVerification(
+      postTransferArgumentsFor(secondRoot),
+      dependencies(new FakeTransport(mismatch)),
+    );
+    expect(mismatchReport.status).toBe("BLOCKED");
+    expect(mismatchReport.failedCheck).toBe("CANDIDATE_IMAGES");
+    expect(mismatchReport.stopReason).toMatch(/CONTRACT_MISMATCH/u);
+  });
+
+  it("uses a positional collector contract with no secret path", async () => {
+    const root = await fixture();
+    const options = parseExecuteReadOnlyArguments(
+      postTransferArgumentsFor(root),
+      "--execute-post-transfer-image-verify",
+    );
+    const args = buildPostTransferSshArguments(options, ledger);
+    expect(args.slice(-6)).toEqual([
+      "sh",
+      "-s",
+      "--",
+      releaseSha,
+      "2",
+      fingerprint,
+    ]);
+    expect(args).not.toContain("/opt/ueb-core/secrets/database-owner.env");
   });
 });

@@ -20,7 +20,7 @@ import { SafePhase6StagingError } from "../../phase-6/lib/staging-contracts";
 export const PHASE9_REPORT_SCHEMA_VERSION = 1;
 export const PHASE9_REMOTE_CHECKS = [
   "SERVER_TIME",
-  "RELEASE_IMAGE",
+  "CURRENT_ROLLBACK_IMAGES",
   "COMPOSE_SERVICES",
   "HEALTH",
   "READINESS",
@@ -31,12 +31,21 @@ export const PHASE9_REMOTE_CHECKS = [
   "MONITORING_ALERT",
 ] as const;
 
+export const PHASE9_POST_TRANSFER_CHECKS = ["CANDIDATE_IMAGES"] as const;
+type Phase9RemoteCheckId =
+  | (typeof PHASE9_REMOTE_CHECKS)[number]
+  | (typeof PHASE9_POST_TRANSFER_CHECKS)[number];
+
 const EXPECTED_ALIAS = "ueb-core-staging";
 const EXPECTED_HOST = "103.200.25.54";
 const EXPECTED_USER = "deploy";
 const EXPECTED_ROOT = "/opt/ueb-core";
 const GIT_SHA = /^[a-f0-9]{40}$/u;
 const SAFE_REFERENCE = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/u;
+const CONSUMED_AUTHORIZATION_REFERENCES = new Set([
+  "P9C-READONLY-STAGING-20260722-01",
+  "P9C2-READONLY-STAGING-20260722-01",
+]);
 const SAFE_REMOTE_SECRET = /^\/opt\/ueb-core\/secrets\/[A-Za-z0-9._-]+$/u;
 const SECRET_PATTERN =
   /(?:password|passwd|token|cookie|session|private[_ -]?key|database[_ -]?url|postgres(?:ql)?:\/\/)[^\s|,}]*/giu;
@@ -95,7 +104,7 @@ export interface SshTransport {
 }
 
 export interface Phase9CheckReport {
-  readonly id: (typeof PHASE9_REMOTE_CHECKS)[number];
+  readonly id: Phase9RemoteCheckId;
   readonly status: "PASS" | "BLOCKED" | "FAIL";
   readonly durationMs: number;
   readonly exitCode: number;
@@ -115,7 +124,7 @@ export interface Phase9ExecutionReport {
   readonly sourceMigrationFingerprint: string;
   readonly checks: readonly Phase9CheckReport[];
   readonly failedCheck:
-    Phase9CheckReport["id"] | "SSH_TRANSPORT" | "COLLECTOR_PROTOCOL" | null;
+    Phase9RemoteCheckId | "SSH_TRANSPORT" | "COLLECTOR_PROTOCOL" | null;
   readonly protocolParseStatus: "COMPLETE" | "PARTIAL" | "MALFORMED" | "NONE";
   readonly sshExitCode: number;
   readonly sshSignal: string | null;
@@ -128,9 +137,10 @@ export interface Phase9ExecutionReport {
 
 export function parseExecuteReadOnlyArguments(
   arguments_: readonly string[],
+  executionFlag = "--execute-read-only",
 ): ExecuteReadOnlyOptions {
   const args = arguments_[0] === "--" ? arguments_.slice(1) : [...arguments_];
-  if (!args.includes("--execute-read-only") || args.includes("--dry-run")) {
+  if (!args.includes(executionFlag) || args.includes("--dry-run")) {
     throw safeError("Dry-run and read-only execution are mutually exclusive.");
   }
   const allowed = new Set([
@@ -149,14 +159,12 @@ export function parseExecuteReadOnlyArguments(
     "--output=",
   ]);
   for (const argument of args) {
-    if (argument === "--execute-read-only") continue;
+    if (argument === executionFlag) continue;
     if (![...allowed].some((prefix) => argument.startsWith(prefix))) {
       throw safeError("Unsupported remote preflight argument.");
     }
   }
-  if (
-    args.filter((argument) => argument === "--execute-read-only").length !== 1
-  ) {
+  if (args.filter((argument) => argument === executionFlag).length !== 1) {
     throw safeError("Read-only execution flag is missing or duplicated.");
   }
   const value = (prefix: string): string => singleValue(args, prefix);
@@ -176,7 +184,10 @@ export function parseExecuteReadOnlyArguments(
       "Only an exact staging target and release SHA are allowed.",
     );
   }
-  if (!SAFE_REFERENCE.test(authorizationReference)) {
+  if (
+    !SAFE_REFERENCE.test(authorizationReference) ||
+    CONSUMED_AUTHORIZATION_REFERENCES.has(authorizationReference)
+  ) {
     throw safeError("Authorization reference is missing or unsafe.");
   }
   if (
@@ -363,14 +374,84 @@ export async function executeReadOnlyPreflight(
     );
   }
   const sshArgs = buildSshArguments(options, ledger);
+  return await runRemoteInspection({
+    options,
+    ledger,
+    collector,
+    transport,
+    resolved,
+    sshArgs,
+    expectedChecks: PHASE9_REMOTE_CHECKS,
+    validate: (checks) => validateChecks(checks, options, ledger),
+  });
+}
+
+export async function executePostTransferCandidateVerification(
+  arguments_: readonly string[],
+  dependencies: {
+    readonly transport?: SshTransport;
+    readonly verifyRelease?: (sha: string) => Promise<void>;
+    readonly assertClean?: () => Promise<void>;
+    readonly ledger?: MigrationLedger;
+    readonly collector?: string;
+  } = {},
+): Promise<Phase9ExecutionReport> {
+  const executionFlag = "--execute-post-transfer-image-verify";
+  const options = parseExecuteReadOnlyArguments(arguments_, executionFlag);
+  await (dependencies.verifyRelease ?? verifyLocalRelease)(options.releaseSha);
+  await (dependencies.assertClean ?? assertCleanWorkingTree)();
+  await assertRegularFile(options.sshConfigFile, "SSH config");
+  await assertRegularFile(options.knownHostsFile, "known-hosts");
+  await assertSafeOutput(options.output);
+  const ledger = dependencies.ledger ?? (await readSourceMigrationLedger());
+  const collector =
+    dependencies.collector ??
+    (await readFile(
+      resolve(
+        process.cwd(),
+        "scripts/phase-9/remote-candidate-image-collector.sh",
+      ),
+      "utf8",
+    ));
+  assertCollectorReadOnly(collector, { requireDatabaseReadOnly: false });
+  const transport = dependencies.transport ?? new RealSshTransport();
+  const resolved = await transport.resolve(
+    options.sshAlias,
+    options.sshConfigFile,
+    options.knownHostsFile,
+  );
+  assertResolvedSsh(resolved, options);
+  return await runRemoteInspection({
+    options,
+    ledger,
+    collector,
+    transport,
+    resolved,
+    sshArgs: buildPostTransferSshArguments(options, ledger),
+    expectedChecks: PHASE9_POST_TRANSFER_CHECKS,
+    validate: (checks) => validateCandidateChecks(checks, options, ledger),
+  });
+}
+
+async function runRemoteInspection(input: {
+  readonly options: ExecuteReadOnlyOptions;
+  readonly ledger: MigrationLedger;
+  readonly collector: string;
+  readonly transport: SshTransport;
+  readonly resolved: SshResolvedConfig;
+  readonly sshArgs: readonly string[];
+  readonly expectedChecks: readonly Phase9RemoteCheckId[];
+  readonly validate: (checks: readonly Phase9CheckReport[]) => void;
+}): Promise<Phase9ExecutionReport> {
+  const { options, ledger, collector, transport, resolved } = input;
   const result = await transport.execute({
     alias: options.sshAlias,
-    args: sshArgs,
+    args: input.sshArgs,
     collectorStdin: collector,
     timeoutMilliseconds: options.commandTimeoutSeconds * 1000,
   });
   const raw = `${result.stdout}\n${result.stderr}`;
-  const protocol = parseCollectorProtocol(result.stdout);
+  const protocol = parseCollectorProtocol(result.stdout, input.expectedChecks);
   const secretLeakageCount =
     [...raw.matchAll(SECRET_PATTERN)].length + protocol.secretLeakageCount;
   const checks = protocol.checks;
@@ -407,7 +488,7 @@ export async function executeReadOnlyPreflight(
     stopReason = "SSH_EXIT_PROTOCOL_INCONSISTENCY";
   } else {
     try {
-      validateChecks(checks, options, ledger);
+      input.validate(checks);
     } catch (error) {
       stopReason = safeMessage(error);
       failedCheck = failedCheckForValidation(stopReason);
@@ -438,6 +519,23 @@ export async function executeReadOnlyPreflight(
   };
   await writeAtomicReport(options.output, report);
   return report;
+}
+
+function assertResolvedSsh(
+  resolved: SshResolvedConfig,
+  options: ExecuteReadOnlyOptions,
+): void {
+  if (
+    resolved.hostname !== options.expectedHost ||
+    resolved.user !== options.expectedUser ||
+    (resolved.proxyCommand ?? "none") !== "none" ||
+    (resolved.localCommand ?? "none") !== "none" ||
+    (resolved.permitLocalCommand ?? "no") !== "no"
+  ) {
+    throw safeError(
+      "Resolved SSH identity or local execution policy is unsafe.",
+    );
+  }
 }
 
 export function buildSshArguments(
@@ -481,11 +579,56 @@ export function buildSshArguments(
   ];
 }
 
-export function assertCollectorReadOnly(collector: string): void {
+export function buildPostTransferSshArguments(
+  options: ExecuteReadOnlyOptions,
+  ledger: MigrationLedger,
+): readonly string[] {
+  return [
+    "-F",
+    options.sshConfigFile,
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    "StrictHostKeyChecking=yes",
+    "-o",
+    `UserKnownHostsFile=${options.knownHostsFile}`,
+    "-o",
+    "PasswordAuthentication=no",
+    "-o",
+    "KbdInteractiveAuthentication=no",
+    "-o",
+    "ChallengeResponseAuthentication=no",
+    "-o",
+    "PermitLocalCommand=no",
+    "-o",
+    "ClearAllForwardings=yes",
+    "-o",
+    "ExitOnForwardFailure=yes",
+    "-o",
+    `ConnectTimeout=${options.connectTimeoutSeconds}`,
+    "-T",
+    options.sshAlias,
+    "--",
+    "sh",
+    "-s",
+    "--",
+    options.releaseSha,
+    String(ledger.count),
+    ledger.fingerprint,
+  ];
+}
+
+export function assertCollectorReadOnly(
+  collector: string,
+  options: { readonly requireDatabaseReadOnly?: boolean } = {},
+): void {
   if (MUTATION_PATTERN.test(stripComments(collector))) {
     throw safeError("Remote collector contains a forbidden mutation token.");
   }
-  if (!collector.includes("default_transaction_read_only=on")) {
+  if (
+    (options.requireDatabaseReadOnly ?? true) &&
+    !collector.includes("default_transaction_read_only=on")
+  ) {
     throw safeError("Remote database inspection is not explicitly read-only.");
   }
   if (/\bsudo\b|\beval\b|set\s+-x/iu.test(stripComments(collector))) {
@@ -500,7 +643,10 @@ interface CollectorProtocolResult {
   readonly stopReason: string | null;
 }
 
-function parseCollectorProtocol(output: string): CollectorProtocolResult {
+function parseCollectorProtocol(
+  output: string,
+  expectedChecks: readonly Phase9RemoteCheckId[],
+): CollectorProtocolResult {
   const lines = output
     .split("\n")
     .map((line) => line.trim())
@@ -524,11 +670,8 @@ function parseCollectorProtocol(output: string): CollectorProtocolResult {
         "COLLECTOR_PROTOCOL_LINE_INVALID",
       );
     }
-    const id = parts[1] as Phase9CheckReport["id"];
-    if (
-      !PHASE9_REMOTE_CHECKS.includes(id) ||
-      id !== PHASE9_REMOTE_CHECKS[checks.length]
-    ) {
+    const id = parts[1] as Phase9RemoteCheckId;
+    if (!expectedChecks.includes(id) || id !== expectedChecks[checks.length]) {
       return malformedProtocol(
         checks,
         secretLeakageCount,
@@ -584,8 +727,7 @@ function parseCollectorProtocol(output: string): CollectorProtocolResult {
     });
   }
   return {
-    status:
-      checks.length === PHASE9_REMOTE_CHECKS.length ? "COMPLETE" : "PARTIAL",
+    status: checks.length === expectedChecks.length ? "COMPLETE" : "PARTIAL",
     checks,
     secretLeakageCount,
     stopReason: null,
@@ -617,7 +759,9 @@ function isCanonicalBase64(value: string): boolean {
 function failedCheckForValidation(
   stopReason: string,
 ): Phase9ExecutionReport["failedCheck"] {
-  if (stopReason.includes("RELEASE_IMAGE")) return "RELEASE_IMAGE";
+  if (stopReason.includes("CURRENT_ROLLBACK_IMAGE"))
+    return "CURRENT_ROLLBACK_IMAGES";
+  if (stopReason.includes("CANDIDATE_IMAGE")) return "CANDIDATE_IMAGES";
   if (stopReason.includes("COMPOSE_SERVICE")) return "COMPOSE_SERVICES";
   if (stopReason.includes("migration ledger"))
     return "DATABASE_MIGRATION_LEDGER";
@@ -632,14 +776,15 @@ function validateChecks(
   ledger: MigrationLedger,
 ): void {
   const byId = new Map(checks.map((check) => [check.id, check.evidence]));
-  const image = byId.get("RELEASE_IMAGE") ?? "";
-  if (
-    !image.includes(
-      `|${options.releaseSha}|${ledger.count}|${ledger.fingerprint}`,
-    ) ||
-    (image.match(/sha256:[a-f0-9]{64}\|linux\/amd64/gu) ?? []).length !== 2
-  ) {
-    throw safeError("RELEASE_IMAGE_CONTRACT_MISMATCH");
+  const currentRollbackImages = byId.get("CURRENT_ROLLBACK_IMAGES") ?? "";
+  const currentMatch = currentRollbackImages.match(
+    /^CURRENT=([^|\n]+)\|(sha256:[a-f0-9]{64})\|(linux\/amd64)\|([^\n]+)$/mu,
+  );
+  const rollbackMatch = currentRollbackImages.match(
+    /^ROLLBACK=([^|\n]+)\|(sha256:[a-f0-9]{64})\|(linux\/amd64)$/mu,
+  );
+  if (!currentMatch || !rollbackMatch) {
+    throw safeError("CURRENT_ROLLBACK_IMAGE_CONTRACT_MISMATCH");
   }
   const services = byId.get("COMPOSE_SERVICES") ?? "";
   for (const service of ["app", "db"]) {
@@ -719,6 +864,36 @@ function validateChecks(
     )
   ) {
     throw safeError("ROLLBACK_METADATA_INVALID");
+  }
+  if (
+    rollbackMetadata.currentImage !== currentMatch[1] ||
+    rollbackMetadata.previousImage !== rollbackMatch[1] ||
+    rollbackMetadata.imageId !== rollbackMatch[2] ||
+    rollbackMetadata.architecture !== rollbackMatch[3]
+  ) {
+    throw safeError("CURRENT_ROLLBACK_IMAGE_METADATA_MISMATCH");
+  }
+}
+
+function validateCandidateChecks(
+  checks: readonly Phase9CheckReport[],
+  options: ExecuteReadOnlyOptions,
+  ledger: MigrationLedger,
+): void {
+  const evidence = checks.find(
+    (check) => check.id === "CANDIDATE_IMAGES",
+  )?.evidence;
+  const candidatePattern = new RegExp(
+    `^(?:APP|OPERATOR)=sha256:[a-f0-9]{64}\\|linux/amd64\\|${options.releaseSha}\\|${ledger.count}\\|${ledger.fingerprint}$`,
+    "gmu",
+  );
+  if (
+    !evidence ||
+    (evidence.match(candidatePattern) ?? []).length !== 2 ||
+    !evidence.includes(`EXPECTED_COUNT=${ledger.count}`) ||
+    !evidence.includes(`EXPECTED_FINGERPRINT=${ledger.fingerprint}`)
+  ) {
+    throw safeError("CANDIDATE_IMAGE_CONTRACT_MISMATCH");
   }
 }
 

@@ -58,18 +58,41 @@ check_server_time() {
   check_summary="SERVER_TIME_CAPTURED"
 }
 
-check_release_image() {
-  app_image="ueb-core:$release_sha"
-  operator_image="ueb-core-operator:$release_sha"
-  app_metadata="$(docker image inspect "$app_image" \
-    --format '{{.Id}}|{{.Os}}/{{.Architecture}}' 2>/dev/null)" || return 12
-  operator_metadata="$(docker image inspect "$operator_image" \
-    --format '{{.Id}}|{{.Os}}/{{.Architecture}}|{{index .Config.Labels "org.opencontainers.image.revision"}}|{{index .Config.Labels "io.ueb-core.migration-count"}}|{{index .Config.Labels "io.ueb-core.migration-ledger-fingerprint"}}' 2>/dev/null)" || return 13
-  check_evidence="APP=$app_metadata
-OPERATOR=$operator_metadata
-EXPECTED_COUNT=$source_migration_count
-EXPECTED_FINGERPRINT=$source_migration_fingerprint"
-  check_summary="IMMUTABLE_IMAGES_INSPECTED"
+check_current_rollback_images() {
+  [ -f "$rollback_metadata" ] && [ ! -L "$rollback_metadata" ] || return 12
+  [ "$(stat -c '%a' "$rollback_metadata")" = "600" ] || return 13
+  json_string_field() {
+    field="$1"
+    matches="$(grep -Eo "\"$field\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$rollback_metadata" 2>/dev/null)" || return 1
+    [ "$(printf '%s\n' "$matches" | wc -l | tr -d ' ')" = "1" ] || return 1
+    printf '%s\n' "$matches" | cut -d '"' -f 4
+  }
+  current_image="$(json_string_field currentImage)" || return 14
+  previous_image="$(json_string_field previousImage)" || return 14
+  expected_previous_id="$(json_string_field imageId)" || return 14
+  metadata_release_sha="$(json_string_field releaseSha)" || return 14
+  metadata_previous_sha="$(json_string_field previousReleaseSha)" || return 14
+  case "$current_image" in ueb-core:[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]|sha256:[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;; *) return 14 ;; esac
+  case "$previous_image" in ueb-core:[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]|sha256:[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;; *) return 14 ;; esac
+  case "$expected_previous_id" in sha256:[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;; *) return 14 ;; esac
+  [ "$metadata_release_sha" = "$release_sha" ] || return 15
+  app_container="$(docker ps \
+    --filter "label=com.docker.compose.project=$project" \
+    --filter 'label=com.docker.compose.service=app' \
+    --format '{{.ID}}' 2>/dev/null)" || return 16
+  [ -n "$app_container" ] && [ "$(printf '%s\n' "$app_container" | wc -l | tr -d ' ')" = "1" ] || return 17
+  running_image="$(docker inspect "$app_container" --format '{{.Config.Image}}' 2>/dev/null)" || return 18
+  [ "$running_image" = "$current_image" ] || return 19
+  current_metadata="$(docker image inspect "$current_image" \
+    --format '{{.Id}}|{{.Os}}/{{.Architecture}}' 2>/dev/null)" || return 20
+  rollback_actual="$(docker image inspect "$previous_image" \
+    --format '{{.Id}}|{{.Os}}/{{.Architecture}}' 2>/dev/null)" || return 21
+  [ "${rollback_actual%%|*}" = "$expected_previous_id" ] || return 22
+  check_evidence="CURRENT=$current_image|$current_metadata|$app_container
+ROLLBACK=$previous_image|$rollback_actual
+METADATA_RELEASE_SHA=$metadata_release_sha
+METADATA_PREVIOUS_RELEASE_SHA=$metadata_previous_sha"
+  check_summary="CURRENT_ROLLBACK_IMAGES_INSPECTED"
 }
 
 check_compose_services() {
@@ -215,7 +238,7 @@ ALERT_STATUS=$alert_status"
 }
 
 run_check "SERVER_TIME" check_server_time
-run_check "RELEASE_IMAGE" check_release_image
+run_check "CURRENT_ROLLBACK_IMAGES" check_current_rollback_images
 run_check "COMPOSE_SERVICES" check_compose_services
 run_check "HEALTH" check_health
 run_check "READINESS" check_readiness

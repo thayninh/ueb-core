@@ -10,7 +10,10 @@ import {
   STAGING_SSH_ALIAS,
   STAGING_URL,
 } from "../phase-6/lib/staging-contracts";
-import { executeReadOnlyPreflight } from "./lib/staging-ssh-executor";
+import {
+  executePostTransferCandidateVerification,
+  executeReadOnlyPreflight,
+} from "./lib/staging-ssh-executor";
 
 const execFileAsync = promisify(execFile);
 const GIT_SHA = /^[a-f0-9]{40}$/u;
@@ -63,8 +66,9 @@ export async function createStagingReadOnlyPreflightPlan(
   const checks = [
     { id: "SERVER_TIME", command: "date -Iseconds" },
     {
-      id: "REMOTE_IMAGES",
-      command: `docker image inspect ueb-core:${releaseSha} ueb-core-operator:${releaseSha}`,
+      id: "CURRENT_ROLLBACK_IMAGES",
+      command:
+        "inspect the running staging app image and approved rollback image from restricted rollback metadata",
     },
     {
       id: "COMPOSE_SERVICES",
@@ -141,6 +145,22 @@ async function assertCleanWorkingTree(): Promise<void> {
 
 export async function main(arguments_ = process.argv.slice(2)): Promise<void> {
   const normalized = arguments_[0] === "--" ? arguments_.slice(1) : arguments_;
+  if (normalized.includes("--execute-post-transfer-image-verify")) {
+    const report = await executePostTransferCandidateVerification(arguments_);
+    process.stdout.write(
+      `${JSON.stringify({
+        status: report.status,
+        gate: "POST_TRANSFER_CANDIDATE_IMAGE",
+        reportSchemaVersion: report.reportSchemaVersion,
+        outputWritten: true,
+        mutationCommands: report.mutationCommandCount,
+        serverConnectionPerformed: report.serverConnectionPerformed,
+        secretsPrinted: false,
+      })}\n`,
+    );
+    if (report.status !== "PASS") process.exitCode = 2;
+    return;
+  }
   if (normalized.includes("--execute-read-only")) {
     const report = await executeReadOnlyPreflight(arguments_);
     process.stdout.write(
