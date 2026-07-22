@@ -133,6 +133,15 @@ locally with mode `0600` using a temporary file and atomic rename, outside the
 repository. It contains sanitized, bounded evidence and only a hash of the
 remote secret reference.
 
+The executor parses every valid collector record before interpreting the SSH
+exit code. A report therefore preserves completed checks, the first remote
+`BLOCKED` or `FAIL` check, its sanitized summary and remote exit code. An SSH
+failure without protocol is classified as `SSH_TRANSPORT`; malformed,
+out-of-order or incomplete protocol is classified as `COLLECTOR_PROTOCOL`.
+Timeout, signal and SSH exit metadata are retained without storing raw stderr.
+An all-PASS protocol paired with a non-zero SSH exit is treated as an
+inconsistency and fails closed.
+
 ## 6. UAT manifest
 
 `phase9:uat-plan` contains the approved 29-case inventory: 21 read-only cases

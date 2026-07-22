@@ -119,6 +119,27 @@ function result(
   return { exitCode: 0, stdout, stderr: "", ...overrides };
 }
 
+function resultWithRemoteFailure(input: {
+  readonly checkId: (typeof PHASE9_REMOTE_CHECKS)[number];
+  readonly checkStatus?: "BLOCKED" | "FAIL";
+  readonly remoteExitCode?: number;
+  readonly sshExitCode?: number;
+}): SshExecutionResult {
+  const base = result();
+  const failedIndex = PHASE9_REMOTE_CHECKS.indexOf(input.checkId);
+  const lines = base.stdout.split("\n").slice(0, failedIndex + 1);
+  const parts = lines[failedIndex]!.split("|");
+  parts[2] = input.checkStatus ?? "BLOCKED";
+  parts[4] = String(input.remoteExitCode ?? 42);
+  parts[5] = "SAFE_REMOTE_FAILURE";
+  lines[failedIndex] = parts.join("|");
+  return {
+    ...base,
+    exitCode: input.sshExitCode ?? input.remoteExitCode ?? 42,
+    stdout: lines.join("\n"),
+  };
+}
+
 class FakeTransport implements SshTransport {
   readonly requests: SshExecutionRequest[] = [];
   constructor(
@@ -286,7 +307,10 @@ describe("Phase 9B fake SSH execution", () => {
         dependencies(new FakeTransport({ ...incomplete, stdout })),
       );
       expect(report.status).toBe("BLOCKED");
-      expect(report.stopReason).toMatch(/CHECK_SET_INCOMPLETE/u);
+      expect([
+        "COLLECTOR_PROTOCOL_INCOMPLETE",
+        "COLLECTOR_PROTOCOL_ORDER_INVALID",
+      ]).toContain(report.stopReason);
     },
   );
 
@@ -300,6 +324,7 @@ describe("Phase 9B fake SSH execution", () => {
     const saved = await readFile(join(root, "report.json"), "utf8");
     expect(report.status).toBe("BLOCKED");
     expect(report.secretLeakageCount).toBeGreaterThan(0);
+    expect(report.failedCheck).toBe("COLLECTOR_PROTOCOL");
     expect(saved).not.toContain("do-not-print-this");
   });
 
@@ -311,7 +336,149 @@ describe("Phase 9B fake SSH execution", () => {
       dependencies(fake),
     );
     expect(report.status).toBe("BLOCKED");
+    expect(report.failedCheck).toBe("SSH_TRANSPORT");
     expect(fake.requests).toHaveLength(1);
+    expect((await stat(join(root, "report.json"))).mode & 0o777).toBe(0o600);
+  });
+});
+
+describe("Phase 9C1 remote failure diagnostics", () => {
+  it("preserves preceding PASS checks and the first BLOCKED check before SSH exit handling", async () => {
+    const root = await fixture();
+    const response = resultWithRemoteFailure({
+      checkId: "BACKUP_EVIDENCE",
+      remoteExitCode: 33,
+      sshExitCode: 33,
+    });
+    const report = await executeReadOnlyPreflight(
+      argumentsFor(root),
+      dependencies(new FakeTransport(response)),
+    );
+    expect(report.status).toBe("BLOCKED");
+    expect(report.failedCheck).toBe("BACKUP_EVIDENCE");
+    expect(report.checks).toHaveLength(7);
+    expect(report.checks.at(-1)).toMatchObject({
+      id: "BACKUP_EVIDENCE",
+      status: "BLOCKED",
+      exitCode: 33,
+      summary: "SAFE_REMOTE_FAILURE",
+    });
+    expect(report.sshExitCode).toBe(33);
+    expect(report.stopReason).toContain("REMOTE_CHECK_BACKUP_EVIDENCE_BLOCKED");
+  });
+
+  it("preserves a first-check BLOCKED result instead of UNAVAILABLE", async () => {
+    const root = await fixture();
+    const report = await executeReadOnlyPreflight(
+      argumentsFor(root),
+      dependencies(
+        new FakeTransport(
+          resultWithRemoteFailure({
+            checkId: "SERVER_TIME",
+            remoteExitCode: 11,
+          }),
+        ),
+      ),
+    );
+    expect(report.failedCheck).toBe("SERVER_TIME");
+    expect(report.checks).toHaveLength(1);
+    expect(report.stopReason).not.toContain("UNAVAILABLE");
+  });
+
+  it("classifies SSH exit 255 without protocol as SSH_TRANSPORT", async () => {
+    const root = await fixture();
+    const report = await executeReadOnlyPreflight(
+      argumentsFor(root),
+      dependencies(
+        new FakeTransport({
+          exitCode: 255,
+          stdout: "",
+          stderr: "transport closed",
+        }),
+      ),
+    );
+    expect(report.failedCheck).toBe("SSH_TRANSPORT");
+    expect(report.protocolParseStatus).toBe("NONE");
+    expect(report.stopReason).toBe("SSH_TRANSPORT_FAILED_WITHOUT_PROTOCOL");
+  });
+
+  it("classifies malformed protocol and preserves checks parsed before it", async () => {
+    const root = await fixture();
+    const validFirst = result().stdout.split("\n")[0]!;
+    const report = await executeReadOnlyPreflight(
+      argumentsFor(root),
+      dependencies(
+        new FakeTransport({
+          exitCode: 2,
+          stdout: `${validFirst}\nnot-a-protocol-line`,
+          stderr: "",
+        }),
+      ),
+    );
+    expect(report.failedCheck).toBe("COLLECTOR_PROTOCOL");
+    expect(report.protocolParseStatus).toBe("MALFORMED");
+    expect(report.checks).toHaveLength(1);
+  });
+
+  it("blocks protocol failure even when SSH exits zero", async () => {
+    const root = await fixture();
+    const response = resultWithRemoteFailure({
+      checkId: "HEALTH",
+      remoteExitCode: 17,
+      sshExitCode: 0,
+    });
+    const report = await executeReadOnlyPreflight(
+      argumentsFor(root),
+      dependencies(new FakeTransport(response)),
+    );
+    expect(report.status).toBe("BLOCKED");
+    expect(report.failedCheck).toBe("HEALTH");
+  });
+
+  it("fails closed when SSH is non-zero but the complete protocol is PASS", async () => {
+    const root = await fixture();
+    const report = await executeReadOnlyPreflight(
+      argumentsFor(root),
+      dependencies(new FakeTransport(result({ exitCode: 9 }))),
+    );
+    expect(report.failedCheck).toBe("COLLECTOR_PROTOCOL");
+    expect(report.protocolParseStatus).toBe("COMPLETE");
+    expect(report.stopReason).toBe("SSH_EXIT_PROTOCOL_INCONSISTENCY");
+  });
+
+  it("retains timeout and signal metadata in the atomic report", async () => {
+    const root = await fixture();
+    const report = await executeReadOnlyPreflight(
+      argumentsFor(root),
+      dependencies(
+        new FakeTransport(
+          result({ exitCode: 255, signal: "SIGKILL", timedOut: true }),
+        ),
+      ),
+    );
+    expect(report.failedCheck).toBe("SSH_TRANSPORT");
+    expect(report.sshSignal).toBe("SIGKILL");
+    expect(report.sshExitCode).toBe(255);
+    const saved = JSON.parse(
+      await readFile(join(root, "report.json"), "utf8"),
+    ) as {
+      sshSignal: string;
+    };
+    expect(saved.sshSignal).toBe("SIGKILL");
+  });
+
+  it("preserves valid partial PASS checks without guessing the missing failure", async () => {
+    const root = await fixture();
+    const partial = result().stdout.split("\n").slice(0, 2).join("\n");
+    const report = await executeReadOnlyPreflight(
+      argumentsFor(root),
+      dependencies(
+        new FakeTransport({ exitCode: 0, stdout: partial, stderr: "" }),
+      ),
+    );
+    expect(report.checks).toHaveLength(2);
+    expect(report.failedCheck).toBe("COLLECTOR_PROTOCOL");
+    expect(report.protocolParseStatus).toBe("PARTIAL");
   });
 });
 
