@@ -78,6 +78,7 @@ export interface SshExecutionRequest {
 
 export interface SshExecutionResult {
   readonly exitCode: number;
+  readonly signal?: string | null;
   readonly stdout: string;
   readonly stderr: string;
   readonly timedOut?: boolean;
@@ -95,7 +96,7 @@ export interface SshTransport {
 
 export interface Phase9CheckReport {
   readonly id: (typeof PHASE9_REMOTE_CHECKS)[number];
-  readonly status: "PASS" | "BLOCKED";
+  readonly status: "PASS" | "BLOCKED" | "FAIL";
   readonly durationMs: number;
   readonly exitCode: number;
   readonly summary: string;
@@ -113,6 +114,11 @@ export interface Phase9ExecutionReport {
   readonly sourceMigrationCount: number;
   readonly sourceMigrationFingerprint: string;
   readonly checks: readonly Phase9CheckReport[];
+  readonly failedCheck:
+    Phase9CheckReport["id"] | "SSH_TRANSPORT" | "COLLECTOR_PROTOCOL" | null;
+  readonly protocolParseStatus: "COMPLETE" | "PARTIAL" | "MALFORMED" | "NONE";
+  readonly sshExitCode: number;
+  readonly sshSignal: string | null;
   readonly mutationCommandCount: 0;
   readonly serverConnectionPerformed: boolean;
   readonly secretLeakageCount: number;
@@ -299,10 +305,11 @@ export class RealSshTransport implements SshTransport {
           stderr: "SSH_EXECUTION_FAILED",
         });
       });
-      child.on("close", (code) => {
+      child.on("close", (code, signal) => {
         clearTimeout(timer);
         resolveResult({
           exitCode: code ?? 255,
+          signal,
           stdout,
           stderr,
           timedOut,
@@ -363,18 +370,48 @@ export async function executeReadOnlyPreflight(
     timeoutMilliseconds: options.commandTimeoutSeconds * 1000,
   });
   const raw = `${result.stdout}\n${result.stderr}`;
-  const secretLeakageCount = [...raw.matchAll(SECRET_PATTERN)].length;
-  let checks: Phase9CheckReport[] = [];
+  const protocol = parseCollectorProtocol(result.stdout);
+  const secretLeakageCount =
+    [...raw.matchAll(SECRET_PATTERN)].length + protocol.secretLeakageCount;
+  const checks = protocol.checks;
+  let failedCheck: Phase9ExecutionReport["failedCheck"] = null;
   let stopReason: string | null = null;
-  try {
-    if (result.timedOut) throw safeError("SSH_COMMAND_TIMEOUT");
-    if (result.outputExceeded) throw safeError("SSH_OUTPUT_LIMIT_EXCEEDED");
-    if (result.exitCode !== 0) throw safeError("SSH_OR_REMOTE_CHECK_FAILED");
-    if (secretLeakageCount > 0) throw safeError("SECRET_LEAKAGE_DETECTED");
-    checks = parseCollectorOutput(result.stdout);
-    validateChecks(checks, options, ledger);
-  } catch (error) {
-    stopReason = safeMessage(error);
+  const firstRemoteFailure = checks.find(
+    (check) => check.status !== "PASS" || check.exitCode !== 0,
+  );
+  if (result.timedOut) {
+    failedCheck = "SSH_TRANSPORT";
+    stopReason = "SSH_COMMAND_TIMEOUT";
+  } else if (result.outputExceeded) {
+    failedCheck = "SSH_TRANSPORT";
+    stopReason = "SSH_OUTPUT_LIMIT_EXCEEDED";
+  } else if (secretLeakageCount > 0) {
+    failedCheck = firstRemoteFailure?.id ?? "COLLECTOR_PROTOCOL";
+    stopReason = "SECRET_LEAKAGE_DETECTED";
+  } else if (protocol.status === "MALFORMED") {
+    failedCheck = "COLLECTOR_PROTOCOL";
+    stopReason = protocol.stopReason ?? "COLLECTOR_PROTOCOL_MALFORMED";
+  } else if (firstRemoteFailure) {
+    failedCheck = firstRemoteFailure.id;
+    stopReason = sanitize(
+      `REMOTE_CHECK_${firstRemoteFailure.id}_${firstRemoteFailure.status}_${firstRemoteFailure.summary}`,
+    );
+  } else if (protocol.status === "NONE" && result.exitCode !== 0) {
+    failedCheck = "SSH_TRANSPORT";
+    stopReason = "SSH_TRANSPORT_FAILED_WITHOUT_PROTOCOL";
+  } else if (protocol.status !== "COMPLETE") {
+    failedCheck = "COLLECTOR_PROTOCOL";
+    stopReason = "COLLECTOR_PROTOCOL_INCOMPLETE";
+  } else if (result.exitCode !== 0) {
+    failedCheck = "COLLECTOR_PROTOCOL";
+    stopReason = "SSH_EXIT_PROTOCOL_INCONSISTENCY";
+  } else {
+    try {
+      validateChecks(checks, options, ledger);
+    } catch (error) {
+      stopReason = safeMessage(error);
+      failedCheck = failedCheckForValidation(stopReason);
+    }
   }
   const report: Phase9ExecutionReport = {
     reportSchemaVersion: PHASE9_REPORT_SCHEMA_VERSION,
@@ -387,6 +424,10 @@ export async function executeReadOnlyPreflight(
     sourceMigrationCount: ledger.count,
     sourceMigrationFingerprint: ledger.fingerprint,
     checks,
+    failedCheck,
+    protocolParseStatus: protocol.status,
+    sshExitCode: result.exitCode,
+    sshSignal: result.signal ?? null,
     mutationCommandCount: 0,
     serverConnectionPerformed: true,
     secretLeakageCount,
@@ -452,45 +493,137 @@ export function assertCollectorReadOnly(collector: string): void {
   }
 }
 
-function parseCollectorOutput(output: string): Phase9CheckReport[] {
-  const checks = output
-    .trim()
+interface CollectorProtocolResult {
+  readonly status: "COMPLETE" | "PARTIAL" | "MALFORMED" | "NONE";
+  readonly checks: readonly Phase9CheckReport[];
+  readonly secretLeakageCount: number;
+  readonly stopReason: string | null;
+}
+
+function parseCollectorProtocol(output: string): CollectorProtocolResult {
+  const lines = output
     .split("\n")
-    .filter(Boolean)
-    .map((line): Phase9CheckReport => {
-      const parts = line.split("|");
-      if (parts.length !== 7 || parts[0] !== "P9B") {
-        throw safeError("REMOTE_PROTOCOL_INVALID");
-      }
-      const id = parts[1] as Phase9CheckReport["id"];
-      if (!PHASE9_REMOTE_CHECKS.includes(id)) {
-        throw safeError("REMOTE_CHECK_ID_INVALID");
-      }
-      const status = parts[2] === "PASS" ? "PASS" : "BLOCKED";
-      const durationMs = Number(parts[3]);
-      const exitCode = Number(parts[4]);
-      const summary = sanitize(parts[5] ?? "");
-      const evidence = sanitize(
-        Buffer.from(parts[6] ?? "", "base64").toString("utf8"),
-      );
-      if (
-        !Number.isSafeInteger(durationMs) ||
-        durationMs < 0 ||
-        !Number.isSafeInteger(exitCode) ||
-        Buffer.byteLength(evidence) > 32_768
-      ) {
-        throw safeError("REMOTE_PROTOCOL_VALUE_INVALID");
-      }
-      return { id, status, durationMs, exitCode, summary, evidence };
-    });
-  if (
-    checks.length !== PHASE9_REMOTE_CHECKS.length ||
-    checks.some((check, index) => check.id !== PHASE9_REMOTE_CHECKS[index]) ||
-    checks.some((check) => check.status !== "PASS" || check.exitCode !== 0)
-  ) {
-    throw safeError("REMOTE_CHECK_SET_INCOMPLETE_OR_BLOCKED");
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length === 0) {
+    return {
+      status: "NONE",
+      checks: [],
+      secretLeakageCount: 0,
+      stopReason: null,
+    };
   }
-  return checks;
+  const checks: Phase9CheckReport[] = [];
+  let secretLeakageCount = 0;
+  for (const line of lines) {
+    const parts = line.split("|");
+    if (parts.length !== 7 || parts[0] !== "P9B") {
+      return malformedProtocol(
+        checks,
+        secretLeakageCount,
+        "COLLECTOR_PROTOCOL_LINE_INVALID",
+      );
+    }
+    const id = parts[1] as Phase9CheckReport["id"];
+    if (
+      !PHASE9_REMOTE_CHECKS.includes(id) ||
+      id !== PHASE9_REMOTE_CHECKS[checks.length]
+    ) {
+      return malformedProtocol(
+        checks,
+        secretLeakageCount,
+        "COLLECTOR_PROTOCOL_ORDER_INVALID",
+      );
+    }
+    const statusValue = parts[2];
+    if (
+      statusValue !== "PASS" &&
+      statusValue !== "BLOCKED" &&
+      statusValue !== "FAIL"
+    ) {
+      return malformedProtocol(
+        checks,
+        secretLeakageCount,
+        "COLLECTOR_PROTOCOL_STATUS_INVALID",
+      );
+    }
+    const durationMs = Number(parts[3]);
+    const exitCode = Number(parts[4]);
+    const encodedEvidence = parts[6] ?? "";
+    if (
+      !Number.isSafeInteger(durationMs) ||
+      durationMs < 0 ||
+      !Number.isSafeInteger(exitCode) ||
+      !isCanonicalBase64(encodedEvidence)
+    ) {
+      return malformedProtocol(
+        checks,
+        secretLeakageCount,
+        "COLLECTOR_PROTOCOL_VALUE_INVALID",
+      );
+    }
+    const decodedEvidence = Buffer.from(encodedEvidence, "base64").toString(
+      "utf8",
+    );
+    secretLeakageCount += [...decodedEvidence.matchAll(SECRET_PATTERN)].length;
+    const evidence = sanitize(decodedEvidence);
+    if (Buffer.byteLength(evidence) > 32_768) {
+      return malformedProtocol(
+        checks,
+        secretLeakageCount,
+        "COLLECTOR_PROTOCOL_EVIDENCE_LIMIT",
+      );
+    }
+    checks.push({
+      id,
+      status: statusValue,
+      durationMs,
+      exitCode,
+      summary: sanitize(parts[5] ?? ""),
+      evidence,
+    });
+  }
+  return {
+    status:
+      checks.length === PHASE9_REMOTE_CHECKS.length ? "COMPLETE" : "PARTIAL",
+    checks,
+    secretLeakageCount,
+    stopReason: null,
+  };
+}
+
+function malformedProtocol(
+  checks: readonly Phase9CheckReport[],
+  secretLeakageCount: number,
+  stopReason: string,
+): CollectorProtocolResult {
+  return {
+    status: "MALFORMED",
+    checks,
+    secretLeakageCount,
+    stopReason,
+  };
+}
+
+function isCanonicalBase64(value: string): boolean {
+  return (
+    value.length % 4 === 0 &&
+    /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(
+      value,
+    )
+  );
+}
+
+function failedCheckForValidation(
+  stopReason: string,
+): Phase9ExecutionReport["failedCheck"] {
+  if (stopReason.includes("RELEASE_IMAGE")) return "RELEASE_IMAGE";
+  if (stopReason.includes("COMPOSE_SERVICE")) return "COMPOSE_SERVICES";
+  if (stopReason.includes("migration ledger"))
+    return "DATABASE_MIGRATION_LEDGER";
+  if (stopReason.includes("BACKUP")) return "BACKUP_EVIDENCE";
+  if (stopReason.includes("ROLLBACK")) return "ROLLBACK_METADATA";
+  return "COLLECTOR_PROTOCOL";
 }
 
 function validateChecks(
