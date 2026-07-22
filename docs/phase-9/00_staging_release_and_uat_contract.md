@@ -85,6 +85,54 @@ backup checksum/catalog/freshness, rollback metadata, Caddy staging route and
 monitoring/alert evidence. The plan contains no `docker load`, Compose start,
 backup, migration, ACL, Caddy reload or secret operation.
 
+### Guarded SSH execution
+
+The same command supports a separate, explicit remote mode. It is never
+inferred from environment variables and cannot be combined with `--dry-run`:
+
+```bash
+pnpm phase9:staging-read-only-preflight -- \
+  --target=staging \
+  --release-sha="$RELEASE_SHA" \
+  --authorization-ref=PHASE9_STAGING_READ_ONLY_CHANGE_REFERENCE \
+  --ssh-alias=ueb-core-staging \
+  --ssh-config-file=/absolute/path/to/ssh-config \
+  --expected-user=deploy \
+  --expected-host=103.200.25.54 \
+  --known-hosts-file=/absolute/path/to/known_hosts \
+  --connect-timeout-seconds=10 \
+  --command-timeout-seconds=60 \
+  --remote-root=/opt/ueb-core \
+  --remote-secret-file=/opt/ueb-core/secrets/database-owner.env \
+  --output=/absolute/path/outside/repository/staging-preflight.json \
+  --execute-read-only
+```
+
+The executor validates the alias with `ssh -G`, pins the expected user and
+host, requires strict host-key checking, disables password and interactive
+authentication, TTY, forwarding and local commands, and applies bounded
+connect, command and output limits. A fixed collector is passed through stdin;
+there is no arbitrary remote-command argument. The collector stops after the
+first failed check and never uses `sudo`, writes a remote file, creates a
+container, starts a service, changes Caddy, or changes a database.
+
+The exact evidence contracts are:
+
+- staging backup metadata and checksum evidence under
+  `/var/backups/ueb-core/staging`;
+- approved rollback metadata at
+  `/opt/ueb-core/evidence/rollback/approved.json`;
+- monitoring script `/opt/ueb-core/config/monitor-staging.sh` and bounded log
+  `/opt/ueb-core/evidence/monitoring/monitor.log`;
+- the owner credential is only referenced beneath `/opt/ueb-core/secrets` and
+  is used by a fixed read-only migration-ledger query. Its value is never
+  returned.
+
+Missing or unsafe evidence blocks the execution. The JSON report is written
+locally with mode `0600` using a temporary file and atomic rename, outside the
+repository. It contains sanitized, bounded evidence and only a hash of the
+remote secret reference.
+
 ## 6. UAT manifest
 
 `phase9:uat-plan` contains the approved 29-case inventory: 21 read-only cases
