@@ -87,7 +87,8 @@ describe("Phase 9 staging preflight dry-run", () => {
     );
     expect(plan.target).toBe("staging");
     expect(JSON.stringify(plan)).toContain("ueb-core-staging.cargis.vn");
-    expect(JSON.stringify(plan)).toContain(`ueb-core:${releaseSha}`);
+    expect(JSON.stringify(plan)).toContain("CURRENT_ROLLBACK_IMAGES");
+    expect(JSON.stringify(plan)).not.toContain(`ueb-core:${releaseSha}`);
     expect(JSON.stringify(plan)).not.toContain("${RELEASE_SHA}");
     expect(JSON.stringify(plan)).not.toMatch(
       /docker load|compose up|migrate deploy|pg_dump|pg_restore|caddy reload/iu,
@@ -178,6 +179,14 @@ describe("Phase 9 repository contract guards", () => {
     expect(dockerfile).toContain("ARG UEB_CORE_MIGRATION_COUNT");
     expect(dockerfile).toContain("/operator/.source-git-sha");
     expect(dockerfile).toContain("/operator/.migration-ledger.json");
+    const appDockerfile = await readFile("Dockerfile", "utf8");
+    expect(appDockerfile).toContain("ARG UEB_CORE_SOURCE_GIT_SHA");
+    expect(appDockerfile).toContain(
+      'org.opencontainers.image.revision="${UEB_CORE_SOURCE_GIT_SHA}"',
+    );
+    expect(appDockerfile).toContain(
+      'io.ueb-core.migration-ledger-fingerprint="${UEB_CORE_MIGRATION_LEDGER_FINGERPRINT}"',
+    );
   });
 
   it("removes the legacy feature-branch dependency", async () => {

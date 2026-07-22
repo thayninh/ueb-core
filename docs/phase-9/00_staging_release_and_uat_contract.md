@@ -33,13 +33,19 @@ ordered ledger. No migration count is hard-coded. Source, operator image and
 database ledgers must match in count, name, checksum and fingerprint. Phase 9A
 does not run migrations and does not modify any migration file.
 
-## 3. Immutable operator image
+## 3. Immutable candidate images and local artifact gate
 
 ```bash
 export RELEASE_SHA="$(git rev-parse HEAD)"
 MIGRATION_LEDGER_JSON="$(pnpm --silent phase6:migration-ledger)"
 MIGRATION_COUNT="$(node -e 'const value=JSON.parse(process.argv[1]);process.stdout.write(String(value.count))' "$MIGRATION_LEDGER_JSON")"
 MIGRATION_LEDGER_FINGERPRINT="$(node -e 'const value=JSON.parse(process.argv[1]);process.stdout.write(value.fingerprint)' "$MIGRATION_LEDGER_JSON")"
+
+docker build --platform linux/amd64 --target runner \
+  --build-arg "UEB_CORE_SOURCE_GIT_SHA=${RELEASE_SHA}" \
+  --build-arg "UEB_CORE_MIGRATION_COUNT=${MIGRATION_COUNT}" \
+  --build-arg "UEB_CORE_MIGRATION_LEDGER_FINGERPRINT=${MIGRATION_LEDGER_FINGERPRINT}" \
+  --tag "ueb-core:${RELEASE_SHA}" .
 
 docker build --platform linux/amd64 --file Dockerfile.operator \
   --build-arg "UEB_CORE_SOURCE_GIT_SHA=${RELEASE_SHA}" \
@@ -48,9 +54,19 @@ docker build --platform linux/amd64 --file Dockerfile.operator \
   --tag "ueb-core-operator:${RELEASE_SHA}" .
 ```
 
-The build verifies the supplied ledger arguments against the ledger generated
-inside the image. Preflight reads OCI labels to verify source SHA, migration
-count and migration fingerprint without starting a container.
+The operator build verifies the supplied ledger arguments against the ledger
+generated inside the image. Both candidates expose the exact source SHA,
+migration count and migration fingerprint as OCI labels. Before transfer, run
+the dedicated local-only gate; it performs Docker inspection only and neither
+builds, loads, pushes nor transfers an image:
+
+```bash
+pnpm phase9:verify-local-candidate-artifacts -- \
+  --release-sha="$RELEASE_SHA" \
+  --app-image="ueb-core:$RELEASE_SHA" \
+  --operator-image="ueb-core-operator:$RELEASE_SHA" \
+  --verify-local
+```
 
 ## 4. Rollback metadata
 
@@ -68,7 +84,7 @@ Previous-image rollback is blocked unless restricted external metadata contains:
 Rollback never edits or reverses an applied migration. Restore remains a
 separately authorized new-target recovery operation.
 
-## 5. Read-only staging preflight
+## 5. Gate 1 — pre-transfer remote read-only staging preflight
 
 The local dry-run is machine-readable and performs no SSH connection:
 
@@ -79,11 +95,12 @@ pnpm phase9:staging-read-only-preflight -- \
   --dry-run
 ```
 
-It plans checks for image/source identity, Compose services, container image
-digest, public health/readiness, source/database migration compatibility,
-backup checksum/catalog/freshness, rollback metadata, Caddy staging route and
-monitoring/alert evidence. The plan contains no `docker load`, Compose start,
-backup, migration, ACL, Caddy reload or secret operation.
+It plans checks for the running staging image/container, approved rollback
+image and metadata, Compose services, public health/readiness, source/database
+migration compatibility, backup checksum/catalog/freshness, Caddy staging
+route and monitoring/alert evidence. It intentionally does not require the
+candidate images before transfer. The plan contains no `docker load`, Compose
+start, backup, migration, ACL, Caddy reload or secret operation.
 
 ### Guarded SSH execution
 
@@ -133,6 +150,38 @@ locally with mode `0600` using a temporary file and atomic rename, outside the
 repository. It contains sanitized, bounded evidence and only a hash of the
 remote secret reference.
 
+## 6. Gate 3 — post-transfer candidate image verification
+
+After a separately authorized transfer/load operation, use a new one-attempt
+authorization reference with the dedicated read-only command. It verifies that
+both exact candidate tags exist remotely and match image ID, `linux/amd64`,
+source SHA and source migration-ledger labels. It cannot start or restart a
+container, run a migration, read a database credential or change Compose:
+
+```bash
+pnpm phase9:verify-staging-candidate-images -- \
+  --target=staging \
+  --release-sha="$RELEASE_SHA" \
+  --authorization-ref="$POST_TRANSFER_READ_ONLY_AUTHORIZATION" \
+  --ssh-alias=ueb-core-staging \
+  --ssh-config-file=/absolute/path/to/ssh-config \
+  --expected-user=deploy \
+  --expected-host=103.200.25.54 \
+  --known-hosts-file=/absolute/path/to/known_hosts \
+  --connect-timeout-seconds=5 \
+  --command-timeout-seconds=90 \
+  --remote-root=/opt/ueb-core \
+  --remote-secret-file=/opt/ueb-core/secrets/database-owner.env \
+  --output=/absolute/path/outside/repository/post-transfer-images.json \
+  --execute-post-transfer-image-verify
+```
+
+The remote secret argument remains part of the shared guarded SSH identity
+contract but is not passed to or read by the post-transfer collector. Gate 1,
+the local candidate gate and Gate 3 are independent; passing one never implies
+that either of the others passed. A consumed one-attempt authorization
+reference is rejected rather than reused.
+
 The executor parses every valid collector record before interpreting the SSH
 exit code. A report therefore preserves completed checks, the first remote
 `BLOCKED` or `FAIL` check, its sanitized summary and remote exit code. An SSH
@@ -142,7 +191,7 @@ Timeout, signal and SSH exit metadata are retained without storing raw stderr.
 An all-PASS protocol paired with a non-zero SSH exit is treated as an
 inconsistency and fails closed.
 
-## 6. UAT manifest
+## 7. UAT manifest
 
 `phase9:uat-plan` contains the approved 29-case inventory: 21 read-only cases
 and 8 cases that create authentication/session/password/workflow writes.
@@ -162,7 +211,7 @@ Authorization is never inferred from an environment variable. The manifest
 contains no username, password, token, cookie, roster identity or real test
 data. Phase 9A only validates dry-run plans; it does not execute UAT.
 
-## 7. Execution hard gate
+## 8. Execution hard gate
 
 Before a later server preflight or staging deployment, require a separate
 authorization covering target, release SHA, image IDs, read-only SSH scope,
