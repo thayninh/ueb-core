@@ -10,6 +10,7 @@ import {
   STAGING_SSH_ALIAS,
   STAGING_URL,
 } from "../phase-6/lib/staging-contracts";
+import { executeReadOnlyPreflight } from "./lib/staging-ssh-executor";
 
 const execFileAsync = promisify(execFile);
 const GIT_SHA = /^[a-f0-9]{40}$/u;
@@ -85,11 +86,12 @@ export async function createStagingReadOnlyPreflightPlan(
     {
       id: "BACKUP_EVIDENCE",
       command:
-        "read checksum-verified staging backup metadata and catalog status",
+        "find /var/backups/ueb-core/staging -maxdepth 1 -type f -name '*.dump.meta.json' -print",
     },
     {
       id: "ROLLBACK_METADATA",
-      command: "read approved rollback metadata evidence",
+      command:
+        "test -r /opt/ueb-core/evidence/rollback/approved.json && head -c 16385 /opt/ueb-core/evidence/rollback/approved.json",
     },
     {
       id: "CADDY_ROUTE",
@@ -97,7 +99,8 @@ export async function createStagingReadOnlyPreflightPlan(
     },
     {
       id: "MONITORING",
-      command: "read bounded staging monitoring and alert evidence",
+      command:
+        "test -x /opt/ueb-core/config/monitor-staging.sh && test -r /opt/ueb-core/evidence/monitoring/monitor.log && tail -n 500 /opt/ueb-core/evidence/monitoring/monitor.log",
     },
   ] as const;
   if (checks.some((check) => MUTATION_TOKENS.test(check.command))) {
@@ -137,6 +140,22 @@ async function assertCleanWorkingTree(): Promise<void> {
 }
 
 export async function main(arguments_ = process.argv.slice(2)): Promise<void> {
+  const normalized = arguments_[0] === "--" ? arguments_.slice(1) : arguments_;
+  if (normalized.includes("--execute-read-only")) {
+    const report = await executeReadOnlyPreflight(arguments_);
+    process.stdout.write(
+      `${JSON.stringify({
+        status: report.status,
+        reportSchemaVersion: report.reportSchemaVersion,
+        outputWritten: true,
+        mutationCommands: report.mutationCommandCount,
+        serverConnectionPerformed: report.serverConnectionPerformed,
+        secretsPrinted: false,
+      })}\n`,
+    );
+    if (report.status !== "PASS") process.exitCode = 2;
+    return;
+  }
   const plan = await createStagingReadOnlyPreflightPlan(arguments_);
   process.stdout.write(
     `${JSON.stringify({
